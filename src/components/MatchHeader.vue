@@ -59,6 +59,8 @@ const connInfo = computed<{ dot: string; text: string }>((() => {
       return { dot: "#f0a020", text: t("conn.reconnecting") };
     case "closed":
       return { dot: "#ff5c5c", text: t("conn.closed") };
+    case "displaced":
+      return { dot: "#ff5c5c", text: t("conn.displaced") };
     default:
       return { dot: "#6b7280", text: t("conn.unknown") };
   }

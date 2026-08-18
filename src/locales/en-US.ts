@@ -207,6 +207,11 @@ const messages: MessageSchema = {
   "conn.connectingBanner": "{action} to server…",
   "conn.action.reconnect": "Reconnecting",
   "conn.action.connect": "Connecting",
+  "conn.displaced": "Taken over",
+  "conn.displacedTitle": "Connection Taken Over",
+  "conn.displacedMsg":
+    "This account was opened in another window, which has taken over the connection. Click \"Take Over Here\" to restore it in this window (the other window will be disconnected).",
+  "conn.retakeBtn": "Take Over Here",
 
   // ── referee home ─────────────────────────────────────────────────────
   "referee.title": "Twilight Cup · Referee",

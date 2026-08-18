@@ -210,6 +210,11 @@ const messages = {
   "conn.connectingBanner": "正在与服务端{action}…",
   "conn.action.reconnect": "重连",
   "conn.action.connect": "建立连接",
+  "conn.displaced": "已被新窗口接管",
+  "conn.displacedTitle": "连接已转移",
+  "conn.displacedMsg":
+    "同一账号已在其他窗口打开，本窗口的连接已被接管下线。点击「重新接管」可在本窗口恢复（另一窗口会被顶掉）。",
+  "conn.retakeBtn": "重新接管",
 
   // ── 裁判端首页 ──────────────────────────────────────────────────────
   "referee.title": "黄昏杯 · 裁判端",

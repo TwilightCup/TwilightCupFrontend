@@ -10,7 +10,7 @@
  */
 import { defineStore } from "pinia";
 import { computed, reactive, ref } from "vue";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 
 import { api } from "@/api/client";
 import {
@@ -215,9 +215,30 @@ export const useMatchStore = defineStore("match", () => {
       socket.onMessage = handleMessage;
       socket.onStatusChange = (s) => {
         connStatus.value = s;
+        // 被同账号新窗口顶掉（exclusive 接管）：弹窗告知；确认可反手接管回来
+        if (s === "displaced") void promptDisplaced(() => connect(lastMatchId()));
       };
     }
-    socket.connect(auth.token, "REFEREE", matchId);
+    // exclusive：独占裁判身份（账号+比赛）——本窗口顶掉旧窗口，也接受被新窗口顶掉
+    socket.connect(auth.token, "REFEREE", matchId, true);
+  }
+
+  /** 当前执裁比赛 id：优先 auth_ok 回填的 matchId，兜底连接时传入的选场参数 */
+  function lastMatchId(): string | undefined {
+    return matchId.value || undefined;
+  }
+
+  /** 「已被其他窗口接管」弹窗：确认=重新接管（顶掉对方），关闭=留在本页不再重连 */
+  async function promptDisplaced(retake: () => void): Promise<void> {
+    try {
+      await ElMessageBox.alert(tr("conn.displacedMsg"), tr("conn.displacedTitle"), {
+        type: "warning",
+        confirmButtonText: tr("conn.retakeBtn"),
+      });
+      retake();
+    } catch {
+      // 右上角关闭/ESC：留在本页（socket 已终态停止重连，可手动刷新恢复）
+    }
   }
 
   function disconnect(): void {

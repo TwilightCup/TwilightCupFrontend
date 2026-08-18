@@ -4,15 +4,26 @@
  * - 连接端点 ws://.../ws/{token}，token 为登录返回的 JWT。
  * - 鉴权失败（auth_error）为终态，停止重连。
  * - 意外断开按指数退避重连（1s → 2s → 4s … 上限 15s）。
+ * - exclusive 连接（裁判/选手端）被同身份新连接顶掉时为终态（displaced，
+ *   close 码 4001）：停止重连，由 UI 弹窗告知「已在其他窗口打开」。
  */
 import { wsUrl } from "@/api/config";
 import { notifySessionExpired } from "@/api/client";
 import { isTokenExpired } from "@/utils/jwt";
 import type { ClientMessage, ServerMessage } from "./protocol";
 
-export type ConnStatus = "idle" | "connecting" | "open" | "reconnecting" | "closed";
+export type ConnStatus =
+  | "idle"
+  | "connecting"
+  | "open"
+  | "reconnecting"
+  | "closed"
+  | "displaced";
 
 const HEARTBEAT_MS = 25_000;
+
+/** 被同身份（exclusive）新连接顶掉时的服务端关闭码，与后端 DISPLACED_CLOSE_CODE 对齐 */
+const DISPLACED_CLOSE_CODE = 4001;
 
 export class MatchSocket {
   /** 由外部（store）注入的回调 */
@@ -24,15 +35,21 @@ export class MatchSocket {
   private token = "";
   private seat: string | undefined;
   private session: string | undefined;
+  private exclusive = false;
   private hbTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private shouldReconnect = false;
   private attempt = 0;
+  /** 已被顶掉（displaced 终态标记：onclose 后状态保持 displaced 而非 closed） */
+  private displaced = false;
 
-  connect(token: string, seat?: string, session?: string): void {
+  /** exclusive=1 的连接要求独占身份 key（账号+座位+比赛）：同 key 旧连接被顶掉 */
+  connect(token: string, seat?: string, session?: string, exclusive = false): void {
     this.token = token;
     this.seat = seat;
     this.session = session;
+    this.exclusive = exclusive;
+    this.displaced = false;
     this.shouldReconnect = true;
     this.attempt = 0;
     this.open();
@@ -43,7 +60,7 @@ export class MatchSocket {
     this.setStatus(this.attempt === 0 ? "connecting" : "reconnecting");
     let ws: WebSocket;
     try {
-      ws = new WebSocket(wsUrl(this.token, this.seat, this.session));
+      ws = new WebSocket(wsUrl(this.token, this.seat, this.session, this.exclusive));
     } catch {
       this.scheduleReconnect();
       return;
@@ -64,6 +81,12 @@ export class MatchSocket {
         return;
       }
       if (!msg || typeof msg.type !== "string") return;
+      // 被同身份新连接顶掉（exclusive 接管）：终态，停止重连（消息仍照常分发）
+      if (msg.type === "displaced") {
+        this.shouldReconnect = false;
+        this.displaced = true;
+        this.setStatus("displaced");
+      }
       // 鉴权失败为终态，停止重连
       if (msg.type === "auth_error") {
         this.shouldReconnect = false;
@@ -78,13 +101,18 @@ export class MatchSocket {
       // 错误细节由 onclose 统一处理（重连/状态切换）
     };
 
-    ws.onclose = () => {
+    ws.onclose = (ev: CloseEvent) => {
       this.stopHeartbeat();
       this.ws = null;
+      // displaced 消息未送达（竞态丢帧）时凭关闭码兜底判定「被顶掉」
+      if (ev.code === DISPLACED_CLOSE_CODE) {
+        this.shouldReconnect = false;
+        this.displaced = true;
+      }
       if (this.shouldReconnect) {
         this.scheduleReconnect();
       } else {
-        this.setStatus("closed");
+        this.setStatus(this.displaced ? "displaced" : "closed");
       }
     };
   }
@@ -157,6 +185,7 @@ export class MatchSocket {
   }
 
   private setStatus(s: ConnStatus): void {
+    if (this.status === s) return; // 去重：避免 displaced 消息与 close 码双触发
     this.status = s;
     this.onStatusChange(s);
   }

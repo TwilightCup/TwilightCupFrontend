@@ -207,6 +207,16 @@ export interface SrvAuthError {
   type: "auth_error";
   msg: string;
 }
+/**
+ * 本连接被同身份（账号+座位+比赛）且带 exclusive=1 的新连接顶掉：
+ * 先于 close(4001) 送达；被顶掉 ≠ 鉴权失败（token 仍有效），应停止自动重连
+ * 并提示「已在其他窗口打开」。与后端 connection_manager.DISPLACED_* 对齐。
+ */
+export interface SrvDisplaced {
+  type: "displaced";
+  /** 目前仅 "superseded_by_new_connection" */
+  reason: string;
+}
 export interface SrvChat {
   type: "chat";
   sender_id?: string | null;
@@ -323,6 +333,7 @@ export interface SrvError {
 export type ServerMessage =
   | SrvAuthOk
   | SrvAuthError
+  | SrvDisplaced
   | SrvChat
   | SrvSystem
   | SrvReadyState
