@@ -1,0 +1,91 @@
+/**
+ * 导播场景页配置持久化（RTMP/HLS 流地址 + PB + 历史战绩）。
+ *
+ * 仿 src/stores/draft.ts 的 localStorage 模式：按 matchId 键控（无 matchId 用 "_global_"），
+ * JSON 序列化，try/catch 容错。导播在编辑面板填一次，刷新 / OBS 重开即恢复。
+ *
+ * 优先级：URL 参数（rtmp_a 等）若提供 → 作为初值并落库；否则读 localStorage；都没有则空串。
+ * 用法：组件 setup 调 const { config, save } = useDirectorConfig(); load(matchId, urlFallbacks)。
+ */
+import { reactive } from "vue";
+import type { SceneParams } from "./useSceneParams";
+
+/** 单场导播配置（每场一份，按 matchId 隔离） */
+export interface DirectorConfig {
+  rtmpA: string;
+  rtmpB: string;
+  hlsA: string;
+  hlsB: string;
+  pbA: string;
+  pbB: string;
+  histA: string;
+  histB: string;
+}
+
+const EMPTY: DirectorConfig = {
+  rtmpA: "",
+  rtmpB: "",
+  hlsA: "",
+  hlsB: "",
+  pbA: "",
+  pbB: "",
+  histA: "",
+  histB: "",
+};
+
+const PREFIX = "twc-director-cfg";
+
+function key(matchId: string): string {
+  return `${PREFIX}:${matchId || "_global_"}`;
+}
+
+function read(matchId: string): DirectorConfig {
+  try {
+    const raw = localStorage.getItem(key(matchId));
+    if (!raw) return { ...EMPTY };
+    const obj = JSON.parse(raw) as Partial<DirectorConfig>;
+    return { ...EMPTY, ...obj };
+  } catch {
+    return { ...EMPTY };
+  }
+}
+
+function write(matchId: string, cfg: DirectorConfig): void {
+  try {
+    localStorage.setItem(key(matchId), JSON.stringify(cfg));
+  } catch {
+    // 配额满 / 隐私模式，忽略——编辑态本轮仍生效（内存）
+  }
+}
+
+/**
+ * 导播配置：响应式 config + load/save。
+ * load 会合并「URL 覆盖 > localStorage > 空」，并把非空 URL 值落库。
+ */
+export function useDirectorConfig() {
+  const config = reactive<DirectorConfig>({ ...EMPTY });
+
+  function load(matchId: string, url: Partial<SceneParams>): void {
+    const stored = read(matchId);
+    // URL 覆盖：URL 给了非空就用 URL 值，并存库（下次刷新延续）
+    const merged: DirectorConfig = {
+      rtmpA: url.rtmpA || stored.rtmpA,
+      rtmpB: url.rtmpB || stored.rtmpB,
+      hlsA: url.hlsA || stored.hlsA,
+      hlsB: url.hlsB || stored.hlsB,
+      pbA: url.pbA || stored.pbA,
+      pbB: url.pbB || stored.pbB,
+      histA: url.histA || stored.histA,
+      histB: url.histB || stored.histB,
+    };
+    Object.assign(config, merged);
+    write(matchId, merged);
+  }
+
+  function save(matchId: string, patch: Partial<DirectorConfig>): void {
+    Object.assign(config, patch);
+    write(matchId, { ...config });
+  }
+
+  return { config, load, save };
+}

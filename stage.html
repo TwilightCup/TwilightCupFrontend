@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      // 语言早设（与 index.html 同逻辑），首屏前据 localStorage.twc_locale 设 <html lang>。
+      (function () {
+        var supported = ["zh-CN", "en-US"];
+        var loc = localStorage.getItem("twc_locale");
+        if (supported.indexOf(loc) === -1) loc = "zh-CN";
+        document.documentElement.lang = loc;
+      })();
+    </script>
+    <title>导播舞台 · 黄昏杯</title>
+    <style>
+      /* 合并舞台：不透明深紫底（合成器浪潮基调），承载全部场景。不读主应用主题。 */
+      html,
+      body,
+      #stage-app {
+        margin: 0;
+        height: 100%;
+        background: #0a0118;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stage-app"></div>
+    <script type="module" src="/src/scenes/stage/main.ts"></script>
+  </body>
+</html>

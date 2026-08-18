@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <script>
+      // 主题早设：localStorage 显式选择优先，否则跟随系统 prefers-color-scheme。
+      // 放在 head 最前、CSS 之前同步执行，避免深/浅闪屏。
+      (function () {
+        var saved = localStorage.getItem("twc_theme");
+        var dark =
+          saved === "dark" ||
+          (saved !== "light" &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches);
+        if (dark) document.documentElement.classList.add("dark");
+      })();
+      // 语言早设：在首屏前据 localStorage.twc_locale 设 <html lang>，避免语言闪屏。
+      // 受支持值之外回退 zh-CN。运行时由 vue-i18n 接管，二者须保持一致。
+      (function () {
+        var supported = ["zh-CN", "en-US"];
+        var loc = localStorage.getItem("twc_locale");
+        if (supported.indexOf(loc) === -1) loc = "zh-CN";
+        document.documentElement.lang = loc;
+      })();
+    </script>
+    <meta charset="UTF-8" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌇</text></svg>" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>黄昏杯 · 赛事控制台</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,126 @@
+# ---------------------------------------------------------------
+# 由 gitignore.io 模板与原 .gitignore 合并生成
+# 模板: node, vue, vite, macos, windows, linux, visualstudiocode, jetbrains
+# https://www.toptal.com/developers/gitignore/api/node,vue,vite,macos,windows,linux,visualstudiocode,jetbrains
+# ---------------------------------------------------------------
+
+### Node ###
+# 日志
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# 诊断报告 (https://nodejs.org/api/report.html)
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# 运行时数据
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# 测试覆盖率 (istanbul / nyc)
+coverage
+*.lcov
+.nyc_output
+
+# 依赖目录
+node_modules/
+jspm_packages/
+
+# TypeScript 增量编译缓存
+*.tsbuildinfo
+
+# 工具缓存
+.npm
+.eslintcache
+.stylelintcache
+.node_repl_history
+
+# npm pack 输出
+*.tgz
+
+# dotenv 环境变量文件
+.env
+.env.*
+!.env.example
+
+# pnpm
+.pnpm-store
+
+### Vite (Vue) ###
+# 构建输出
+dist
+dist-ssr
+*.local
+
+# Vite 临时文件 / 缓存
+.vite/
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+### 编辑器 ###
+# VS Code
+.vscode/*
+!.vscode/extensions.json
+*.vsix
+
+# JetBrains IDEs(整个 .idea 目录不共享)
+.idea/
+*.iws
+
+### macOS ###
+.DS_Store
+.localized
+__MACOSX/
+.AppleDouble
+.LSOverride
+Icon[]
+
+# 资源分叉
+._*
+
+# 外置卷根目录可能出现的文件/目录
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+### Windows ###
+# 缩略图缓存
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+
+# 系统配置 / 回收站 / 转储
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.stackdump
+
+# 快捷方式
+*.lnk
+
+### Linux ###
+*~
+
+# 进程仍持有已删除文件句柄时产生的临时文件
+.fuse_hidden*
+
+# Dolphin 文件管理器元数据
+.directory
+
+# 回收站
+.Trash-*
+
+# NFS 残留文件
+.nfs*
+
+# nohup 默认日志
+nohup.out

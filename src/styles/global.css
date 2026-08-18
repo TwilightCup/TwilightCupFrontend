@@ -1,0 +1,112 @@
+/* 浅色（默认：html 无 .dark 类时） */
+:root {
+  --tc-bg: #ffffff;
+  --tc-bg-soft: #f5f6f8;
+  --tc-hover: #e9ebef;
+  --tc-border: #d8dce3;
+  --tc-text: #1f2329;
+  --tc-text-dim: #6b7280;
+  --tc-primary: #409eff;
+  --tc-a: #3d8bff;
+  --tc-b: #ff6b4a;
+  --tc-scrollbar-thumb: #c4c9d4;
+  --tc-scrollbar-hover: #a8aeba;
+  --tc-hover-strong: #1f2329;
+  font-family: "Inter", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system,
+    "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+
+/* 深色（html.dark，由 index.html 主题脚本按 localStorage / 系统偏好设置） */
+:root.dark {
+  --tc-bg: #0f1115;
+  --tc-bg-soft: #171a21;
+  --tc-hover: #1e232d;
+  --tc-border: #2a2f3a;
+  --tc-text: #f3f4f6;
+  --tc-text-dim: #9ca3af;
+  --tc-primary: #409eff;
+  --tc-a: #3d8bff;
+  --tc-b: #ff6b4a;
+  --tc-scrollbar-thumb: #3a4150;
+  --tc-scrollbar-hover: #4a5364;
+  --tc-hover-strong: #e9ebef;
+  color-scheme: dark;
+}
+
+/*
+ * Element Plus 组件配色统一到 --tc-*。
+ * 用 :root, :root.dark 组合：对 .dark 元素取 :root.dark 的特异性 (0,2,0)，
+ * 高于 Element Plus dark/css-vars 的 html.dark (0,1,1)，能覆盖其暗色变量；
+ * 对普通 :root 元素则覆盖 Element Plus 默认亮色变量（global.css 后导入，同特异性后者胜）。
+ * --el-* 引用 --tc-*，故深/浅切换时 Element Plus 组件与我们的卡片完全同色。
+ */
+:root,
+:root.dark {
+  --el-color-primary: var(--tc-primary);
+  --el-bg-color: var(--tc-bg-soft);
+  --el-bg-color-page: var(--tc-bg);
+  --el-bg-color-overlay: var(--tc-bg-soft);
+  --el-text-color-primary: var(--tc-text);
+  --el-text-color-regular: var(--tc-text-dim);
+  --el-text-color-secondary: var(--tc-text-dim);
+  --el-text-color-placeholder: var(--tc-text-dim);
+  --el-text-color-disabled: var(--tc-text-dim);
+  --el-border-color: var(--tc-border);
+  --el-border-color-light: var(--tc-border);
+  --el-border-color-lighter: var(--tc-border);
+  --el-border-color-extra-light: var(--tc-border);
+  --el-fill-color: var(--tc-hover);
+  --el-fill-color-light: var(--tc-hover);
+  --el-fill-color-lighter: var(--tc-hover);
+  --el-fill-color-blank: var(--tc-bg);
+  --el-box-shadow: 0 20px 60px rgba(0, 0, 0, 0.18);
+  --el-box-shadow-light: 0 12px 32px rgba(0, 0, 0, 0.12);
+  /* 默认按钮 hover 强反色：浅模式 浅底→深底反色字；深模式 深底→浅底反色字 */
+  --el-button-hover-bg-color: var(--tc-hover-strong);
+  --el-button-hover-text-color: var(--tc-bg);
+  --el-button-hover-border-color: var(--tc-hover-strong);
+  /* 默认 Tag 反色：浅模式深底浅字，深模式浅底深字（与按钮同原则） */
+  --el-tag-bg-color: var(--tc-hover-strong);
+  --el-tag-text-color: var(--tc-bg);
+  --el-tag-border-color: var(--tc-hover-strong);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--tc-bg);
+  color: var(--tc-text);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--tc-scrollbar-thumb);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--tc-scrollbar-hover);
+}
+
+/* 选手方配色工具类 */
+.tc-a {
+  color: var(--tc-a);
+}
+.tc-b {
+  color: var(--tc-b);
+}

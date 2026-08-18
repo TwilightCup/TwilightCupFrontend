@@ -1,0 +1,335 @@
+/**
+ * 导播端状态：控制台与 OBS 叠加层共用。
+ *
+ * 复用 MatchSocket 收后端广播（导播连接 WS 后服务端按账号解析 seat=DIRECTOR
+ * 自动订阅，`director_subscribe` 实为 no-op，导播只读）。connect(token) 接受
+ * 任意 token——控制台用 auth.token，叠加层用 URL ?token=。
+ *
+ * 选手展示名从聊天消息捕获（未发言前以「选手A / 选手B」占位）；比赛元数据
+ * （赛制 / 延迟）在 auth_ok 后拉 match_log 补全（首回合前日志不存在则忽略）。
+ */
+import { defineStore } from "pinia";
+import { computed, ref } from "vue";
+
+import { api } from "@/api/client";
+import {
+  MatchPhase,
+  PickType,
+  PlayerStatus,
+  type Attempt,
+  type LevelTime,
+  type MatchPhase as MP,
+  type Pick,
+  type PickType as PT,
+  type PlayerStatus as PS,
+  type RoundVerdict,
+  type SeatName,
+} from "@/api/types";
+import type { ServerMessage } from "@/ws/protocol";
+import { ConnStatus, MatchSocket } from "@/ws/socket";
+import { useAuthStore } from "./auth";
+import { t as tr } from "@/locales";
+
+export interface PlayerLive {
+  status: PS;
+  currentLevelIndex: number;
+  completedLevels: LevelTime[];
+  attempts: Attempt[];
+}
+
+export interface DirectorRound {
+  roundId: string;
+  pick: Pick;
+  collection: { raw: Record<string, unknown> };
+  type: PT;
+}
+
+interface LogLine {
+  ts: string;
+  kind: string;
+  text: string;
+}
+
+const MAX_LOG = 200;
+
+function clock(): string {
+  return new Date().toLocaleTimeString("zh-CN", { hour12: false });
+}
+
+function freshPlayer(): PlayerLive {
+  return {
+    status: PlayerStatus.IN_GAME,
+    currentLevelIndex: 0,
+    completedLevels: [],
+    attempts: [],
+  };
+}
+
+export const useDirectorStore = defineStore("director", () => {
+  const auth = useAuthStore();
+  const socket = new MatchSocket();
+
+  const tokenRef = ref("");
+  const connStatus = ref<ConnStatus>("idle");
+  const seat = ref<SeatName | "">("");
+  const matchId = ref("");
+  const displayName = ref("");
+  const authError = ref("");
+
+  const phase = ref<MP>(MatchPhase.IDLE);
+  const aReady = ref(false);
+  const bReady = ref(false);
+  const countdownRemaining = ref<number | null>(null);
+  const countdownSource = ref<"auto" | "manual" | null>(null);
+
+  const currentRound = ref<DirectorRound | null>(null);
+  const playerA = ref<PlayerLive>(freshPlayer());
+  const playerB = ref<PlayerLive>(freshPlayer());
+
+  const winsA = ref(0);
+  const winsB = ref(0);
+  const threshold = ref(0);
+  const matchWinner = ref<"A" | "B" | null>(null);
+  const lastResult = ref<{
+    verdict: RoundVerdict;
+    scoreA: number | null;
+    scoreB: number | null;
+  } | null>(null);
+
+  const nameA = ref(tr("seat.a"));
+  const nameB = ref(tr("seat.b"));
+
+  const matchName = ref("");
+  const boFormat = ref(0);
+  const winThreshold = ref(0);
+  const scoringMethodName = ref<"FASTEST" | "AVERAGE" | "">("");
+  const countdownDelay = ref<number | null>(null);
+  /** 所属赛事 id（独立比赛为空）；赛程图场景页链接用 */
+  const tournamentId = ref("");
+  const metaReady = ref(false);
+
+  const messages = ref<LogLine[]>([]);
+
+  /** ban/pick 草稿状态（裁判端权威上报、后端转发；供叠加层渲染 ban/pick 动画） */
+  const draft = ref<Record<string, unknown> | null>(null);
+
+  socket.onStatusChange = (s) => {
+    connStatus.value = s;
+  };
+  socket.onMessage = (msg) => handle(msg);
+
+  const isMulti = computed(() => currentRound.value?.type === PickType.MULTI);
+
+  function log(kind: string, text: string, ts?: string): void {
+    messages.value.unshift({ ts: ts ?? clock(), kind, text });
+    if (messages.value.length > MAX_LOG) messages.value.length = MAX_LOG;
+  }
+
+  function applyPlayer(s: SeatName, live: PlayerLive): void {
+    if (s === "PLAYER_A") playerA.value = live;
+    else if (s === "PLAYER_B") playerB.value = live;
+  }
+
+  function handle(msg: ServerMessage): void {
+    switch (msg.type) {
+      case "auth_ok":
+        seat.value = msg.seat;
+        matchId.value = msg.match_id;
+        displayName.value = msg.display_name;
+        // 双方选手名：auth_ok 即带（后端已补），连入即有，不再依赖聊天捕获
+        if (msg.player_a_name) nameA.value = msg.player_a_name;
+        if (msg.player_b_name) nameB.value = msg.player_b_name;
+        authError.value = "";
+        void loadMeta();
+        break;
+      case "auth_error":
+        authError.value = msg.msg;
+        break;
+      case "phase_change":
+        phase.value = msg.phase;
+        break;
+      case "ready_state":
+        aReady.value = msg.a_ready;
+        bReady.value = msg.b_ready;
+        break;
+      case "countdown_tick":
+        countdownRemaining.value = msg.remaining_secs;
+        countdownSource.value = msg.source;
+        break;
+      case "countdown_abort":
+        countdownRemaining.value = null;
+        countdownSource.value = null;
+        break;
+      case "round_start":
+        currentRound.value = {
+          roundId: msg.round_id,
+          pick: msg.pick,
+          collection: msg.collection,
+          type: msg.pick.type,
+        };
+        playerA.value = freshPlayer();
+        playerB.value = freshPlayer();
+        matchWinner.value = null;
+        lastResult.value = null;
+        break;
+      case "player_status":
+        applyPlayer(msg.seat, {
+          status: msg.status,
+          currentLevelIndex: msg.current_level_index,
+          completedLevels: msg.completed_levels,
+          attempts: msg.attempts,
+        });
+        break;
+      case "round_result":
+        lastResult.value = {
+          verdict: msg.verdict,
+          scoreA: msg.score_a_ms ?? null,
+          scoreB: msg.score_b_ms ?? null,
+        };
+        break;
+      case "cumulative_score":
+        winsA.value = msg.wins_a;
+        winsB.value = msg.wins_b;
+        threshold.value = msg.threshold;
+        break;
+      case "match_end":
+        matchWinner.value = msg.winner;
+        break;
+      case "chat":
+        if (msg.seat === "PLAYER_A") nameA.value = msg.sender_name;
+        else if (msg.seat === "PLAYER_B") nameB.value = msg.sender_name;
+        log("chat", `${msg.sender_name}：${msg.text}`, msg.ts);
+        break;
+      case "system":
+        log("system", msg.text, msg.ts);
+        break;
+      case "error":
+        log("error", tr("log.errorLog", { code: msg.code, msg: msg.msg }));
+        break;
+      case "draft_state":
+        draft.value = msg.state;
+        break;
+      default:
+        // level_time_update / counter_* / round_started_broadcast / verdict_edit
+        // 已由 player_status / cumulative_score 等覆盖或与导播展示无关，忽略
+        break;
+    }
+  }
+
+  async function loadMeta(): Promise<void> {
+    if (!matchId.value || !tokenRef.value) return;
+    try {
+      const doc = await api.getMatchLog(matchId.value, tokenRef.value);
+      const info = doc.initial_info;
+      matchName.value = info.name ?? "";
+      boFormat.value = info.bo_format ?? 0;
+      winThreshold.value = info.win_threshold ?? 0;
+      scoringMethodName.value =
+        (info.scoring_method as "FASTEST" | "AVERAGE" | undefined) ?? "";
+      countdownDelay.value = info.start_countdown_delay ?? null;
+      tournamentId.value = doc.tournament_id ?? "";
+      metaReady.value = true;
+    } catch {
+      // 首回合前 match_log 尚未生成（404），忽略
+    }
+  }
+
+  function connect(token: string, matchId?: string): void {
+    tokenRef.value = token;
+    socket.connect(token, "DIRECTOR", matchId);
+  }
+
+  function connectWithAuth(matchId?: string): void {
+    if (auth.token) connect(auth.token, matchId);
+  }
+
+  function disconnect(): void {
+    socket.disconnect();
+  }
+
+  function nameOf(side: "A" | "B"): string {
+    return side === "A" ? nameA.value : nameB.value;
+  }
+  function playerOf(side: "A" | "B"): PlayerLive {
+    return side === "A" ? playerA.value : playerB.value;
+  }
+
+  /** OBS 浏览器源叠加层链接（带当前 token + 本场 match，多场区分） */
+  const overlayUrl = computed(() => {
+    if (!tokenRef.value) return "";
+    const base = `${globalThis.location.origin}/overlay.html?token=${encodeURIComponent(
+      tokenRef.value,
+    )}`;
+    return matchId.value ? `${base}&match=${encodeURIComponent(matchId.value)}` : base;
+  });
+
+  /**
+   * 直播画面场景页链接集合（叠加层 + 赛程图 + 图池 + 比赛详情）。
+   * 各带当前 token；按需带 match / tournament。tournament 缺失（独立比赛 / 首回合前）
+   * 时赛程图链接留空（赛程图对无赛事比赛无意义）。
+   */
+  const sceneUrls = computed(() => {
+    const origin = globalThis.location.origin;
+    const tok = encodeURIComponent(tokenRef.value);
+    const match = matchId.value ? encodeURIComponent(matchId.value) : "";
+    const tour = tournamentId.value ? encodeURIComponent(tournamentId.value) : "";
+    if (!tok) {
+      return { overlay: "", bracket: "", mappool: "", matchDetail: "", stage: "" };
+    }
+    const q = (file: string, extra = ""): string =>
+      `${origin}/${file}?token=${tok}${extra}`;
+    return {
+      overlay: q("overlay.html", match ? `&match=${match}` : ""),
+      matchDetail: q("match-scene.html", match ? `&match=${match}` : ""),
+      mappool: q("mappool.html", match ? `&match=${match}` : tour ? `&tournament=${tour}` : ""),
+      bracket: tour ? q("bracket.html", `&tournament=${tour}`) : "",
+      // 合并舞台：含 match + tournament（舞台内赛程图场景需 tournament）
+      stage: q("stage.html", (match ? `&match=${match}` : "") + (tour ? `&tournament=${tour}` : "")),
+    };
+  });
+
+  return {
+    // 连接
+    connStatus,
+    seat,
+    matchId,
+    displayName,
+    authError,
+    // 比赛
+    phase,
+    aReady,
+    bReady,
+    countdownRemaining,
+    countdownSource,
+    currentRound,
+    playerA,
+    playerB,
+    winsA,
+    winsB,
+    threshold,
+    matchWinner,
+    lastResult,
+    // 名字 / 元数据
+    nameA,
+    nameB,
+    matchName,
+    boFormat,
+    winThreshold,
+    scoringMethodName,
+    countdownDelay,
+    tournamentId,
+    metaReady,
+    // 日志
+    messages,
+    draft,
+    // 派生 / 动作
+    isMulti,
+    overlayUrl,
+    sceneUrls,
+    connect,
+    connectWithAuth,
+    disconnect,
+    nameOf,
+    playerOf,
+  };
+});
