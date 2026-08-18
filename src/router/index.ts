@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { AccountType } from "@/api/types";
+import { isTokenExpired } from "@/utils/jwt";
 
 declare module "vue-router" {
   interface RouteMeta {
@@ -107,6 +108,14 @@ const router = createRouter({
 router.beforeEach((to) => {
   const auth = useAuthStore();
 
+  // 本地令牌已过期（如隔夜重开标签页）视同未登录：清凭证后直接回登录页，
+  // 避免先进页面再被一堆 401 打回来
+  if (auth.isLoggedIn && isTokenExpired(auth.token)) {
+    auth.logout();
+    if (to.matched.some((r) => r.meta.requiresAuth)) {
+      return { name: "login", query: { expired: "1" } };
+    }
+  }
   if (to.matched.some((r) => r.meta.requiresAuth) && !auth.isLoggedIn) {
     return { name: "login" };
   }

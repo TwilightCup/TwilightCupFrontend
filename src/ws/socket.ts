@@ -6,6 +6,8 @@
  * - 意外断开按指数退避重连（1s → 2s → 4s … 上限 15s）。
  */
 import { wsUrl } from "@/api/config";
+import { notifySessionExpired } from "@/api/client";
+import { isTokenExpired } from "@/utils/jwt";
 import type { ClientMessage, ServerMessage } from "./protocol";
 
 export type ConnStatus = "idle" | "connecting" | "open" | "reconnecting" | "closed";
@@ -65,6 +67,9 @@ export class MatchSocket {
       // 鉴权失败为终态，停止重连
       if (msg.type === "auth_error") {
         this.shouldReconnect = false;
+        // 令牌确已过期（区别于「未被指派 / 座位冲突」等业务性拒绝）→ 统一登出跳登录；
+        // 场景独立入口未注册处理器时不跳转，维持各端原有遮罩/mock 兜底
+        if (isTokenExpired(this.token)) notifySessionExpired();
       }
       this.onMessage(msg);
     };
