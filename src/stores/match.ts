@@ -126,6 +126,9 @@ export const useMatchStore = defineStore("match", () => {
   // --- 准备状态 ---
   const aReady = ref(false);
   const bReady = ref(false);
+  /** 双方预载状态（preload_state 广播；absent = 从未上报/无预载） */
+  const aPreload = ref<"absent" | "in_progress" | "done" | "failed" | "na">("absent");
+  const bPreload = ref<"absent" | "in_progress" | "done" | "failed" | "na">("absent");
 
   // --- 双方实时状态 ---
   const players = reactive<{ A: PlayerLive; B: PlayerLive }>({
@@ -158,6 +161,10 @@ export const useMatchStore = defineStore("match", () => {
 
   const metaReady = computed(() => !!matchName.value || pickCodes.value.length > 0);
   const bothReady = computed(() => aReady.value && bReady.value);
+  /** 存在预载未完的席位（手动开始确认提示用） */
+  const preloadIncomplete = computed(
+    () => aPreload.value === "in_progress" || bPreload.value === "in_progress",
+  );
   const canMarkPrep = computed(
     () => phase.value === MatchPhase.IDLE || phase.value === MatchPhase.ROUND_END,
   );
@@ -248,6 +255,10 @@ export const useMatchStore = defineStore("match", () => {
       case "ready_state":
         aReady.value = msg.a_ready;
         bReady.value = msg.b_ready;
+        break;
+      case "preload_state":
+        aPreload.value = msg.a_status;
+        bPreload.value = msg.b_status;
         break;
       case "seat_state":
         if (msg.seat === "PLAYER_A" || msg.seat === "PLAYER_B") {
@@ -668,6 +679,8 @@ export const useMatchStore = defineStore("match", () => {
     countdown.value = null;
     aReady.value = false;
     bReady.value = false;
+    aPreload.value = "absent";
+    bPreload.value = "absent";
     players.A = freshPlayer();
     players.B = freshPlayer();
     winsA.value = 0;
@@ -704,6 +717,8 @@ export const useMatchStore = defineStore("match", () => {
     countdown,
     aReady,
     bReady,
+    aPreload,
+    bPreload,
     players,
     playerNames,
     winsA,
@@ -717,6 +732,7 @@ export const useMatchStore = defineStore("match", () => {
     // 计算
     metaReady,
     bothReady,
+    preloadIncomplete,
     canMarkPrep,
     canManualStart,
     canVerdict,

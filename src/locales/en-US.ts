@@ -261,6 +261,12 @@ const messages: MessageSchema = {
   "countdown.manualHint": "A manual start cannot be cancelled by players",
   "countdown.autoHint": "A player cancelling ready will abort the countdown",
 
+  // ── preload badges (preload_state) ───────────────────────────────────
+  "preload.done": "Preloaded",
+  "preload.inProgress": "Preloading…",
+  "preload.failed": "Preload failed",
+  "preload.none": "No preload",
+
   // ── prep ─────────────────────────────────────────────────────────────
   "prep.title": "Round prep",
   "prep.markBtn": "Mark round prep phase",
@@ -271,13 +277,14 @@ const messages: MessageSchema = {
   "prep.pickSelected": "Selected: {code}",
   "prep.pickNotSelected": "No pick selected yet",
   "prep.readyStatus": "Player ready status",
-  "prep.autoTip": "When both players are ready, the countdown starts automatically; either player cancelling ready aborts the auto countdown.",
+  "prep.autoTip": "Once both players are ready and preloading is complete, the countdown starts automatically; either player cancelling ready aborts the auto countdown.",
   "prep.manualStartBtn": "Manual start (forced / uninterruptible)",
   "prep.pickRequired": "Please select or enter a pick code",
   "prep.pickBeforeManual": "Please select this round's pick before starting manually",
   "prep.manualConfirmMsg": "A manual start triggers an uninterruptible countdown (regardless of readiness). Start?",
   "prep.manualConfirmTitle": "Manual round start",
   "prep.manualConfirmBtn": "Start",
+  "prep.preloadIncompleteWarning": "A player's preload is still in progress; forcing the start will fall back to standard loading.",
   "prep.ctTagLabel": "CT tags (optional, up to {n})",
   "prep.ctTagPlaceholder": "Select extra tags (optional)",
   "prep.ctTagTip": "Tags are submitted with the pick; the player's timer enables the matching rule tags. Up to {n}; conflicting tags are mutually exclusive.",

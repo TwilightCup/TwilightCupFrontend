@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, h, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useDraftStore, type Side } from "@/stores/draft";
@@ -249,9 +249,30 @@ function reapplyPickTags(): void {
 }
 
 // --- PREP / 开局 ---
+/** 预载徽标（preload_state）：done/na/absent/failed/in_progress → 标签样式与文案键 */
+function preloadTag(st: string): { type: "success" | "warning" | "danger" | "info"; key: string } {
+  switch (st) {
+    case "done":
+      return { type: "success", key: "preload.done" };
+    case "in_progress":
+      return { type: "warning", key: "preload.inProgress" };
+    case "failed":
+      return { type: "danger", key: "preload.failed" };
+    default:
+      return { type: "info", key: "preload.none" };
+  }
+}
+
 async function onManualStart(): Promise<void> {
+  // 存在预载未完席位时，确认框追加强制开始的后果提示
+  const message = match.preloadIncomplete
+    ? h("div", null, [
+        h("div", null, t("banpick.bpManualStartMsg")),
+        h("div", { style: "margin-top: 8px;" }, t("prep.preloadIncompleteWarning")),
+      ])
+    : t("banpick.bpManualStartMsg");
   try {
-    await ElMessageBox.confirm(t("banpick.bpManualStartMsg"), t("banpick.bpManualStartTitle"), {
+    await ElMessageBox.confirm(message, t("banpick.bpManualStartTitle"), {
       type: "warning",
       confirmButtonText: t("banpick.bpManualStartBtn"),
       cancelButtonText: t("common.cancel"),
@@ -527,11 +548,17 @@ const showPrepUi = computed(() => match.phase === MatchPhase.PREP);
       <div class="ready-row">
         <div class="ready a" :class="{ on: match.aReady }">
           <span class="who">{{ match.playerNames.A || $t('seat.a') }}</span>
-          <el-tag :type="match.aReady ? ('success' as const) : ('info' as const)" effect="dark">{{ match.aReady ? $t('playerStatus.ready') : $t('playerStatus.notReady') }}</el-tag>
+          <span class="ready-tags">
+            <el-tag :type="match.aReady ? ('success' as const) : ('info' as const)" effect="dark">{{ match.aReady ? $t('playerStatus.ready') : $t('playerStatus.notReady') }}</el-tag>
+            <el-tag :type="preloadTag(match.aPreload).type" effect="plain">{{ $t(preloadTag(match.aPreload).key) }}</el-tag>
+          </span>
         </div>
         <div class="ready b" :class="{ on: match.bReady }">
           <span class="who">{{ match.playerNames.B || $t('seat.b') }}</span>
-          <el-tag :type="match.bReady ? ('success' as const) : ('info' as const)" effect="dark">{{ match.bReady ? $t('playerStatus.ready') : $t('playerStatus.notReady') }}</el-tag>
+          <span class="ready-tags">
+            <el-tag :type="match.bReady ? ('success' as const) : ('info' as const)" effect="dark">{{ match.bReady ? $t('playerStatus.ready') : $t('playerStatus.notReady') }}</el-tag>
+            <el-tag :type="preloadTag(match.bPreload).type" effect="plain">{{ $t(preloadTag(match.bPreload).key) }}</el-tag>
+          </span>
         </div>
       </div>
       <div class="row-label mt8">{{ $t('banpick.timeoutInfo') }}</div>
@@ -830,6 +857,11 @@ const showPrepUi = computed(() => match.phase === MatchPhase.PREP);
 }
 .ready .who {
   font-weight: 600;
+}
+.ready-tags {
+  display: flex;
+  gap: 6px;
+  align-items: center;
 }
 .ready.a .who {
   color: var(--tc-a);
