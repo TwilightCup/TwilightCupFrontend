@@ -87,6 +87,13 @@ export interface ClientReconnectResync {
   type: "reconnect_resync";
   round_id: string;
 }
+/** 选手端预载状态上报（仅选手席位，PREP 阶段有意义；SINGLE 合集报 "na"） */
+export interface ClientPreloadReport {
+  type: "preload_report";
+  status: "in_progress" | "done" | "failed" | "na";
+  /** 失败原因等，仅日志/告警用 */
+  detail?: string | null;
+}
 
 /** 裁判上报完整 ban/pick 草稿状态（后端转发给导播；state 为任意 JSON） */
 export interface ClientDraftSync {
@@ -110,6 +117,7 @@ export type ClientMessage =
   | ClientProjectComplete
   | ClientForfeitSignal
   | ClientReconnectResync
+  | ClientPreloadReport
   | ClientDraftSync;
 
 export const send = {
@@ -236,6 +244,12 @@ export interface SrvReadyState {
   a_ready: boolean;
   b_ready: boolean;
 }
+/** 双方预载状态广播（上报/重置时；absent = 从未上报） */
+export interface SrvPreloadState {
+  type: "preload_state";
+  a_status: "absent" | "in_progress" | "done" | "failed" | "na";
+  b_status: "absent" | "in_progress" | "done" | "failed" | "na";
+}
 /** 座席连接状态变化（选手/裁判连入或断开时广播；后端可选实现，见 docs/backend-seat-presence.md） */
 export interface SrvSeatState {
   type: "seat_state";
@@ -255,6 +269,13 @@ export interface SrvCountdownTick {
 export interface SrvCountdownAbort {
   type: "countdown_abort";
   reason: string;
+}
+/** 选图确定即提前下发的合集预览（round_start 仍是唯一权威；与 round_start 的 pick/collection 同构） */
+export interface SrvPickAnnounced {
+  type: "pick_announced";
+  pick_code: string;
+  pick: Pick;
+  collection: { raw: Record<string, unknown> };
 }
 export interface SrvRoundStart {
   type: "round_start";
@@ -337,10 +358,12 @@ export type ServerMessage =
   | SrvChat
   | SrvSystem
   | SrvReadyState
+  | SrvPreloadState
   | SrvSeatState
   | SrvPhaseChange
   | SrvCountdownTick
   | SrvCountdownAbort
+  | SrvPickAnnounced
   | SrvRoundStart
   | SrvRoundStartedBroadcast
   | SrvPlayerStatus

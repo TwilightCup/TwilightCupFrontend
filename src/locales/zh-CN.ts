@@ -269,6 +269,12 @@ const messages = {
   "countdown.manualHint": "手动开始不可被选手中断",
   "countdown.autoHint": "选手取消准备将中断倒计时",
 
+  // ── 预载状态徽标（preload_state）────────────────────────────────────
+  "preload.done": "已预载",
+  "preload.inProgress": "预载中…",
+  "preload.failed": "预载失败",
+  "preload.none": "无预载",
+
   // ── PrepPanel ────────────────────────────────────────────────────────
   "prep.title": "回合准备",
   "prep.markBtn": "标记进入回合准备阶段",
@@ -279,13 +285,14 @@ const messages = {
   "prep.pickSelected": "已选定：{code}",
   "prep.pickNotSelected": "尚未选定选图",
   "prep.readyStatus": "选手准备状态",
-  "prep.autoTip": "双方均就绪后将自动进入倒计时；任一方取消准备会中断自动倒计时。",
+  "prep.autoTip": "双方就绪且预载完成后将自动进入倒计时；任一方取消准备会中断自动倒计时。",
   "prep.manualStartBtn": "手动开始（强制 / 不可中断）",
   "prep.pickRequired": "请选择或输入选图编号",
   "prep.pickBeforeManual": "请先选择本回合选图，再手动开始",
   "prep.manualConfirmMsg": "手动开始将触发不可中断的倒计时（无论双方是否就绪）。确认开始？",
   "prep.manualConfirmTitle": "手动开始回合",
   "prep.manualConfirmBtn": "开始",
+  "prep.preloadIncompleteWarning": "仍有选手预载未完成，强制开始将退回普通加载。",
   "prep.ctTagLabel": "CT 词条（可选，最多 {n} 个）",
   "prep.ctTagPlaceholder": "选择附加词条（可不选）",
   "prep.ctTagTip": "词条将随选图提交，选手端计时器自动启用对应规则标签；最多 {n} 个，冲突词条互斥。",
