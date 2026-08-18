@@ -46,6 +46,8 @@ export default defineConfig({
     allowedHosts: ALLOWED_HOSTS,
   },
   build: {
+    // 构建产物放 static/：默认的 assets/ 会与对象存储反代路径 /assets/ 冲突
+    assetsDir: "static",
     rollupOptions: {
       input: {
         main: fileURLToPath(new URL("./index.html", import.meta.url)),
