@@ -45,6 +45,24 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * 会话过期统一处理（带令牌的请求被 401 拒绝 / WS 鉴权失败且令牌确已过期）。
+ * 主应用入口注入「登出 + 跳登录页」；OBS 场景独立入口不注入 → 返回 false，
+ * 调用方维持原有兜底（mock 数据 / 遮罩提示），绝不让直播画面跳走。
+ */
+let sessionExpiredHandler: (() => void) | null = null;
+
+export function setSessionExpiredHandler(fn: (() => void) | null): void {
+  sessionExpiredHandler = fn;
+}
+
+/** 触发会话过期处理；返回 false 表示无人接管（调用方维持原有错误展示） */
+export function notifySessionExpired(): boolean {
+  if (!sessionExpiredHandler) return false;
+  sessionExpiredHandler();
+  return true;
+}
+
 function extractMsg(data: unknown, status: number, fallback: string): string {
   if (data && typeof data === "object") {
     const d = data as Record<string, unknown>;
@@ -83,6 +101,9 @@ async function request<T>(
     }
   }
   if (!res.ok) {
+    // 带令牌的请求被 401 拒绝 = 会话已死（过期/吊销）→ 统一登出跳登录；
+    // 登录接口本身不带令牌（口令错误也是 401），不受影响
+    if (res.status === 401 && token) notifySessionExpired();
     throw new ApiError(res.status, extractMsg(data, res.status, `HTTP ${res.status}`));
   }
   return data as T;
@@ -115,6 +136,7 @@ async function uploadFile(
     }
   }
   if (!res.ok) {
+    if (res.status === 401) notifySessionExpired();
     throw new ApiError(res.status, extractMsg(data, res.status, `HTTP ${res.status}`));
   }
   return data as { key: string; url: string | null };

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import { useI18n } from "vue-i18n";
 import { useAuthStore } from "@/stores/auth";
@@ -8,6 +8,7 @@ import { useAuthStore } from "@/stores/auth";
 const { t } = useI18n();
 const auth = useAuthStore();
 const router = useRouter();
+const route = useRoute();
 
 const username = ref("");
 const password = ref("");
@@ -43,6 +44,14 @@ async function onSubmit(): Promise<void> {
         v-if="auth.loginError"
         :title="auth.loginError"
         type="error"
+        show-icon
+        :closable="false"
+        class="alert"
+      />
+      <el-alert
+        v-else-if="route.query.expired === '1'"
+        :title="$t('login.expired')"
+        type="warning"
         show-icon
         :closable="false"
         class="alert"
