@@ -414,6 +414,8 @@ export interface MatchOut {
   created_at: string;
   started_at?: string | null;
   ended_at?: string | null;
+  /** 归档时间（仅 ENDED 可归档；null/缺失 = 未归档。纯列表整理，不影响状态机） */
+  archived_at?: string | null;
 }
 
 export interface MatchCreate {

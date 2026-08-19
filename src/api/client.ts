@@ -310,6 +310,22 @@ export const api = {
     );
   },
 
+  /** 归档已结束比赛（仅 ENDED；archived_at 置当前时间，返回更新后的比赛） */
+  archiveMatch(matchId: string, token: string): Promise<MatchOut> {
+    return request<MatchOut>(
+      `/admin/matches/${encodeURIComponent(matchId)}/archive`,
+      { method: "POST", token },
+    );
+  },
+
+  /** 取消归档（archived_at 置 null，返回更新后的比赛） */
+  unarchiveMatch(matchId: string, token: string): Promise<MatchOut> {
+    return request<MatchOut>(
+      `/admin/matches/${encodeURIComponent(matchId)}/unarchive`,
+      { method: "POST", token },
+    );
+  },
+
   /** 当前账号参与的赛事（作为选手/裁判/导播） */
   listMyTournaments(token: string): Promise<TournamentOut[]> {
     return request<TournamentOut[]>("/me/tournaments", { method: "GET", token });

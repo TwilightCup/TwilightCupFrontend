@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { ElMessageBox } from "element-plus";
 import { useI18n } from "vue-i18n";
 import { useAdminStore } from "@/stores/admin";
@@ -14,6 +14,51 @@ const admin = useAdminStore();
 const createOpen = ref(false);
 const detailOpen = ref(false);
 const current = ref<MatchOut | null>(null);
+
+type StatusFilter = MatchStatus | "ALL";
+type ArchiveFilter = "active" | "archived" | "all";
+
+const keyword = ref("");
+const statusFilter = ref<StatusFilter>("ALL");
+const archiveFilter = ref<ArchiveFilter>("active"); // 默认隐藏已归档，保持工作列表干净
+const page = ref(1);
+const pageSize = ref(20);
+
+const statusOptions = computed(() => [
+  { value: "ALL" as StatusFilter, label: t("admin.matches.filterAll") },
+  ...([MatchStatus.CREATED, MatchStatus.RUNNING, MatchStatus.PAUSED, MatchStatus.ENDED] as MatchStatus[]).map(
+    (s) => ({ value: s, label: matchStatusInfo(s).label }),
+  ),
+]);
+
+const archiveOptions = computed(() => [
+  { value: "active" as ArchiveFilter, label: t("admin.matches.filterActive") },
+  { value: "archived" as ArchiveFilter, label: t("admin.matches.filterArchived") },
+  { value: "all" as ArchiveFilter, label: t("admin.matches.filterAll") },
+]);
+
+const filtered = computed<MatchOut[]>(() => {
+  const kw = keyword.value.trim().toLowerCase();
+  return admin.matches.filter((m) => {
+    if (statusFilter.value !== "ALL" && m.status !== statusFilter.value) return false;
+    if (archiveFilter.value === "archived" && !m.archived_at) return false;
+    if (archiveFilter.value === "active" && m.archived_at) return false;
+    if (!kw) return true;
+    return (
+      m.name.toLowerCase().includes(kw) ||
+      m.player_a_username.toLowerCase().includes(kw) ||
+      m.player_b_username.toLowerCase().includes(kw)
+    );
+  });
+});
+
+const paged = computed<MatchOut[]>(() =>
+  filtered.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value),
+);
+
+const emptyText = computed(() =>
+  admin.matches.length === 0 ? t("admin.matches.empty") : t("admin.matches.emptyFiltered"),
+);
 
 function openDetail(row: MatchOut): void {
   current.value = row;
@@ -34,6 +79,49 @@ async function onForceEnd(row: MatchOut): Promise<void> {
   await admin.forceEndMatch(row.id);
 }
 
+/** 归档已结束比赛（列表整理用；可随时取消归档恢复） */
+async function onArchive(row: MatchOut): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      t("admin.matches.archiveConfirmMsg", { name: row.name }),
+      t("admin.matches.archiveConfirmTitle"),
+      { type: "warning", confirmButtonText: t("admin.matches.archiveBtn"), cancelButtonText: t("common.cancel") },
+    );
+  } catch {
+    return;
+  }
+  await admin.archiveMatch(row.id);
+}
+
+/** 取消归档（可逆操作，无需确认框） */
+async function onUnarchive(row: MatchOut): Promise<void> {
+  await admin.unarchiveMatch(row.id);
+}
+
+/** 已归档行整体压暗（row-class-name 挂在内部 tr 上，配合 :deep 样式） */
+function rowClass({ row }: { row: MatchOut }): string {
+  return row.archived_at ? "archived-row" : "";
+}
+
+// 筛选条件变化 → 回到第 1 页
+watch([keyword, statusFilter, archiveFilter], () => {
+  page.value = 1;
+});
+
+// 每页条数变化 → 回到第 1 页，避免停留在越界页码
+function onSizeChange(): void {
+  page.value = 1;
+}
+
+// 数据缩减（如归档掉本页最后一条）→ 钳制到末页，避免空页
+watch(
+  () => filtered.value.length,
+  (n) => {
+    const maxPage = Math.max(1, Math.ceil(n / pageSize.value));
+    if (page.value > maxPage) page.value = maxPage;
+  },
+);
+
 onMounted(() => {
   admin.loadAccounts();
   admin.loadMatches();
@@ -48,6 +136,28 @@ onMounted(() => {
         <span class="count">{{ $t('admin.matches.count', { n: admin.matches.length }) }}</span>
       </div>
       <div class="actions">
+        <el-input
+          v-model="keyword"
+          :placeholder="$t('admin.matches.searchPlaceholder')"
+          clearable
+          style="width: 220px"
+        />
+        <el-select v-model="statusFilter" style="width: 120px">
+          <el-option
+            v-for="o in statusOptions"
+            :key="String(o.value)"
+            :value="o.value"
+            :label="o.label"
+          />
+        </el-select>
+        <el-select v-model="archiveFilter" style="width: 120px">
+          <el-option
+            v-for="o in archiveOptions"
+            :key="o.value"
+            :value="o.value"
+            :label="o.label"
+          />
+        </el-select>
         <el-button :loading="admin.matchesLoading" @click="admin.loadMatches()">
           {{ $t('common.refresh') }}
         </el-button>
@@ -56,9 +166,10 @@ onMounted(() => {
     </div>
 
     <el-table
-      :data="admin.matches"
+      :data="paged"
       v-loading="admin.matchesLoading"
-      :empty-text="$t('admin.matches.empty')"
+      :empty-text="emptyText"
+      :row-class-name="rowClass"
       stripe
       class="sess-table"
     >
@@ -74,11 +185,16 @@ onMounted(() => {
           {{ scoringMethodLabel(row.scoring_method) }}
         </template>
       </el-table-column>
-      <el-table-column :label="$t('admin.matches.colStatus')" width="90">
+      <el-table-column :label="$t('admin.matches.colStatus')" width="100">
         <template #default="{ row }">
-          <el-tag :type="matchStatusInfo(row.status).type" effect="dark" size="small">
-            {{ matchStatusInfo(row.status).label }}
-          </el-tag>
+          <div class="status-cell">
+            <el-tag :type="matchStatusInfo(row.status).type" effect="dark" size="small">
+              {{ matchStatusInfo(row.status).label }}
+            </el-tag>
+            <el-tag v-if="row.archived_at" type="info" effect="plain" size="small">
+              {{ $t('admin.matches.archivedTag') }}
+            </el-tag>
+          </div>
         </template>
       </el-table-column>
       <el-table-column :label="$t('admin.matches.colMatchup')" min-width="180">
@@ -97,7 +213,7 @@ onMounted(() => {
       <el-table-column :label="$t('common.createdAt')" width="150">
         <template #default="{ row }">{{ dateTime(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column :label="$t('common.actions')" width="150" fixed="right">
+      <el-table-column :label="$t('common.actions')" width="170" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="openDetail(row)">{{ $t('admin.matches.detailBtn') }}</el-button>
           <el-button
@@ -108,9 +224,37 @@ onMounted(() => {
           >
             {{ $t('admin.matches.forceEndBtn') }}
           </el-button>
+          <el-button
+            v-else-if="row.status === MatchStatus.ENDED && !row.archived_at"
+            link
+            type="warning"
+            @click="onArchive(row)"
+          >
+            {{ $t('admin.matches.archiveBtn') }}
+          </el-button>
+          <el-button
+            v-else-if="row.archived_at"
+            link
+            type="info"
+            @click="onUnarchive(row)"
+          >
+            {{ $t('admin.matches.unarchiveBtn') }}
+          </el-button>
         </template>
       </el-table-column>
     </el-table>
+
+    <div class="pager-row">
+      <el-pagination
+        v-model:current-page="page"
+        v-model:page-size="pageSize"
+        :total="filtered.length"
+        :page-sizes="[10, 20, 50]"
+        layout="total, sizes, prev, pager, next"
+        background
+        @size-change="onSizeChange"
+      />
+    </div>
 
     <MatchFormDialog v-model="createOpen" />
     <MatchDetailDrawer v-model="detailOpen" :match="current" />
@@ -153,6 +297,20 @@ onMounted(() => {
 .sess-table {
   flex: 1;
   min-height: 0;
+}
+.pager-row {
+  display: flex;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+.status-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+:deep(.archived-row) {
+  opacity: 0.55;
 }
 .dim {
   color: var(--tc-text-dim);

@@ -578,6 +578,36 @@ export const useAdminStore = defineStore("admin", () => {
     }
   }
 
+  /** 归档已结束比赛（archived_at 置时间；纯列表整理，不影响状态机/选手占用） */
+  async function archiveMatch(matchId: string): Promise<boolean> {
+    const token = auth.token;
+    if (!token) return false;
+    try {
+      const m = await api.archiveMatch(matchId, token);
+      matches.value = matches.value.map((x) => (x.id === matchId ? m : x));
+      ElMessage.success(tr("toast.archiveMatchOk"));
+      return true;
+    } catch (e) {
+      ElMessage.error(msgOf(e, tr("toast.archiveMatchFail")));
+      return false;
+    }
+  }
+
+  /** 取消归档（archived_at 置 null，比赛回到普通已结束状态） */
+  async function unarchiveMatch(matchId: string): Promise<boolean> {
+    const token = auth.token;
+    if (!token) return false;
+    try {
+      const m = await api.unarchiveMatch(matchId, token);
+      matches.value = matches.value.map((x) => (x.id === matchId ? m : x));
+      ElMessage.success(tr("toast.unarchiveMatchOk"));
+      return true;
+    } catch (e) {
+      ElMessage.error(msgOf(e, tr("toast.unarchiveMatchFail")));
+      return false;
+    }
+  }
+
   return {
     accounts,
     accountsLoading,
@@ -630,5 +660,7 @@ export const useAdminStore = defineStore("admin", () => {
     assignOfficials,
     createMatchForFixture,
     forceEndMatch,
+    archiveMatch,
+    unarchiveMatch,
   };
 });
