@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { ElMessageBox } from "element-plus";
+import { ElMessageBox, type TableInstance } from "element-plus";
 import { useI18n } from "vue-i18n";
 import { useAdminStore } from "@/stores/admin";
 import { MatchStatus, type MatchOut } from "@/api/types";
@@ -14,6 +14,8 @@ const admin = useAdminStore();
 const createOpen = ref(false);
 const detailOpen = ref(false);
 const current = ref<MatchOut | null>(null);
+const tableRef = ref<TableInstance>();
+const selected = ref<MatchOut[]>([]);
 
 type StatusFilter = MatchStatus | "ALL";
 type ArchiveFilter = "active" | "archived" | "all";
@@ -101,6 +103,33 @@ async function onUnarchive(row: MatchOut): Promise<void> {
   await admin.unarchiveMatch(row.id);
 }
 
+/** 仅已结束且未归档的行可勾选（用于批量归档） */
+function canSelect(row: MatchOut): boolean {
+  return row.status === MatchStatus.ENDED && !row.archived_at;
+}
+
+function onSelectionChange(rows: MatchOut[]): void {
+  selected.value = rows;
+}
+
+/** 批量归档勾选的比赛（顺序请求，store 汇总成功/失败） */
+async function onArchiveSelected(): Promise<void> {
+  // 过滤掉勾选后状态已变化的行（如已被单条归档）
+  const targets = selected.value.filter(canSelect);
+  if (targets.length === 0) return;
+  try {
+    await ElMessageBox.confirm(
+      t("admin.matches.archiveSelectedConfirmMsg", { n: targets.length }),
+      t("admin.matches.archiveSelectedConfirmTitle"),
+      { type: "warning", confirmButtonText: t("admin.matches.archiveBtn"), cancelButtonText: t("common.cancel") },
+    );
+  } catch {
+    return;
+  }
+  await admin.archiveMatches(targets.map((m) => m.id));
+  tableRef.value?.clearSelection();
+}
+
 /** 已归档行整体压暗（row-class-name 挂在内部 tr 上，配合 :deep 样式） */
 function rowClass({ row }: { row: MatchOut }): string {
   return row.archived_at ? "archived-row" : "";
@@ -161,6 +190,13 @@ onMounted(() => {
             :label="o.label"
           />
         </el-select>
+        <el-button
+          type="warning"
+          :disabled="selected.length === 0"
+          @click="onArchiveSelected"
+        >
+          {{ $t('admin.matches.archiveSelectedBtn') }}
+        </el-button>
         <el-button :loading="admin.matchesLoading" @click="admin.loadMatches()">
           {{ $t('common.refresh') }}
         </el-button>
@@ -169,13 +205,17 @@ onMounted(() => {
     </div>
 
     <el-table
+      ref="tableRef"
       :data="paged"
       v-loading="admin.matchesLoading"
       :empty-text="emptyText"
       :row-class-name="rowClass"
+      row-key="id"
       stripe
       class="sess-table"
+      @selection-change="onSelectionChange"
     >
+      <el-table-column type="selection" width="42" :selectable="canSelect" reserve-selection />
       <el-table-column prop="name" :label="$t('admin.matches.colName')" min-width="160" />
       <el-table-column :label="$t('admin.matches.colFormat')" width="120">
         <template #default="{ row }">

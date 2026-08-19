@@ -610,6 +610,26 @@ export const useAdminStore = defineStore("admin", () => {
     }
   }
 
+  /** 批量归档（顺序请求避免并发写竞争；逐条回填，汇总成功/失败数） */
+  async function archiveMatches(matchIds: string[]): Promise<{ ok: number; fail: number }> {
+    const token = auth.token;
+    const result = { ok: 0, fail: 0 };
+    if (!token) return result;
+    for (const id of matchIds) {
+      try {
+        const m = await api.archiveMatch(id, token);
+        matches.value = matches.value.map((x) => (x.id === id ? { ...x, archived_at: m.archived_at } : x));
+        result.ok += 1;
+      } catch {
+        // 单条失败（如已被其他管理员归档）不中断批次，最后汇总提示
+        result.fail += 1;
+      }
+    }
+    if (result.ok > 0) ElMessage.success(tr("toast.archiveMatchesOk", { n: result.ok }));
+    if (result.fail > 0) ElMessage.error(tr("toast.archiveMatchesFail", { n: result.fail }));
+    return result;
+  }
+
   return {
     accounts,
     accountsLoading,
@@ -663,6 +683,7 @@ export const useAdminStore = defineStore("admin", () => {
     createMatchForFixture,
     forceEndMatch,
     archiveMatch,
+    archiveMatches,
     unarchiveMatch,
   };
 });

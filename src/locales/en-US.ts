@@ -548,6 +548,9 @@ const messages: MessageSchema = {
   "admin.matches.archiveConfirmMsg": "Archive match \"{name}\"? Archived matches are hidden from the list by default; switch the filter to \"Archived\" to view or restore them.",
   "admin.matches.archiveConfirmTitle": "Archive match",
   "admin.matches.emptyFiltered": "No matches match the current filters",
+  "admin.matches.archiveSelectedBtn": "Archive selected",
+  "admin.matches.archiveSelectedConfirmTitle": "Archive selected matches",
+  "admin.matches.archiveSelectedConfirmMsg": "Archive {n} selected ended matches? Archived matches are hidden from the list by default; switch the filter to \"Archived\" to view or restore them.",
 
   // ── accounts ─────────────────────────────────────────────────────────
   "admin.accounts.title": "Accounts",
@@ -948,6 +951,8 @@ const messages: MessageSchema = {
   "toast.archiveMatchFail": "Failed to archive",
   "toast.unarchiveMatchOk": "Match unarchived",
   "toast.unarchiveMatchFail": "Failed to unarchive",
+  "toast.archiveMatchesOk": "Archived {n} matches",
+  "toast.archiveMatchesFail": "Failed to archive {n} matches",
   "toast.matchAuthFailed": "Authentication failed",
   "toast.matchWsError": "[{code}] {msg}",
   "toast.matchTieRematchWarn": "This round was judged a tie and will go to a rematch",

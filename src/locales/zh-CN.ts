@@ -551,6 +551,9 @@ const messages = {
   "admin.matches.archiveConfirmMsg": "确认归档比赛「{name}」？归档后默认从列表隐藏，可在筛选「已归档」中查看并取消归档。",
   "admin.matches.archiveConfirmTitle": "归档比赛",
   "admin.matches.emptyFiltered": "没有符合当前筛选条件的比赛",
+  "admin.matches.archiveSelectedBtn": "归档所选",
+  "admin.matches.archiveSelectedConfirmTitle": "归档所选比赛",
+  "admin.matches.archiveSelectedConfirmMsg": "确认归档所选的 {n} 场已结束比赛？归档后默认从列表隐藏，可在筛选「已归档」中查看并取消归档。",
 
   // ── 账号管理（AccountsView） ─────────────────────────────────────────
   "admin.accounts.title": "账号管理",
@@ -951,6 +954,8 @@ const messages = {
   "toast.archiveMatchFail": "归档失败",
   "toast.unarchiveMatchOk": "已取消归档",
   "toast.unarchiveMatchFail": "取消归档失败",
+  "toast.archiveMatchesOk": "已归档 {n} 场比赛",
+  "toast.archiveMatchesFail": "{n} 场比赛归档失败",
   "toast.matchAuthFailed": "鉴权失败",
   "toast.matchWsError": "[{code}] {msg}",
   "toast.matchTieRematchWarn": "本回合判定为平局，将进入重赛",
