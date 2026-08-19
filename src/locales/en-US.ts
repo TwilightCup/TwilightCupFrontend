@@ -538,7 +538,7 @@ const messages: MessageSchema = {
   "admin.matches.forceEndBtn": "Force end",
   "admin.matches.forceEndConfirmMsg": "Force-end match \"{name}\"? The winner is derived from the current score and the bracket advances (if tied, the match just ends and players are released); both players will be disconnected. This cannot be undone.",
   "admin.matches.forceEndConfirmTitle": "Force end",
-  "admin.matches.searchPlaceholder": "Search match name / player username",
+  "admin.matches.searchPlaceholder": "Search match name / player",
   "admin.matches.filterAll": "All",
   "admin.matches.filterActive": "Unarchived",
   "admin.matches.filterArchived": "Archived",

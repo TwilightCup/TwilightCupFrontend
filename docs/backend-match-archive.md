@@ -41,3 +41,18 @@
   GET /admin/matches 包含该行且带 archived_at;GET /me/matches 不再包含该行。
 - 对非 ENDED 比赛 archive → 400;重复 archive → 400;unarchive → 200 且
   archived_at 为 null,GET /me/matches 重新包含该行。
+
+## 6. 对齐记录(2026-08-19,后端 eb98444)
+
+契约已逐条核对一致:字段/端点/守卫/列表行为均按上文实现,前端已联动。
+遗留一项小改进(不阻塞,前端已兜底):
+
+- `/admin/matches` 列表与 archive/unarchive 响应中 `player_a_username`/
+  `player_b_username` 恒为空串 —— `MatchOut.from_match(match, None, storage)`
+  的 `db` 参数传了 `None`(仅 `me_controller.py` 的 `/me/matches/{id}` 传了
+  `self.db`)。建议这几处补传 `self.db`,让管理端也能按选手用户名搜索;
+  在此之前前端搜索已改为同时匹配选手显示名(display_name)。
+
+**更新(同日)**:该改进已在后端落地(`match_controller.py` 六处 `from_match`
+均传 `self.db`,含新增测试 `tests/test_archive.py`),管理端响应已携带选手
+username,用户名搜索原生生效。前端保留显示名兜底匹配作为防御,无额外改动。

@@ -584,7 +584,8 @@ export const useAdminStore = defineStore("admin", () => {
     if (!token) return false;
     try {
       const m = await api.archiveMatch(matchId, token);
-      matches.value = matches.value.map((x) => (x.id === matchId ? m : x));
+      // 仅回填 archived_at（归档只改这一个字段，本地行其余数据保持不变）
+      matches.value = matches.value.map((x) => (x.id === matchId ? { ...x, archived_at: m.archived_at } : x));
       ElMessage.success(tr("toast.archiveMatchOk"));
       return true;
     } catch (e) {
@@ -599,7 +600,8 @@ export const useAdminStore = defineStore("admin", () => {
     if (!token) return false;
     try {
       const m = await api.unarchiveMatch(matchId, token);
-      matches.value = matches.value.map((x) => (x.id === matchId ? m : x));
+      // 同 archiveMatch：仅回填 archived_at（此处为 null）
+      matches.value = matches.value.map((x) => (x.id === matchId ? { ...x, archived_at: m.archived_at } : x));
       ElMessage.success(tr("toast.unarchiveMatchOk"));
       return true;
     } catch (e) {

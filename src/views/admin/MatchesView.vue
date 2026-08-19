@@ -44,10 +44,13 @@ const filtered = computed<MatchOut[]>(() => {
     if (archiveFilter.value === "archived" && !m.archived_at) return false;
     if (archiveFilter.value === "active" && m.archived_at) return false;
     if (!kw) return true;
+    // 同时匹配选手用户名与显示名（显示名来自账号缓存，即表格实际展示的名字）
     return (
       m.name.toLowerCase().includes(kw) ||
       m.player_a_username.toLowerCase().includes(kw) ||
-      m.player_b_username.toLowerCase().includes(kw)
+      m.player_b_username.toLowerCase().includes(kw) ||
+      admin.displayName(m.player_a_id).toLowerCase().includes(kw) ||
+      admin.displayName(m.player_b_id).toLowerCase().includes(kw)
     );
   });
 });

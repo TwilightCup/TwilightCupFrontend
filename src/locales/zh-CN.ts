@@ -541,7 +541,7 @@ const messages = {
   "admin.matches.forceEndBtn": "强制结束",
   "admin.matches.forceEndConfirmMsg": "确认强制结束比赛「{name}」？将按当前比分判定胜方并推进赛程（比分持平时仅结束并释放选手），断开双方选手连接，不可恢复。",
   "admin.matches.forceEndConfirmTitle": "强制结束",
-  "admin.matches.searchPlaceholder": "搜索比赛名 / 选手用户名",
+  "admin.matches.searchPlaceholder": "搜索比赛名 / 选手",
   "admin.matches.filterAll": "全部",
   "admin.matches.filterActive": "未归档",
   "admin.matches.filterArchived": "已归档",
