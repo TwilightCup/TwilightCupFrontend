@@ -298,7 +298,7 @@ onUnmounted(() => {
             @update:model-value="(v: string | number | boolean) => onSwitchScene(v as SceneKey)"
           >
             <el-radio-button
-              v-for="key in (['overlay','match','mappool','bracket','soon'] as SceneKey[])"
+              v-for="key in (['soon','overlay','match','mappool','bracket'] as SceneKey[])"
               :key="key"
               :value="key"
             >

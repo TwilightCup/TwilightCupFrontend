@@ -23,12 +23,9 @@ const { sharedBg } = useSceneContext();
 /** 品牌默认 logo（统一位置 public/logo.png） */
 const DEFAULT_LOGO = "/logo.png";
 
-// ---- 赛事信息 ----
-const matchName = computed(() => director.matchName || t("soon.noMatch"));
+// ---- 赛事信息（显示赛事名，非单场比赛名；BO 是单场的，这里不展示）----
+const tournamentName = computed(() => director.matchName || t("soon.noMatch"));
 const phaseLabel = computed(() => phaseInfo(director.phase).label);
-const boText = computed(() =>
-  director.boFormat ? `BO${director.boFormat}` : "",
-);
 
 // ---- 倒计时状态（从 localStorage 读取，跨标签同步） ----
 interface CountdownState {
@@ -132,18 +129,16 @@ onUnmounted(() => {
     <SynthwaveBg v-if="!sharedBg" />
 
     <div class="content soon-content">
-      <!-- 中上：品牌区 -->
-      <header class="brand-header">
-        <img :src="DEFAULT_LOGO" class="logo" alt="logo" />
-        <h1 class="match-name neon-text">{{ matchName }}</h1>
-        <div class="meta-row">
-          <span v-if="boText" class="bo neon-text-dim">{{ boText }}</span>
-          <span class="phase neon-text-cyan">{{ phaseLabel }}</span>
-        </div>
-      </header>
-
-      <!-- 中央：Coming Soon / 倒计时 -->
+      <!-- 全部内容屏幕正中央 -->
       <main class="center-display">
+        <!-- 品牌：logo + 赛事名 + 状态 -->
+        <header class="brand-header">
+          <img :src="DEFAULT_LOGO" class="logo" alt="logo" />
+          <h1 class="tournament-name neon-text">{{ tournamentName }}</h1>
+          <span class="phase neon-text-cyan">{{ phaseLabel }}</span>
+        </header>
+
+        <!-- Coming Soon / 倒计时 -->
         <div class="center-main" :class="{ counting: state.startedAt !== null && !isFinished, finished: isFinished }">
           {{ centerText }}
         </div>
@@ -165,48 +160,37 @@ onUnmounted(() => {
   padding: 4vh 4vw;
 }
 
-/* ---- 品牌头部 ---- */
-.brand-header {
-  position: absolute;
-  top: 5vh;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-}
-.logo {
-  width: clamp(56px, 7vw, 110px);
-  height: auto;
-  object-fit: contain;
-}
-.match-name {
-  font-size: clamp(20px, 2.8vw, 42px);
-  font-weight: 900;
-  letter-spacing: 2px;
-  margin: 0;
-  text-align: center;
-}
-.meta-row {
-  display: flex;
-  gap: 12px;
-  font-size: clamp(12px, 1.2vw, 18px);
-}
-.bo {
-  color: var(--syn-text-dim);
-}
-.phase {
-  color: var(--syn-cyan);
-  font-weight: 700;
-}
-
-/* ---- 中央显示 ---- */
+/* ---- 全部居中 ---- */
 .center-display {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
+}
+
+/* ---- 品牌头部（居中）---- */
+.brand-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.logo {
+  width: clamp(64px, 8vw, 120px);
+  height: auto;
+  object-fit: contain;
+}
+.tournament-name {
+  font-size: clamp(22px, 3vw, 48px);
+  font-weight: 900;
+  letter-spacing: 3px;
+  margin: 0;
+  text-align: center;
+}
+.phase {
+  font-size: clamp(13px, 1.5vw, 22px);
+  color: var(--syn-cyan);
+  font-weight: 700;
 }
 .center-main {
   font-size: clamp(48px, 10vw, 160px);
