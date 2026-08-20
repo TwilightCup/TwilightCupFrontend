@@ -27,35 +27,14 @@ const DEFAULT_LOGO = "/logo.png";
 const tournamentName = computed(() => director.matchName || t("soon.noMatch"));
 const phaseLabel = computed(() => phaseInfo(director.phase).label);
 
-// ---- 倒计时状态（从 localStorage 读取，跨标签同步） ----
-interface CountdownState {
-  /** 目标总毫秒数 */
-  targetMs: number;
-  /** 开始时间戳（null = 未启动） */
-  startedAt: number | null;
-  /** 暂停时间戳（null = 未暂停） */
-  pausedAt: number | null;
-}
-
-const COUNTDOWN_KEY = "twc-soon-countdown";
-
-function loadState(): CountdownState {
-  try {
-    const raw = localStorage.getItem(COUNTDOWN_KEY);
-    if (raw) return JSON.parse(raw) as CountdownState;
-  } catch {
-    // ignore
-  }
-  return { targetMs: 300_000, startedAt: null, pausedAt: null };
-}
-
-const state = ref<CountdownState>(loadState());
+// ---- 倒计时状态（从 director store 读取，WS 广播权威来源）----
+const soonState = computed(() => director.soonCmdState);
 const remainingMs = ref(0);
 let timerId: ReturnType<typeof setInterval> | null = null;
 
 /** 计算剩余毫秒数 */
 function calcRemaining(): number {
-  const s = state.value;
+  const s = soonState.value;
   if (s.startedAt === null) return 0;
   if (s.pausedAt !== null) {
     // 暂停中：从暂停时刻算已过时间
@@ -68,7 +47,7 @@ function calcRemaining(): number {
 }
 
 /** 是否已完成倒计时 */
-const isFinished = computed(() => remainingMs.value <= 0 && state.value.startedAt !== null);
+const isFinished = computed(() => remainingMs.value <= 0 && soonState.value.startedAt !== null);
 
 /** 格式化 mm:ss */
 function fmt(ms: number): string {
@@ -80,15 +59,17 @@ function fmt(ms: number): string {
 
 /** 中央显示文字 */
 const centerText = computed(() => {
-  if (state.value.startedAt === null) return t("soon.comingSoon");
+  const s = soonState.value;
+  if (s.startedAt === null) return t("soon.comingSoon");
   if (isFinished.value) return t("soon.finished");
   return fmt(remainingMs.value);
 });
 
 /** 状态标签文字（给控制台参考，本场景内也可展示小字） */
 const statusTag = computed(() => {
-  if (state.value.startedAt === null) return t("directorView.soonIdle");
-  if (state.value.pausedAt !== null) return t("directorView.soonPaused");
+  const s = soonState.value;
+  if (s.startedAt === null) return t("directorView.soonIdle");
+  if (s.pausedAt !== null) return t("directorView.soonPaused");
   if (isFinished.value) return t("directorView.soonFinished");
   return t("directorView.soonRunning");
 });
@@ -97,29 +78,12 @@ function tick(): void {
   remainingMs.value = calcRemaining();
 }
 
-let storageCleanup: (() => void) | null = null;
-
 onMounted(() => {
-  // 监听 localStorage 变化（控制台写 → 本标签即时响应）
-  const onStorage = (e: StorageEvent): void => {
-    if (e.key === COUNTDOWN_KEY && e.newValue) {
-      try {
-        state.value = JSON.parse(e.newValue) as CountdownState;
-        tick();
-      } catch {
-        // ignore
-      }
-    }
-  };
-  window.addEventListener("storage", onStorage);
-  storageCleanup = () => window.removeEventListener("storage", onStorage);
-
   tick();
   timerId = setInterval(tick, 200); // 200ms 刷新够平滑
 });
 
 onUnmounted(() => {
-  storageCleanup?.();
   if (timerId) clearInterval(timerId);
 });
 </script>
@@ -139,10 +103,10 @@ onUnmounted(() => {
         </header>
 
         <!-- Coming Soon / 倒计时 -->
-        <div class="center-main" :class="{ counting: state.startedAt !== null && !isFinished, finished: isFinished }">
+        <div class="center-main" :class="{ counting: soonState.startedAt !== null && !isFinished, finished: isFinished }">
           {{ centerText }}
         </div>
-        <div v-if="state.startedAt !== null" class="status-label neon-text-dim">
+        <div v-if="soonState.startedAt !== null" class="status-label neon-text-dim">
           {{ statusTag }}
         </div>
       </main>

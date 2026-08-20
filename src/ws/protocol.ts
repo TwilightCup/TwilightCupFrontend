@@ -101,6 +101,23 @@ export interface ClientDraftSync {
   state: Record<string, unknown>;
 }
 
+/**
+ * 导播控制台发往同账号其他导播连接（OBS 舞台）的指令。
+ * 后端收到后广播给同 match + 同 account_id 的其他 DIRECTOR 连接。
+ */
+export interface ClientDirectorCommand {
+  type: "director_command";
+  /** 指令类别 */
+  action: "switch_scene" | "soon_start" | "soon_pause" | "soon_reset" | "soon_set_target";
+  /** 指令载荷（按 action 不同含义） */
+  payload: Record<string, unknown>;
+  // switch_scene:   { scene: "soon" }
+  // soon_start:     {}
+  // soon_pause:     {}
+  // soon_reset:     {}
+  // soon_set_target: { target_ms: 300000 }
+}
+
 export type ClientMessage =
   | ClientChat
   | ClientRefereeMarkPrep
@@ -118,7 +135,8 @@ export type ClientMessage =
   | ClientForfeitSignal
   | ClientReconnectResync
   | ClientPreloadReport
-  | ClientDraftSync;
+  | ClientDraftSync
+  | ClientDirectorCommand;
 
 export const send = {
   chat: (text: string): ClientChat => ({ type: "chat", text }),
@@ -192,6 +210,15 @@ export const send = {
   draftSync: (state: Record<string, unknown>): ClientDraftSync => ({
     type: "draft_sync",
     state,
+  }),
+  // ---- 导播控制台 → 舞台指令（WS 广播给同账号其他导播连接）----
+  directorCommand: (
+    action: ClientDirectorCommand["action"],
+    payload: Record<string, unknown> = {},
+  ): ClientDirectorCommand => ({
+    type: "director_command",
+    action,
+    payload,
   }),
 };
 
@@ -345,6 +372,16 @@ export interface SrvDraftState {
   type: "draft_state";
   state: Record<string, unknown>;
 }
+
+/**
+ * 服务端广播给同账号其他导播连接的指令（原样转发 ClientDirectorCommand 的 action+payload）。
+ * 导播控制台发 director_command → 后端广播 SrvDirectorCmd 给同 match 同 account_id 的其他 DIRECTOR 连接。
+ */
+export interface SrvDirectorCmd {
+  type: "director_cmd";
+  action: string;
+  payload: Record<string, unknown>;
+}
 export interface SrvError {
   type: "error";
   code: number;
@@ -375,4 +412,5 @@ export type ServerMessage =
   | SrvCounterAlert
   | SrvVerdictEdit
   | SrvDraftState
+  | SrvDirectorCmd
   | SrvError;

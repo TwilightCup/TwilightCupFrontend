@@ -26,6 +26,7 @@ import {
   type SeatName,
 } from "@/api/types";
 import type { ServerMessage } from "@/ws/protocol";
+import { send } from "@/ws/protocol";
 import { ConnStatus, MatchSocket } from "@/ws/socket";
 import { useAuthStore } from "./auth";
 import { t as tr } from "@/locales";
@@ -209,6 +210,27 @@ export const useDirectorStore = defineStore("director", () => {
       case "draft_state":
         draft.value = msg.state;
         break;
+      case "director_cmd":
+        // 导播控制台通过 WS 广播的指令（场景切换 / 倒计时操控）
+        if (msg.action === "switch_scene") {
+          currentSceneCmd.value = (msg.payload?.scene as string) ?? null;
+        } else if (msg.action === "soon_set_target" && msg.payload?.target_ms) {
+          soonCmdState.value.targetMs = msg.payload.target_ms as number;
+        } else if (msg.action === "soon_start") {
+          const s = soonCmdState.value;
+          if (s.pausedAt !== null) {
+            s.startedAt = (s.startedAt ?? 0) + (Date.now() - s.pausedAt);
+            s.pausedAt = null;
+          } else {
+            s.startedAt = Date.now();
+          }
+        } else if (msg.action === "soon_pause") {
+          const s = soonCmdState.value;
+          if (s.startedAt !== null && s.pausedAt === null) s.pausedAt = Date.now();
+        } else if (msg.action === "soon_reset") {
+          soonCmdState.value = { targetMs: soonCmdState.value.targetMs, startedAt: null, pausedAt: null };
+        }
+        break;
       default:
         // level_time_update / counter_* / round_started_broadcast / verdict_edit
         // 已由 player_status / cumulative_score 等覆盖或与导播展示无关，忽略
@@ -245,6 +267,58 @@ export const useDirectorStore = defineStore("director", () => {
 
   function disconnect(): void {
     socket.disconnect();
+  }
+
+  // ---- 导播控制台 → 舞台 WS 广播指令 ----
+
+  /** 当前场景指令（控制台发 → store 收 director_cmd 后更新；舞台/SoonScene 读此 ref） */
+  const currentSceneCmd = ref<string | null>(null);
+  /** Coming Soon 倒计时状态（同上，WS 广播同步） */
+  interface SoonCmdState {
+    targetMs: number;
+    startedAt: number | null;
+    pausedAt: number | null;
+  }
+  const soonCmdState = ref<SoonCmdState>({
+    targetMs: 300_000,
+    startedAt: null,
+    pausedAt: null,
+  });
+
+  /**
+   * 发送导演指令到后端，后端广播给同账号其他导播连接（OBS 舞台）。
+   * 同时更新本地状态（控制台自身也是 director 连接，但后端广播 exclude sender）。
+   */
+  function sendDirectorCommand(
+    action: "switch_scene" | "soon_start" | "soon_pause" | "soon_reset" | "soon_set_target",
+    payload?: Record<string, unknown>,
+  ): boolean {
+    // 同步本地状态
+    if (action === "switch_scene") {
+      currentSceneCmd.value = (payload?.scene as string) ?? null;
+    } else if (action === "soon_set_target" && payload?.target_ms) {
+      soonCmdState.value.targetMs = payload.target_ms as number;
+    } else if (action === "soon_start") {
+      const s = soonCmdState.value;
+      if (s.pausedAt !== null) {
+        // 继续：补偿暂停时长
+        s.startedAt = (s.startedAt ?? 0) + (Date.now() - s.pausedAt);
+        s.pausedAt = null;
+      } else {
+        s.startedAt = Date.now();
+        s.pausedAt = null;
+      }
+    } else if (action === "soon_pause") {
+      const s = soonCmdState.value;
+      if (s.startedAt !== null && s.pausedAt === null) {
+        s.pausedAt = Date.now();
+      }
+    } else if (action === "soon_reset") {
+      soonCmdState.value = { targetMs: soonCmdState.value.targetMs, startedAt: null, pausedAt: null };
+    }
+
+    // 发 WS
+    return socket.send(send.directorCommand(action, payload));
   }
 
   function nameOf(side: "A" | "B"): string {
@@ -307,6 +381,10 @@ export const useDirectorStore = defineStore("director", () => {
     // 派生 / 动作
     isMulti,
     stageUrl,
+    // 导演指令（WS 广播 → 舞台）
+    currentSceneCmd,
+    soonCmdState,
+    sendDirectorCommand,
     connect,
     connectWithAuth,
     disconnect,

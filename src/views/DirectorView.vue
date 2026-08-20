@@ -80,51 +80,30 @@ const sceneBtnLabels: Record<SceneKey, string> = {
 const activeScene = ref<SceneKey>(getCurrentScene());
 function onSwitchScene(key: SceneKey): void {
   activeScene.value = key;
-  setCurrentScene(key);
+  setCurrentScene(key); // localStorage 兜底（同进程）
+  director.sendDirectorCommand("switch_scene", { scene: key }); // WS 广播（跨进程 OBS）
 }
 
-// ---- Coming Soon 倒计时控制（localStorage → 舞台 SoonScene 跨标签同步）----
-const SOON_KEY = "twc-soon-countdown";
+// ---- Coming Soon 倒计时控制（WS 广播 → 舞台 SoonScene 跨进程同步）----
 
-interface SoonState {
-  targetMs: number;
-  startedAt: number | null;
-  pausedAt: number | null;
-}
-
-const DEFAULT_TARGET_S = 300; // 5 分钟
-
-function loadSoon(): SoonState {
-  try {
-    const raw = localStorage.getItem(SOON_KEY);
-    if (raw) return JSON.parse(raw) as SoonState;
-  } catch {
-    // ignore
-  }
-  return { targetMs: DEFAULT_TARGET_S * 1000, startedAt: null, pausedAt: null };
-}
-
-function saveSoon(s: SoonState): void {
-  try {
-    localStorage.setItem(SOON_KEY, JSON.stringify(s));
-  } catch {
-    // ignore
-  }
-}
-
-const soon = ref<SoonState>(loadSoon());
+/** 读 director store 的 soonCmdState（WS 广播的权威状态） */
 const soonTargetSec = computed({
-  get: () => Math.round(soon.value.targetMs / 1000),
+  get: () => Math.round(director.soonCmdState.targetMs / 1000),
   set: (v: number) => {
     const newMs = v * 1000;
-    soon.value.targetMs = newMs;
-    saveSoon(soon.value);
+    // 同步本地 + WS 发送
+    director.soonCmdState.targetMs = newMs;
+    director.sendDirectorCommand("soon_set_target", { target_ms: newMs });
+    // localStorage 兜底（同进程 Chrome 标签页）
+    try {
+      localStorage.setItem("twc-soon-countdown", JSON.stringify(director.soonCmdState));
+    } catch { /* ignore */ }
   },
 });
 
 /** 剩余毫秒 */
 const soonRemaining = computed(() => {
-  const s = soon.value;
+  const s = director.soonCmdState;
   if (s.startedAt === null) return s.targetMs;
   const base = s.pausedAt ?? Date.now();
   const elapsed = base - s.startedAt;
@@ -133,47 +112,32 @@ const soonRemaining = computed(() => {
 
 /** 状态文字 */
 const soonStatusText = computed(() => {
-  if (soon.value.startedAt === null) return t("directorView.soonIdle");
-  if (soon.value.pausedAt !== null) return t("directorView.soonPaused");
+  const s = director.soonCmdState;
+  if (s.startedAt === null) return t("directorView.soonIdle");
+  if (s.pausedAt !== null) return t("directorView.soonPaused");
   if (soonRemaining.value <= 0) return t("directorView.soonFinished");
   return t("directorView.soonRunning");
 });
 
 function soonStart(): void {
-  const s = soon.value;
-  if (s.pausedAt !== null) {
-    // 继续：补偿暂停时长
-    const pauseDuration = Date.now() - s.pausedAt;
-    s.startedAt = (s.startedAt ?? 0) + pauseDuration;
-    s.pausedAt = null;
-  } else {
-    s.startedAt = Date.now();
-    s.pausedAt = null;
-  }
-  saveSoon(s);
+  director.sendDirectorCommand("soon_start");
 }
 
 function soonPause(): void {
-  const s = soon.value;
-  if (s.startedAt !== null && s.pausedAt === null) {
-    s.pausedAt = Date.now();
-    saveSoon(s);
-  }
+  director.sendDirectorCommand("soon_pause");
 }
 
 function soonReset(): void {
-  soon.value = { targetMs: soon.value.targetMs, startedAt: null, pausedAt: null };
-  saveSoon(soon.value);
+  director.sendDirectorCommand("soon_reset");
 }
 
-// 监听舞台端可能的外部重置（跨标签）
+// localStorage 兜底：同进程 Chrome 标签页仍可同步（OBS-CEF 跨进程靠 WS）
 window.addEventListener("storage", (e: StorageEvent) => {
-  if (e.key === SOON_KEY && e.newValue) {
+  if (e.key === "twc-soon-countdown" && e.newValue) {
     try {
-      soon.value = JSON.parse(e.newValue) as SoonState;
-    } catch {
-      // ignore
-    }
+      const parsed = JSON.parse(e.newValue);
+      Object.assign(director.soonCmdState, parsed);
+    } catch { /* ignore */ }
   }
 });
 
@@ -322,25 +286,25 @@ onUnmounted(() => {
               style="width: 120px"
               @change="(v: number | undefined) => { if (v != null) soonTargetSec = v; }"
             />
-            <span class="soon-status" :class="{ running: soon.startedAt !== null && soon.pausedAt === null && soonRemaining > 0 }">
+            <span class="soon-status" :class="{ running: director.soonCmdState.startedAt !== null && director.soonCmdState.pausedAt === null && soonRemaining > 0 }">
               {{ soonStatusText }}
             </span>
           </div>
-          <div class="soon-remaining" v-if="soon.startedAt !== null">
+          <div class="soon-remaining" v-if="director.soonCmdState.startedAt !== null">
             {{ Math.ceil(soonRemaining / 1000) }}s
           </div>
           <div class="soon-btns">
             <el-button
               size="small"
               type="primary"
-              :disabled="soonRemaining <= 0 && soon.startedAt !== null"
+              :disabled="soonRemaining <= 0 && director.soonCmdState.startedAt !== null"
               @click="soonStart()"
             >
-              {{ soon.pausedAt !== null ? $t("directorView.soonResume") : $t("directorView.soonStart") }}
+              {{ director.soonCmdState.pausedAt !== null ? $t("directorView.soonResume") : $t("directorView.soonStart") }}
             </el-button>
             <el-button
               size="small"
-              :disabled="!soon.startedAt || soon.pausedAt !== null || soonRemaining <= 0"
+              :disabled="!director.soonCmdState.startedAt || director.soonCmdState.pausedAt !== null || soonRemaining <= 0"
               @click="soonPause()"
             >
               {{ $t("directorView.soonPause") }}
