@@ -585,6 +585,7 @@ const messages: MessageSchema = {
   "admin.tournaments.colStatus": "Status",
   "admin.tournaments.colPlayerCount": "Players",
   "admin.tournaments.enterBtn": "Open",
+  "admin.tournaments.defaultTag": "Standalone container",
   "admin.tournaments.deleteConfirmMsg": "Delete tournament \"{name}\"? Only tournaments in the Configuring (DRAFT) state can be deleted; this cannot be undone.",
   "admin.tournaments.deleteConfirmTitle": "Delete tournament",
 
@@ -638,7 +639,9 @@ const messages: MessageSchema = {
   "admin.tourDetail.membersPool": "Member pool",
   "admin.tourDetail.editableHint": "Editable only while configuring",
   "admin.tourDetail.readOnlyHint": "Read-only (tournament locked)",
+  "admin.tourDetail.defaultMembersHint": "Read-only (standalone-match container; members not managed here)",
   "admin.tourDetail.schedule": "Schedule",
+  "admin.tourDetail.defaultScheduleHint": "The default tournament has no schedule. Matches created directly under Matches are attached here automatically; it cannot be edited or deleted, and never completes.",
   "admin.tourDetail.genBracketTip": "With at least 2 players and configuration complete, you can generate the bracket.\nAfter generation the tournament enters \"In progress\" and the member pool can no longer be edited.\nCurrent players: {count}.",
   "admin.tourDetail.generateBracketBtn": "Generate bracket",
   "admin.tourDetail.minPlayersHint": "(at least 2 players required)",

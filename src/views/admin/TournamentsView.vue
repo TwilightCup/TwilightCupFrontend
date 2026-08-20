@@ -4,7 +4,7 @@ import { useRouter } from "vue-router";
 import { ElMessageBox } from "element-plus";
 import { useI18n } from "vue-i18n";
 import { useAdminStore } from "@/stores/admin";
-import { TournamentStatus, type TournamentOut } from "@/api/types";
+import { DEFAULT_TOURNAMENT_ID, TournamentStatus, type TournamentOut } from "@/api/types";
 import { dateTime, tournamentFormatLabel, tournamentStatusInfo } from "@/utils/format";
 import TournamentFormDialog from "@/components/admin/TournamentFormDialog.vue";
 
@@ -74,7 +74,20 @@ onMounted(() => {
       class="t-table"
       @row-click="goDetail"
     >
-      <el-table-column prop="name" :label="$t('admin.tournaments.colName')" min-width="180" />
+      <el-table-column prop="name" :label="$t('admin.tournaments.colName')" min-width="180">
+        <template #default="{ row }">
+          {{ row.name }}
+          <el-tag
+            v-if="row.id === DEFAULT_TOURNAMENT_ID"
+            size="small"
+            type="info"
+            effect="plain"
+            style="margin-left: 6px"
+          >
+            {{ $t('admin.tournaments.defaultTag') }}
+          </el-tag>
+        </template>
+      </el-table-column>
       <el-table-column :label="$t('admin.tournaments.colFormat')" width="110">
         <template #default="{ row }">{{ tournamentFormatLabel(row.format) }}</template>
       </el-table-column>
@@ -95,7 +108,7 @@ onMounted(() => {
         <template #default="{ row }">
           <el-button link type="primary" @click.stop="goDetail(row)">{{ $t('admin.tournaments.enterBtn') }}</el-button>
           <el-button
-            v-if="row.status === TournamentStatus.DRAFT"
+            v-if="row.status === TournamentStatus.DRAFT && row.id !== DEFAULT_TOURNAMENT_ID"
             link
             type="primary"
             @click.stop="openEdit(row)"
@@ -103,7 +116,7 @@ onMounted(() => {
             {{ $t('common.edit') }}
           </el-button>
           <el-button
-            v-if="row.status === TournamentStatus.DRAFT"
+            v-if="row.status === TournamentStatus.DRAFT && row.id !== DEFAULT_TOURNAMENT_ID"
             link
             type="danger"
             @click.stop="onRemove(row)"

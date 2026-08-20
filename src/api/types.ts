@@ -500,6 +500,9 @@ export interface TournamentStanding {
   note: string | null;
 }
 
+/** 默认赛事（孤立比赛容器）固定主键，与后端 datatypes.DEFAULT_TOURNAMENT_ID 对齐 */
+export const DEFAULT_TOURNAMENT_ID = "default";
+
 export interface TournamentOut {
   id: string;
   name: string;

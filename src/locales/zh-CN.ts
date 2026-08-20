@@ -588,6 +588,7 @@ const messages = {
   "admin.tournaments.colStatus": "状态",
   "admin.tournaments.colPlayerCount": "选手数",
   "admin.tournaments.enterBtn": "进入",
+  "admin.tournaments.defaultTag": "孤立比赛容器",
   "admin.tournaments.deleteConfirmMsg": "确认删除赛事「{name}」？仅配置中（DRAFT）状态可删除，该操作不可恢复。",
   "admin.tournaments.deleteConfirmTitle": "删除赛事",
 
@@ -641,7 +642,9 @@ const messages = {
   "admin.tourDetail.membersPool": "成员池",
   "admin.tourDetail.editableHint": "仅配置中可编辑",
   "admin.tourDetail.readOnlyHint": "只读（赛事已锁定）",
+  "admin.tourDetail.defaultMembersHint": "只读（孤立比赛容器，成员不由此管理）",
   "admin.tourDetail.schedule": "赛程",
+  "admin.tourDetail.defaultScheduleHint": "默认赛事不生成赛程。在「比赛管理」直接创建的比赛会自动挂靠到此赛事下，它不可修改、删除，也永不结束。",
   "admin.tourDetail.genBracketTip": "至少 2 名选手且配置完成后可生成对阵表。\n生成后赛事进入「进行中」，成员池不可再修改。\n当前参赛选手：{count} 人。",
   "admin.tourDetail.generateBracketBtn": "生成对阵表",
   "admin.tourDetail.minPlayersHint": "（至少需 2 名参赛选手）",
