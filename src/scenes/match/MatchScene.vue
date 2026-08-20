@@ -3,7 +3,7 @@
  * 比赛详情场景页根组件。
  *
  * 合成器浪潮背景之上：
- *   中上：赛事 logo（?logo=）或霓虹赛事名 + matchName
+ *   中上：赛事 logo（默认 /logo.png，?logo= 可覆盖）+ matchName
  *   顶部两侧：A(蓝,左) / B(红,右) 名字 + ScoreBlocks（BO 胜点方块）
  *   中间：TugBar 计时差进度条（双方最后共同关卡的累计用时差）
  *   下方：两个 4:3 StreamFrame（A 左 / B 右），各下接一个 PlayerInfoBox（PB + 历史）
@@ -31,6 +31,9 @@ const { params, hosted, sharedBg } = useSceneContext();
 const { config, load, save } = useDirectorConfig();
 
 const panelOpen = ref(params.editMode);
+
+/** 品牌默认 logo（统一位置 public/logo.png，换 logo 只覆盖该文件） */
+const DEFAULT_LOGO = "/logo.png";
 
 /** 是否已收到任何 WS 真实数据（playerA 状态被更新过即算）；否则用 mock */
 const liveReady = ref(false);
@@ -98,8 +101,7 @@ onUnmounted(() => {
           </div>
 
           <div class="center-brand">
-            <img v-if="params.logoUrl" :src="params.logoUrl" class="logo" alt="logo" />
-            <span v-else class="brand-glyph">🌇</span>
+            <img :src="params.logoUrl || DEFAULT_LOGO" class="logo" alt="logo" />
             <div class="brand-name neon-text">{{ matchName }}</div>
             <div class="bo">BO{{ liveReady && director.boFormat ? director.boFormat : MOCK_MATCH.boFormat }}</div>
           </div>
@@ -200,11 +202,6 @@ onUnmounted(() => {
   width: clamp(48px, 6vw, 96px);
   height: auto;
   object-fit: contain;
-}
-.brand-glyph {
-  font-size: clamp(36px, 5vw, 72px);
-  line-height: 1;
-  filter: drop-shadow(0 0 12px rgba(255, 138, 61, 0.6));
 }
 .brand-name {
   font-size: clamp(16px, 2vw, 30px);

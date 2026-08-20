@@ -9,9 +9,9 @@
  */
 import type { Ref } from "vue";
 
-export type SceneKey = "overlay" | "match" | "mappool" | "bracket";
+export type SceneKey = "overlay" | "match" | "mappool" | "bracket" | "soon";
 
-export const SCENE_KEYS: SceneKey[] = ["overlay", "match", "mappool", "bracket"];
+export const SCENE_KEYS: SceneKey[] = ["overlay", "match", "mappool", "bracket", "soon"];
 
 export const SCENE_STORAGE_KEY = "twc-director-scene";
 

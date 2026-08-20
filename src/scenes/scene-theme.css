@@ -61,6 +61,16 @@ body,
     0 0 6px var(--syn-magenta),
     0 0 14px rgba(255, 46, 136, 0.55);
 }
+.neon-text-cyan {
+  color: var(--syn-text);
+  text-shadow:
+    0 0 6px var(--syn-cyan),
+    0 0 14px rgba(34, 227, 255, 0.55);
+}
+.neon-text-dim {
+  color: var(--syn-text-dim);
+  text-shadow: none;
+}
 
 /* 霓虹面板：半透紫底 + 青色辉光描边 */
 .neon-panel {

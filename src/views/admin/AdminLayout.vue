@@ -22,7 +22,7 @@ function logout(): void {
   <div class="layout">
     <header class="topbar">
       <div class="brand">
-        <span class="logo">🌇</span>
+        <img src="/logo.png" class="logo" alt="logo" />
         <div>
           <div class="title">{{ $t('brand.admin') }}</div>
           <div class="subtitle">{{ $t('brand.adminSubtitle') }}</div>
@@ -91,7 +91,9 @@ function logout(): void {
   gap: 12px;
 }
 .logo {
-  font-size: 26px;
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
 }
 .title {
   font-size: 16px;

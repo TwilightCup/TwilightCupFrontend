@@ -35,7 +35,7 @@ async function onSubmit(): Promise<void> {
   <div class="login-page">
     <div class="login-card">
       <div class="brand">
-        <div class="logo">🌇</div>
+        <img src="/logo.png" class="logo" alt="logo" />
         <h1>{{ $t("brand.appTitle") }}</h1>
         <p class="subtitle">{{ $t("brand.subtitle") }}</p>
       </div>
@@ -118,8 +118,9 @@ async function onSubmit(): Promise<void> {
   margin-bottom: 20px;
 }
 .logo {
-  font-size: 44px;
-  line-height: 1;
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
 }
 .brand h1 {
   margin: 10px 0 2px;

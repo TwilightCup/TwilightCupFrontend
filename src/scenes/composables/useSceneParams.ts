@@ -29,7 +29,7 @@ export interface SceneParams {
   histB: string;
   /** 编辑态（=1 唤出导播配置面板） */
   editMode: boolean;
-  /** 赛事 logo URL（中上展示） */
+  /** 赛事 logo URL 覆盖值（空则用默认 /logo.png） */
   logoUrl: string;
   /** 进度条满偏对应的计时差（毫秒），默认 60000 */
   gapMs: number;

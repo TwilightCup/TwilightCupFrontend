@@ -66,16 +66,8 @@ async function copyUrl(url: string): Promise<void> {
   }
 }
 
-/** 直播画面链接列表（叠加层 + 三个场景页 + 合并舞台） */
-const sceneLinks = computed(() => [
-  { key: "overlay", label: t("directorView.sceneOverlay"), url: director.sceneUrls.overlay },
-  { key: "matchDetail", label: t("directorView.sceneMatch"), url: director.sceneUrls.matchDetail },
-  { key: "mappool", label: t("directorView.sceneMappool"), url: director.sceneUrls.mappool },
-  { key: "bracket", label: t("directorView.sceneBracket"), url: director.sceneUrls.bracket },
-]);
-
-/** 合并舞台：单 OBS 源承载全部场景（推荐挂这一个） */
-const stageUrl = computed(() => director.sceneUrls.stage);
+/** 合并舞台：单 OBS 源承载全部场景（叠加信息 / 比赛详情 / 图池 / 赛程图） */
+const stageUrl = computed(() => director.stageUrl);
 
 // ---- 场景切换（写 localStorage → 合并舞台跨标签监听切换）----
 const sceneBtnLabels: Record<SceneKey, string> = {
@@ -83,12 +75,107 @@ const sceneBtnLabels: Record<SceneKey, string> = {
   match: "directorView.sceneBtnMatch",
   mappool: "directorView.sceneBtnMappool",
   bracket: "directorView.sceneBtnBracket",
+  soon: "directorView.sceneBtnSoon",
 };
 const activeScene = ref<SceneKey>(getCurrentScene());
 function onSwitchScene(key: SceneKey): void {
   activeScene.value = key;
   setCurrentScene(key);
 }
+
+// ---- Coming Soon 倒计时控制（localStorage → 舞台 SoonScene 跨标签同步）----
+const SOON_KEY = "twc-soon-countdown";
+
+interface SoonState {
+  targetMs: number;
+  startedAt: number | null;
+  pausedAt: number | null;
+}
+
+const DEFAULT_TARGET_S = 300; // 5 分钟
+
+function loadSoon(): SoonState {
+  try {
+    const raw = localStorage.getItem(SOON_KEY);
+    if (raw) return JSON.parse(raw) as SoonState;
+  } catch {
+    // ignore
+  }
+  return { targetMs: DEFAULT_TARGET_S * 1000, startedAt: null, pausedAt: null };
+}
+
+function saveSoon(s: SoonState): void {
+  try {
+    localStorage.setItem(SOON_KEY, JSON.stringify(s));
+  } catch {
+    // ignore
+  }
+}
+
+const soon = ref<SoonState>(loadSoon());
+const soonTargetSec = computed({
+  get: () => Math.round(soon.value.targetMs / 1000),
+  set: (v: number) => {
+    const newMs = v * 1000;
+    soon.value.targetMs = newMs;
+    saveSoon(soon.value);
+  },
+});
+
+/** 剩余毫秒 */
+const soonRemaining = computed(() => {
+  const s = soon.value;
+  if (s.startedAt === null) return s.targetMs;
+  const base = s.pausedAt ?? Date.now();
+  const elapsed = base - s.startedAt;
+  return Math.max(0, s.targetMs - elapsed);
+});
+
+/** 状态文字 */
+const soonStatusText = computed(() => {
+  if (soon.value.startedAt === null) return t("directorView.soonIdle");
+  if (soon.value.pausedAt !== null) return t("directorView.soonPaused");
+  if (soonRemaining.value <= 0) return t("directorView.soonFinished");
+  return t("directorView.soonRunning");
+});
+
+function soonStart(): void {
+  const s = soon.value;
+  if (s.pausedAt !== null) {
+    // 继续：补偿暂停时长
+    const pauseDuration = Date.now() - s.pausedAt;
+    s.startedAt = (s.startedAt ?? 0) + pauseDuration;
+    s.pausedAt = null;
+  } else {
+    s.startedAt = Date.now();
+    s.pausedAt = null;
+  }
+  saveSoon(s);
+}
+
+function soonPause(): void {
+  const s = soon.value;
+  if (s.startedAt !== null && s.pausedAt === null) {
+    s.pausedAt = Date.now();
+    saveSoon(s);
+  }
+}
+
+function soonReset(): void {
+  soon.value = { targetMs: soon.value.targetMs, startedAt: null, pausedAt: null };
+  saveSoon(soon.value);
+}
+
+// 监听舞台端可能的外部重置（跨标签）
+window.addEventListener("storage", (e: StorageEvent) => {
+  if (e.key === SOON_KEY && e.newValue) {
+    try {
+      soon.value = JSON.parse(e.newValue) as SoonState;
+    } catch {
+      // ignore
+    }
+  }
+});
 
 function logout(): void {
   director.disconnect();
@@ -211,7 +298,7 @@ onUnmounted(() => {
             @update:model-value="(v: string | number | boolean) => onSwitchScene(v as SceneKey)"
           >
             <el-radio-button
-              v-for="key in (['overlay','match','mappool','bracket'] as SceneKey[])"
+              v-for="key in (['overlay','match','mappool','bracket','soon'] as SceneKey[])"
               :key="key"
               :value="key"
             >
@@ -220,42 +307,71 @@ onUnmounted(() => {
           </el-radio-group>
         </div>
 
-        <!-- 直播画面链接（叠加层 + 场景页） -->
+        <!-- Coming Soon 倒计时控制（仅待开始场景可用） -->
+        <div v-if="activeScene === 'soon'" class="card">
+          <div class="card-title">{{ $t("directorView.soonTitle") }}</div>
+          <p class="hint">{{ $t("directorView.soonHint") }}</p>
+          <div class="soon-row">
+            <span class="soon-label">{{ $t("directorView.soonLabel") }}</span>
+            <el-input-number
+              :model-value="soonTargetSec"
+              :min="10"
+              :max="3600"
+              :step="30"
+              size="small"
+              style="width: 120px"
+              @change="(v: number | undefined) => { if (v != null) soonTargetSec = v; }"
+            />
+            <span class="soon-status" :class="{ running: soon.startedAt !== null && soon.pausedAt === null && soonRemaining > 0 }">
+              {{ soonStatusText }}
+            </span>
+          </div>
+          <div class="soon-remaining" v-if="soon.startedAt !== null">
+            {{ Math.ceil(soonRemaining / 1000) }}s
+          </div>
+          <div class="soon-btns">
+            <el-button
+              size="small"
+              type="primary"
+              :disabled="soonRemaining <= 0 && soon.startedAt !== null"
+              @click="soonStart()"
+            >
+              {{ soon.pausedAt !== null ? $t("directorView.soonResume") : $t("directorView.soonStart") }}
+            </el-button>
+            <el-button
+              size="small"
+              :disabled="!soon.startedAt || soon.pausedAt !== null || soonRemaining <= 0"
+              @click="soonPause()"
+            >
+              {{ $t("directorView.soonPause") }}
+            </el-button>
+            <el-button
+              size="small"
+              @click="soonReset()"
+            >
+              {{ $t("directorView.soonReset") }}
+            </el-button>
+          </div>
+        </div>
+
+        <!-- 直播画面链接：合并舞台单源（全部场景在其中渲染 + 控制台切场景） -->
         <div class="card">
           <div class="card-title">{{ $t("directorView.sceneTitle") }}</div>
           <p class="hint">{{ $t("directorView.sceneHint") }}</p>
-          <div class="scene-list">
-            <div v-for="s in sceneLinks" :key="s.key" class="scene-row">
-              <div class="scene-label">{{ s.label }}</div>
-              <el-input
-                :model-value="s.url || $t('directorView.sceneUnavailable')"
-                readonly
-                size="small"
-                :disabled="!s.url"
-              >
-                <template #append>
-                  <el-button size="small" :disabled="!s.url" @click="copyUrl(s.url)">
-                    {{ $t("directorView.copyOverlayBtn") }}
-                  </el-button>
-                </template>
-              </el-input>
-            </div>
-            <!-- 合并舞台：推荐挂这一个单源，导播按钮切场景 -->
-            <div class="scene-row stage-row">
-              <div class="scene-label">{{ $t("directorView.sceneStage") }}</div>
-              <el-input
-                :model-value="stageUrl || $t('directorView.sceneUnavailable')"
-                readonly
-                size="small"
-                :disabled="!stageUrl"
-              >
-                <template #append>
-                  <el-button size="small" :disabled="!stageUrl" @click="copyUrl(stageUrl)">
-                    {{ $t("directorView.copyOverlayBtn") }}
-                  </el-button>
-                </template>
-              </el-input>
-            </div>
+          <div class="scene-row">
+            <div class="scene-label">{{ $t("directorView.sceneStage") }}</div>
+            <el-input
+              :model-value="stageUrl || $t('directorView.sceneUnavailable')"
+              readonly
+              size="small"
+              :disabled="!stageUrl"
+            >
+              <template #append>
+                <el-button size="small" :disabled="!stageUrl" @click="copyUrl(stageUrl)">
+                  {{ $t("directorView.copyOverlayBtn") }}
+                </el-button>
+              </template>
+            </el-input>
           </div>
         </div>
 
@@ -431,11 +547,6 @@ onUnmounted(() => {
   color: var(--tc-text-dim);
   line-height: 1.6;
 }
-.scene-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
 .scene-row {
   display: flex;
   flex-direction: column;
@@ -444,15 +555,39 @@ onUnmounted(() => {
 .scene-label {
   font-size: 12px;
   font-weight: 600;
-  color: var(--tc-text);
-}
-.stage-row {
-  padding-top: 8px;
-  border-top: 1px dashed var(--tc-border);
-  margin-top: 4px;
-}
-.stage-row .scene-label {
   color: var(--tc-primary);
+}
+.soon-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.soon-label {
+  font-size: 13px;
+  color: var(--tc-text);
+  white-space: nowrap;
+}
+.soon-status {
+  font-size: 12px;
+  color: var(--tc-text-dim);
+  margin-left: auto;
+}
+.soon-status.running {
+  color: var(--tc-primary);
+  font-weight: 600;
+}
+.soon-remaining {
+  font-size: 28px;
+  font-weight: 900;
+  color: var(--tc-primary);
+  text-align: center;
+  padding: 6px 0;
+  font-variant-numeric: tabular-nums;
+}
+.soon-btns {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
 }
 .warn {
   margin: 8px 0 0;

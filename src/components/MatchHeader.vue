@@ -90,7 +90,7 @@ async function onResume(): Promise<void> {
   <header class="match-header">
     <div class="left">
       <div class="title-block">
-        <span class="logo">🌇</span>
+        <img src="/logo.png" class="logo" alt="logo" />
         <div>
           <div class="match-name">{{ match.matchName || $t('matchHeader.unnamed') }}</div>
           <div class="meta">
@@ -185,7 +185,9 @@ async function onResume(): Promise<void> {
   gap: 12px;
 }
 .logo {
-  font-size: 26px;
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
 }
 .match-name {
   font-size: 16px;

@@ -254,38 +254,20 @@ export const useDirectorStore = defineStore("director", () => {
     return side === "A" ? playerA.value : playerB.value;
   }
 
-  /** OBS 浏览器源叠加层链接（带当前 token + 本场 match，多场区分） */
-  const overlayUrl = computed(() => {
-    if (!tokenRef.value) return "";
-    const base = `${globalThis.location.origin}/overlay.html?token=${encodeURIComponent(
-      tokenRef.value,
-    )}`;
-    return matchId.value ? `${base}&match=${encodeURIComponent(matchId.value)}` : base;
-  });
-
   /**
-   * 直播画面场景页链接集合（叠加层 + 赛程图 + 图池 + 比赛详情）。
-   * 各带当前 token；按需带 match / tournament。tournament 缺失（独立比赛 / 首回合前）
-   * 时赛程图链接留空（赛程图对无赛事比赛无意义）。
+   * 合并舞台链接：单 OBS 浏览器源承载全部场景（叠加信息 / 比赛详情 / 图池 / 赛程图），
+   * 导播控制台切场景。带当前 token + 本场 match + 所属 tournament（赛程图场景需）。
    */
-  const sceneUrls = computed(() => {
-    const origin = globalThis.location.origin;
-    const tok = encodeURIComponent(tokenRef.value);
-    const match = matchId.value ? encodeURIComponent(matchId.value) : "";
-    const tour = tournamentId.value ? encodeURIComponent(tournamentId.value) : "";
-    if (!tok) {
-      return { overlay: "", bracket: "", mappool: "", matchDetail: "", stage: "" };
-    }
-    const q = (file: string, extra = ""): string =>
-      `${origin}/${file}?token=${tok}${extra}`;
-    return {
-      overlay: q("overlay.html", match ? `&match=${match}` : ""),
-      matchDetail: q("match-scene.html", match ? `&match=${match}` : ""),
-      mappool: q("mappool.html", match ? `&match=${match}` : tour ? `&tournament=${tour}` : ""),
-      bracket: tour ? q("bracket.html", `&tournament=${tour}`) : "",
-      // 合并舞台：含 match + tournament（舞台内赛程图场景需 tournament）
-      stage: q("stage.html", (match ? `&match=${match}` : "") + (tour ? `&tournament=${tour}` : "")),
-    };
+  const stageUrl = computed(() => {
+    if (!tokenRef.value) return "";
+    const qs = [
+      `token=${encodeURIComponent(tokenRef.value)}`,
+      matchId.value ? `match=${encodeURIComponent(matchId.value)}` : "",
+      tournamentId.value ? `tournament=${encodeURIComponent(tournamentId.value)}` : "",
+    ]
+      .filter(Boolean)
+      .join("&");
+    return `${globalThis.location.origin}/stage.html?${qs}`;
   });
 
   return {
@@ -324,8 +306,7 @@ export const useDirectorStore = defineStore("director", () => {
     draft,
     // 派生 / 动作
     isMulti,
-    overlayUrl,
-    sceneUrls,
+    stageUrl,
     connect,
     connectWithAuth,
     disconnect,

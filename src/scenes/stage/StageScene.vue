@@ -28,6 +28,7 @@ import Overlay from "@/overlay/Overlay.vue";
 import MatchScene from "@/scenes/match/MatchScene.vue";
 import MappoolScene from "@/scenes/mappool/MappoolScene.vue";
 import BracketScene from "@/scenes/bracket/BracketScene.vue";
+import SoonScene from "@/scenes/soon/SoonScene.vue";
 
 const params = useSceneParams();
 const director = useDirectorStore();
@@ -57,6 +58,7 @@ const sceneMap: Record<SceneKey, typeof Overlay> = {
   match: MatchScene,
   mappool: MappoolScene,
   bracket: BracketScene,
+  soon: SoonScene,
 };
 const activeComponent = shallowRef<typeof Overlay>(sceneMap[currentScene.value]);
 // 切换时同步组件引用（Transition 用 key 区分，组件引用也跟着换）
