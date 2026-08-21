@@ -19,6 +19,7 @@ import {
   type Attempt,
   type LevelTime,
   type MatchPhase as MP,
+  type MatchStatus as MS,
   type Pick,
   type PickType as PT,
   type PlayerStatus as PS,
@@ -101,6 +102,8 @@ export const useDirectorStore = defineStore("director", () => {
   const nameB = ref(tr("seat.b"));
 
   const matchName = ref("");
+  /** 比赛状态（MatchStatus；首回合前 REST 拉到，Coming Soon 场景兜底显示用） */
+  const matchStatus = ref<MS | null>(null);
   const boFormat = ref(0);
   const winThreshold = ref(0);
   const scoringMethodName = ref<"FASTEST" | "AVERAGE" | "">("");
@@ -240,6 +243,17 @@ export const useDirectorStore = defineStore("director", () => {
 
   async function loadMeta(): Promise<void> {
     if (!matchId.value || !tokenRef.value) return;
+    // 1) /me/matches/{id}：首回合前即可用（match_log 要首回合后才生成），
+    //    尽早补比赛名/状态/赛事归属（Coming Soon 场景与舞台 URL 依赖）。
+    try {
+      const m = await api.getMyMatch(matchId.value, tokenRef.value);
+      matchName.value = m.name || matchName.value;
+      matchStatus.value = m.status;
+      tournamentId.value = m.tournament_id || tournamentId.value;
+    } catch {
+      // token 无权限等，忽略（下面 match_log 再试一次）
+    }
+    // 2) match_log：BO/胜点/计分制等（首回合前 404 忽略）。
     try {
       const doc = await api.getMatchLog(matchId.value, tokenRef.value);
       const info = doc.initial_info;
@@ -250,10 +264,10 @@ export const useDirectorStore = defineStore("director", () => {
         (info.scoring_method as "FASTEST" | "AVERAGE" | undefined) ?? "";
       countdownDelay.value = info.start_countdown_delay ?? null;
       tournamentId.value = doc.tournament_id ?? "";
-      metaReady.value = true;
     } catch {
       // 首回合前 match_log 尚未生成（404），忽略
     }
+    metaReady.value = true;
   }
 
   function connect(token: string, matchId?: string): void {
@@ -369,6 +383,7 @@ export const useDirectorStore = defineStore("director", () => {
     nameA,
     nameB,
     matchName,
+    matchStatus,
     boFormat,
     winThreshold,
     scoringMethodName,

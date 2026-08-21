@@ -10,9 +10,9 @@
  * gapMs 为满偏对应的差值（默认 60s）。
  */
 import { computed } from "vue";
-import { useI18n } from "vue-i18n";
 import { PlayerStatus, type LevelTime } from "@/api/types";
 import { formatMs } from "@/utils/format";
+import { bi } from "@/utils/bilingual";
 
 const props = defineProps<{
   levelsA: LevelTime[];
@@ -21,8 +21,6 @@ const props = defineProps<{
   statusB: PlayerStatus;
   gapMs: number;
 }>();
-
-const { t } = useI18n();
 
 /** 双方都完成的最高 level_index */
 function maxIdx(levels: LevelTime[]): number {
@@ -75,7 +73,7 @@ const forfeited = computed(
     </div>
     <div class="labels">
       <span class="lab a">{{ tA }}</span>
-      <span v-if="forfeited" class="fo">{{ t("scenes.match.forfeit") }}</span>
+      <span v-if="forfeited" class="fo">{{ bi("scenes.match.forfeit") }}</span>
       <span class="lab b">{{ tB }}</span>
     </div>
   </div>

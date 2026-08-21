@@ -9,7 +9,7 @@
  * side='A' 蓝（左）、'B' 红（右）。
  */
 import { computed } from "vue";
-import { useI18n } from "vue-i18n";
+import { bi } from "@/utils/bilingual";
 
 const props = defineProps<{
   side: "A" | "B";
@@ -18,7 +18,6 @@ const props = defineProps<{
   rtmpUrl: string;
 }>();
 
-const { t } = useI18n();
 const hasVideo = computed(() => !!props.hlsUrl);
 </script>
 
@@ -33,10 +32,10 @@ const hasVideo = computed(() => !!props.hlsUrl);
       class="video"
     />
     <div v-else class="placeholder">
-      <div class="live">● {{ t("scenes.match.waitingSignal") }}</div>
+      <div class="live">● {{ bi("scenes.match.waitingSignal") }}</div>
       <div class="pname" :class="side">{{ name }}</div>
       <div v-if="rtmpUrl" class="rtmp">{{ rtmpUrl }}</div>
-      <div v-else class="rtmp dim">{{ t("scenes.match.waitingSignal") }}</div>
+      <div v-else class="rtmp dim">{{ bi("scenes.match.waitingSignal") }}</div>
     </div>
   </div>
 </template>

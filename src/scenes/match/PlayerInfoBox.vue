@@ -4,7 +4,7 @@
  * 内容由导播在配置面板填写（useDirectorConfig），暂不在后端持久化。
  * side='A' 蓝（左）、'B' 红（右）。
  */
-import { useI18n } from "vue-i18n";
+import { bi } from "@/utils/bilingual";
 
 defineProps<{
   side: "A" | "B";
@@ -12,8 +12,6 @@ defineProps<{
   pb: string;
   history: string;
 }>();
-
-const { t } = useI18n();
 </script>
 
 <template>
@@ -21,11 +19,11 @@ const { t } = useI18n();
     <div class="head">
       <span class="nm" :class="side">{{ name }}</span>
       <span class="pb">
-        <span class="pb-label">{{ t("scenes.match.pb") }}</span>
+        <span class="pb-label">{{ bi("scenes.match.pb") }}</span>
         <span class="pb-val">{{ pb || "—" }}</span>
       </span>
     </div>
-    <div class="hist">{{ history || t("scenes.match.history") }}</div>
+    <div class="hist">{{ history || bi("scenes.match.history") }}</div>
   </div>
 </template>
 

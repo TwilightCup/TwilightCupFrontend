@@ -523,12 +523,12 @@ const messages = {
 
   // ── 导播叠加层（Overlay.vue） ────────────────────────────────────────
   "overlay.noToken": "缺少 token。请在导播控制台复制「合并舞台」链接，将完整 URL 填入 OBS 浏览器源。",
-  "overlay.matchWinner": "🏆 选手{winner} 获胜",
+  "overlay.matchWinner": "选手{winner} 获胜",
 
   // ── Coming Soon 场景 ──────────────────────────────────────────────
   "soon.noMatch": "黄昏杯",
-  "soon.comingSoon": "Coming Soon...",
-  "soon.finished": "即将开始",
+  "soon.comingSoon": "即将开始",
+  "soon.finished": "马上开始",
 
   // ── 管理员端布局 ─────────────────────────────────────────────────────
   "admin.menu.matches": "比赛管理",

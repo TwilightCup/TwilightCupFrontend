@@ -100,14 +100,24 @@
   perspective: 9vmin;
   perspective-origin: 50% 0;
 }
+/*
+ * 网格两层都用「单周期 tile + background-size 显式平铺」：
+ * 渐变若不带尺寸（auto = 元素盒大小，如 540px），内部 8vmin 周期与 tile 边界
+ * 不对齐，background-position 平移一个周期后 tile 接缝处相位跳变——表现为
+ * 横线走一半突然重置。显式 8vmin tile 保证平移量恰为一个完整周期，逐帧无缝。
+ */
 .grid {
   position: absolute;
   inset: 0;
   transform: rotateX(74deg);
   transform-origin: 50% 0;
   background-image:
-    repeating-linear-gradient(90deg, rgba(34, 227, 255, 0.55) 0 2px, transparent 2px 8vmin),
-    repeating-linear-gradient(0deg, rgba(255, 46, 136, 0.45) 0 2px, transparent 2px 8vmin);
+    linear-gradient(90deg, rgba(34, 227, 255, 0.55) 0 2px, transparent 2px),
+    linear-gradient(to bottom, rgba(255, 46, 136, 0.45) 0 2px, transparent 2px);
+  background-size:
+    8vmin 8vmin,
+    8vmin 8vmin;
+  background-repeat: repeat, repeat;
   animation: gridScroll 2.6s linear infinite;
 }
 

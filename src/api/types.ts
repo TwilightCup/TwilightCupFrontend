@@ -416,6 +416,8 @@ export interface MatchOut {
   referee_id: string;
   director_id: string;
   winner: "A" | "B" | null;
+  /** 所属赛事 id（孤立比赛为默认容器 "default"；后端已下发，前端用于舞台 URL 等 */
+  tournament_id?: string | null;
   created_at: string;
   started_at?: string | null;
   ended_at?: string | null;

@@ -3,29 +3,45 @@
  * Coming Soon / 倒计时背景场景。
  *
  * 合成器浪潮背景之上：
- *   中上：品牌 logo + 赛事名 + 阶段状态
- *   屏幕中央："Coming Soon..." 或倒计时数字（由导播控制台通过 localStorage 操控）
+ *   上部：品牌 logo + 赛事名 + 赛事状态（真实赛事取自 /me/tournaments；
+ *         孤立比赛回退比赛名/比赛状态，均双语）
+ *   屏幕正中央（绝对居中）："即将开始 / Coming Soon" 双语或倒计时数字，
+ *   倒计时结束显示"马上开始 / Starting Soon"（由导播控制台经 WS 广播操控）
  *
  * 数据来源：director store（hosted 模式下由舞台根统一连 WS，本组件只读）。
- * 倒计时状态：localStorage key `twc-soon-countdown`，格式：
- *   { targetMs: number, startedAt: number | null, pausedAt: number | null }
+ * 倒计时状态：director.soonCmdState（WS 广播权威来源）。
  */
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { useI18n } from "vue-i18n";
 import { useDirectorStore } from "@/stores/director";
-import { phaseInfo } from "@/utils/format";
+import { api } from "@/api/client";
+import { DEFAULT_TOURNAMENT_ID, type TournamentOut } from "@/api/types";
+import {
+  matchStatusLabelKey,
+  phaseLabelKey,
+  tournamentStatusLabelKey,
+} from "@/utils/format";
+import { bi, biPair } from "@/utils/bilingual";
 import { useSceneContext } from "@/scenes/composables/useSceneContext";
 
-const { t } = useI18n();
 const director = useDirectorStore();
-const { sharedBg } = useSceneContext();
+const { params, sharedBg } = useSceneContext();
 
 /** 品牌默认 logo（统一位置 public/logo.png） */
 const DEFAULT_LOGO = "/logo.png";
 
-// ---- 赛事信息（显示赛事名，非单场比赛名；BO 是单场的，这里不展示）----
-const tournamentName = computed(() => director.matchName || t("soon.noMatch"));
-const phaseLabel = computed(() => phaseInfo(director.phase).label);
+// ---- 赛事信息（logo 下：赛事名 + 赛事状态）----
+// 真实赛事从 /me/tournaments 取名字与状态；默认容器（孤立比赛）名字无意义，
+// 回退当前比赛名 + 比赛状态；再兜底品牌名。
+const tournament = ref<TournamentOut | null>(null);
+
+const eventName = computed(
+  () => tournament.value?.name || director.matchName || bi("soon.noMatch"),
+);
+const statusText = computed(() => {
+  if (tournament.value) return bi(tournamentStatusLabelKey(tournament.value.status));
+  if (director.matchStatus !== null) return bi(matchStatusLabelKey(director.matchStatus));
+  return bi(phaseLabelKey(director.phase));
+});
 
 // ---- 倒计时状态（从 director store 读取，WS 广播权威来源）----
 const soonState = computed(() => director.soonCmdState);
@@ -57,28 +73,37 @@ function fmt(ms: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-/** 中央显示文字 */
-const centerText = computed(() => {
-  const s = soonState.value;
-  if (s.startedAt === null) return t("soon.comingSoon");
-  if (isFinished.value) return t("soon.finished");
-  return fmt(remainingMs.value);
-});
+/** 中央大字（双语堆叠展示用一对；倒计时中为数字） */
+const comingPair = biPair("soon.comingSoon");
+const finishedPair = biPair("soon.finished");
 
-/** 状态标签文字（给控制台参考，本场景内也可展示小字） */
+/** 状态标签文字（倒计时中显示在数字下方） */
 const statusTag = computed(() => {
   const s = soonState.value;
-  if (s.startedAt === null) return t("directorView.soonIdle");
-  if (s.pausedAt !== null) return t("directorView.soonPaused");
-  if (isFinished.value) return t("directorView.soonFinished");
-  return t("directorView.soonRunning");
+  if (s.startedAt === null) return "";
+  if (s.pausedAt !== null) return bi("directorView.soonPaused");
+  if (isFinished.value) return bi("directorView.soonFinished");
+  return bi("directorView.soonRunning");
 });
+
+/** 赛事元数据只拉一次（挂载时）；场景切换重挂会重拉，端点轻量可接受 */
+async function loadTournament(): Promise<void> {
+  const tid = params.tournamentId;
+  if (!params.token || !tid || tid === DEFAULT_TOURNAMENT_ID) return;
+  try {
+    const list = await api.listMyTournaments(params.token);
+    tournament.value = list.find((x: TournamentOut) => x.id === tid) ?? null;
+  } catch {
+    // 非赛事成员 / 网络失败：回退比赛名/状态展示
+  }
+}
 
 function tick(): void {
   remainingMs.value = calcRemaining();
 }
 
 onMounted(() => {
+  void loadTournament();
   tick();
   timerId = setInterval(tick, 200); // 200ms 刷新够平滑
 });
@@ -93,51 +118,55 @@ onUnmounted(() => {
     <SynthwaveBg v-if="!sharedBg" />
 
     <div class="content soon-content">
-      <!-- 全部内容屏幕正中央 -->
-      <main class="center-display">
-        <!-- 品牌：logo + 赛事名 + 状态 -->
-        <header class="brand-header">
-          <img :src="DEFAULT_LOGO" class="logo" alt="logo" />
-          <h1 class="tournament-name neon-text">{{ tournamentName }}</h1>
-          <span class="phase neon-text-cyan">{{ phaseLabel }}</span>
-        </header>
+      <!-- 上部：品牌 logo + 赛事名 + 赛事状态 -->
+      <header class="brand-header">
+        <img :src="DEFAULT_LOGO" class="logo" alt="logo" />
+        <h1 class="tournament-name neon-text">{{ eventName }}</h1>
+        <span class="phase neon-text-cyan">{{ statusText }}</span>
+      </header>
 
-        <!-- Coming Soon / 倒计时 -->
-        <div class="center-main" :class="{ counting: soonState.startedAt !== null && !isFinished, finished: isFinished }">
-          {{ centerText }}
+      <!-- 屏幕正中央：Coming Soon / 倒计时（绝对居中，不受头部高度影响） -->
+      <main class="center-block">
+        <div
+          v-if="soonState.startedAt === null"
+          class="center-main idle"
+        >
+          <div class="zh">{{ comingPair.zh }}</div>
+          <div class="en">{{ comingPair.en }}</div>
         </div>
-        <div v-if="soonState.startedAt !== null" class="status-label neon-text-dim">
-          {{ statusTag }}
+        <div v-else-if="isFinished" class="center-main finished">
+          <div class="zh">{{ finishedPair.zh }}</div>
+          <div class="en">{{ finishedPair.en }}</div>
         </div>
+        <template v-else>
+          <div class="center-main counting">{{ fmt(remainingMs) }}</div>
+          <div v-if="statusTag" class="status-label neon-text-dim">{{ statusTag }}</div>
+        </template>
       </main>
     </div>
   </div>
 </template>
 
 <style scoped>
-.soon-content {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+.scene {
+  position: relative;
   height: 100%;
-  padding: 4vh 4vw;
+}
+.soon-content {
+  position: relative;
+  height: 100%;
 }
 
-/* ---- 全部居中 ---- */
-.center-display {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-}
-
-/* ---- 品牌头部（居中）---- */
+/* ---- 品牌头部（上部位，水平居中）---- */
 .brand-header {
+  position: absolute;
+  top: 9vh;
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 .logo {
   width: clamp(64px, 8vw, 120px);
@@ -150,26 +179,53 @@ onUnmounted(() => {
   letter-spacing: 3px;
   margin: 0;
   text-align: center;
+  max-width: 80vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .phase {
   font-size: clamp(13px, 1.5vw, 22px);
   color: var(--syn-cyan);
   font-weight: 700;
+  letter-spacing: 1px;
+}
+
+/* ---- 中央显示（绝对居中，双行双语）---- */
+.center-block {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2.2vh;
 }
 .center-main {
-  font-size: clamp(48px, 10vw, 160px);
-  font-weight: 900;
-  line-height: 1.1;
   text-align: center;
   letter-spacing: 2px;
-  /* 默认 Coming Soon... 用品牌金 */
+  line-height: 1.15;
+  /* 默认 Coming Soon 用品牌金 */
   color: #f0a020;
   text-shadow:
     0 0 30px rgba(240, 160, 32, 0.5),
     0 4px 0 rgba(0, 0, 0, 0.4);
   transition: color 0.3s, text-shadow 0.3s;
 }
+.center-main .zh {
+  font-size: clamp(44px, 8vw, 130px);
+  font-weight: 900;
+}
+.center-main .en {
+  font-size: clamp(20px, 3vw, 48px);
+  font-weight: 800;
+  opacity: 0.92;
+  letter-spacing: 4px;
+}
 .center-main.counting {
+  font-size: clamp(48px, 10vw, 160px);
+  font-weight: 900;
   color: #fff;
   text-shadow:
     0 0 40px rgba(255, 255, 255, 0.6),

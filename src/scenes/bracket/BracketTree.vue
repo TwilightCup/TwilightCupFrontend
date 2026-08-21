@@ -10,12 +10,12 @@
  * 双败：WINNERS(青) / LOSERS(品红) 分组渲染（MAIN 视为胜者组）。
  */
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { useI18n } from "vue-i18n";
 import {
   BracketSide,
   type BracketView,
   type BracketRound,
 } from "@/api/types";
+import { bi } from "@/utils/bilingual";
 import FixtureCard from "./FixtureCard.vue";
 
 const props = defineProps<{
@@ -23,8 +23,6 @@ const props = defineProps<{
   scores: Map<string, { a: number | null; b: number | null }>;
   nameOf: (id: string | null) => string;
 }>();
-
-const { t } = useI18n();
 
 /** 按 bracket_side 拆分（MAIN/WINNERS 一组，LOSERS 一组） */
 const mainRounds = ref<BracketRound[]>([]);
@@ -108,8 +106,8 @@ function isCurrent(r: BracketRound): boolean {
   return r.round_no === props.bracket.current_round;
 }
 function sideTitle(r: BracketRound): string {
-  if (r.bracket_side === BracketSide.LOSERS) return t("scenes.bracket.losers");
-  return t("scenes.bracket.winners");
+  if (r.bracket_side === BracketSide.LOSERS) return bi("scenes.bracket.losers");
+  return bi("scenes.bracket.winners");
 }
 </script>
 
@@ -119,7 +117,7 @@ function sideTitle(r: BracketRound): string {
       <h3 class="grp-title neon-text">{{ sideTitle(mainRounds[0]) }}</h3>
       <div ref="mainWrap" class="cols">
         <div v-for="r in mainRounds" :key="r.round_no" class="col" :class="{ current: isCurrent(r) }">
-          <div class="col-title">{{ t('scenes.bracket.roundTitle', { n: r.round_no }) }}</div>
+          <div class="col-title">{{ bi('scenes.bracket.roundTitle', { n: r.round_no }) }}</div>
           <div class="slots">
             <div v-for="f in r.fixtures" :key="f.id" class="slot">
               <FixtureCard
@@ -139,10 +137,10 @@ function sideTitle(r: BracketRound): string {
     </div>
 
     <div v-if="losersRounds.length" class="group losers">
-      <h3 class="grp-title neon-text-magenta">{{ t('scenes.bracket.losers') }}</h3>
+      <h3 class="grp-title neon-text-magenta">{{ bi('scenes.bracket.losers') }}</h3>
       <div ref="losersWrap" class="cols">
         <div v-for="r in losersRounds" :key="r.round_no" class="col" :class="{ current: isCurrent(r) }">
-          <div class="col-title">{{ t('scenes.bracket.roundTitle', { n: r.round_no }) }}</div>
+          <div class="col-title">{{ bi('scenes.bracket.roundTitle', { n: r.round_no }) }}</div>
           <div class="slots">
             <div v-for="f in r.fixtures" :key="f.id" class="slot">
               <FixtureCard

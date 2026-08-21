@@ -11,6 +11,7 @@ import SynthwaveBg from "@/scenes/components/SynthwaveBg.vue";
 import { useSceneContext } from "@/scenes/composables/useSceneContext";
 import { useMappoolData } from "./useMappoolData";
 import { categoryKindInfo } from "@/utils/format";
+import { bi } from "@/utils/bilingual";
 import MapCard from "./MapCard.vue";
 
 const { t } = useI18n();
@@ -37,7 +38,7 @@ function kindLabel(kind: string): string {
     <template v-else>
       <div class="content">
         <header class="head">
-          <h1 class="title neon-text">{{ t("scenes.mappool.title") }}</h1>
+          <h1 class="title neon-text">{{ bi("scenes.mappool.title") }}</h1>
         </header>
 
         <div class="scroll">
@@ -47,7 +48,7 @@ function kindLabel(kind: string): string {
               <MapCard v-for="p in g.picks" :key="p.code" :pick="p" :kind="g.kind" />
             </div>
           </section>
-          <div v-if="groups.length === 0" class="empty">{{ t("scenes.mappool.empty") }}</div>
+          <div v-if="groups.length === 0" class="empty">{{ bi("scenes.mappool.empty") }}</div>
         </div>
       </div>
 

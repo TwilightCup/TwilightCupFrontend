@@ -9,6 +9,7 @@ import { computed, onMounted, onUnmounted } from "vue";
 import { useI18n } from "vue-i18n";
 import SynthwaveBg from "@/scenes/components/SynthwaveBg.vue";
 import { useSceneContext } from "@/scenes/composables/useSceneContext";
+import { bi } from "@/utils/bilingual";
 import { useBracketData } from "./useBracketData";
 import BracketTree from "./BracketTree.vue";
 
@@ -18,12 +19,12 @@ const { bracket, isMock, load, stop, scores, names } = useBracketData();
 
 const tournamentTitle = computed(() =>
   params.tournamentId
-    ? t("scenes.bracket.title")
-    : t("scenes.bracket.mockHint"),
+    ? bi("scenes.bracket.title")
+    : bi("scenes.bracket.mockHint"),
 );
 
 function nameOf(id: string | null): string {
-  if (!id) return t("scenes.bracket.tbd");
+  if (!id) return bi("scenes.bracket.tbd");
   return names.value.get(id) ?? id.slice(0, 8);
 }
 
@@ -53,7 +54,7 @@ onUnmounted(stop);
             :scores="scores"
             :name-of="nameOf"
           />
-          <div v-else class="loading">{{ t("scenes.bracket.title") }}</div>
+          <div v-else class="loading">{{ tournamentTitle }}</div>
         </div>
       </div>
 

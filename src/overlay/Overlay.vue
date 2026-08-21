@@ -7,13 +7,12 @@
  * 本版为基础渲染，ban/pick 面板与转场动画由 GSAP 任务补齐。
  */
 import { computed, onMounted, onUnmounted } from "vue";
-import { useI18n } from "vue-i18n";
 import { useDirectorStore } from "@/stores/director";
 import { MatchPhase, PlayerStatus } from "@/api/types";
-import { phaseInfo, verdictInfo } from "@/utils/format";
+import { phaseLabelKey, verdictLabelKey } from "@/utils/format";
+import { bi } from "@/utils/bilingual";
 import { useSceneContext } from "@/scenes/composables/useSceneContext";
 
-const { t } = useI18n();
 const director = useDirectorStore();
 const { params, hosted } = useSceneContext();
 const token = params.token;
@@ -23,7 +22,7 @@ const matchId = params.matchId || undefined;
 const A = "#3d8bff";
 const B = "#ff6b4a";
 
-const phaseLabel = computed(() => phaseInfo(director.phase).label);
+const phaseLabel = computed(() => bi(phaseLabelKey(director.phase)));
 const showCountdown = computed(
   () =>
     director.phase === MatchPhase.COUNTDOWN &&
@@ -41,13 +40,13 @@ const matchOver = computed(
 );
 const verdictText = computed(() => {
   const v = director.lastResult?.verdict;
-  return v != null ? verdictInfo(v).label : "";
+  return v != null ? bi(verdictLabelKey(v)) : "";
 });
 
 function statusText(side: "A" | "B"): string {
   const s = director.playerOf(side).status;
-  if (s === PlayerStatus.COMPLETED) return t("playerStatus.completedShort");
-  if (s === PlayerStatus.FORFEITED) return t("playerStatus.forfeitShort");
+  if (s === PlayerStatus.COMPLETED) return bi("playerStatus.completedShort");
+  if (s === PlayerStatus.FORFEITED) return bi("playerStatus.forfeitShort");
   return "";
 }
 function isCompleted(side: "A" | "B"): boolean {
@@ -57,8 +56,8 @@ function progressText(side: "A" | "B"): string {
   if (!director.currentRound) return "";
   const p = director.playerOf(side);
   return director.isMulti
-    ? t("directorView.progLevel", { idx: p.currentLevelIndex })
-    : t("directorView.progAttempt", { count: p.attempts.length });
+    ? bi("directorView.progLevel", { idx: p.currentLevelIndex })
+    : bi("directorView.progAttempt", { count: p.attempts.length });
 }
 
 onMounted(() => {
@@ -77,7 +76,7 @@ onUnmounted(() => {
   <div v-else class="overlay">
     <!-- 顶部：比赛名 + 阶段 -->
     <div class="top-bar">
-      <span class="match-name">{{ director.matchName || $t('brand.overlayFallback') }}</span>
+      <span class="match-name">{{ director.matchName || bi('brand.overlayFallback') }}</span>
       <span v-if="director.boFormat" class="bo">BO{{ director.boFormat }}</span>
       <span class="phase">{{ phaseLabel }}</span>
     </div>
@@ -97,7 +96,7 @@ onUnmounted(() => {
         <div class="pick-name">{{ director.currentRound.pick.name }}</div>
       </div>
       <div v-if="matchOver && director.matchWinner" class="match-winner">
-        {{ $t('overlay.matchWinner', { winner: director.matchWinner }) }}
+        🏆 {{ bi('overlay.matchWinner', { winner: director.matchWinner }) }}
       </div>
       <div v-if="verdictText" class="verdict-flash">{{ verdictText }}</div>
     </div>

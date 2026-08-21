@@ -520,11 +520,11 @@ const messages: MessageSchema = {
 
   // ── overlay ──────────────────────────────────────────────────────────
   "overlay.noToken": "Missing token. Copy the \"merged stage\" link in the director console and paste the full URL into the OBS browser source.",
-  "overlay.matchWinner": "🏆 Player {winner} wins",
+  "overlay.matchWinner": "Player {winner} wins",
 
   // ── Coming Soon scene ──────────────────────────────────────────────
   "soon.noMatch": "Twilight Cup",
-  "soon.comingSoon": "Coming Soon...",
+  "soon.comingSoon": "Coming Soon",
   "soon.finished": "Starting Soon",
 
   // ── admin layout ─────────────────────────────────────────────────────

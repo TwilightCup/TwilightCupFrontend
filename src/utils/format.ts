@@ -38,26 +38,42 @@ export function seatLabel(seat: "A" | "B"): string {
   return seat === "A" ? t("seat.a") : t("seat.b");
 }
 
-/** 阶段标签 + 主题色 */
-export function phaseInfo(phase: MatchPhase): { label: string; type: TagType } {
+/** 比赛阶段 → i18n 键（直播画面经 bilingual.ts 双语展示用同一映射） */
+export function phaseLabelKey(phase: MatchPhase): string {
   switch (phase) {
     case MatchPhase.IDLE:
-      return { label: t("phase.idle"), type: "info" };
+      return "phase.idle";
     case MatchPhase.PREP:
-      return { label: t("phase.prep"), type: "warning" };
+      return "phase.prep";
     case MatchPhase.COUNTDOWN:
-      return { label: t("phase.countdown"), type: "danger" };
+      return "phase.countdown";
     case MatchPhase.IN_ROUND:
-      return { label: t("phase.inRound"), type: "primary" };
+      return "phase.inRound";
     case MatchPhase.ROUND_JUDGING:
-      return { label: t("phase.judging"), type: "danger" };
+      return "phase.judging";
     case MatchPhase.ROUND_END:
-      return { label: t("phase.roundEnd"), type: "success" };
+      return "phase.roundEnd";
     case MatchPhase.MATCH_END:
-      return { label: t("phase.matchEnd"), type: "success" };
+      return "phase.matchEnd";
     default:
-      return { label: t("common.unknown"), type: "info" };
+      return "common.unknown";
   }
+}
+
+/** 阶段标签 + 主题色 */
+export function phaseInfo(phase: MatchPhase): { label: string; type: TagType } {
+  const key = phaseLabelKey(phase);
+  const type: TagType =
+    phase === MatchPhase.COUNTDOWN || phase === MatchPhase.ROUND_JUDGING
+      ? "danger"
+      : phase === MatchPhase.PREP
+        ? "warning"
+        : phase === MatchPhase.IN_ROUND
+          ? "primary"
+          : phase === MatchPhase.ROUND_END || phase === MatchPhase.MATCH_END
+            ? "success"
+            : "info";
+  return { label: t(key), type };
 }
 
 /** 选手状态 */
@@ -74,26 +90,39 @@ export function playerStatusInfo(status: number): { label: string; type: TagType
   }
 }
 
+/** 回合判定 → i18n 键 */
+export function verdictLabelKey(v: RoundVerdict): string {
+  switch (v) {
+    case RoundVerdict.A_WIN:
+      return "verdict.aWin";
+    case RoundVerdict.B_WIN:
+      return "verdict.bWin";
+    case RoundVerdict.TIE_REMATCH:
+      return "verdict.tieRematch";
+    case RoundVerdict.A_DISCONNECT_LOSS:
+      return "verdict.aDisconnectLoss";
+    case RoundVerdict.B_DISCONNECT_LOSS:
+      return "verdict.bDisconnectLoss";
+    default:
+      return "common.unknown";
+  }
+}
+
 /** 判定标签 + 是否该方获胜 */
 export function verdictInfo(v: RoundVerdict): {
   label: string;
   type: TagType;
   winner: "A" | "B" | "none";
 } {
-  switch (v) {
-    case RoundVerdict.A_WIN:
-      return { label: t("verdict.aWin"), type: "primary", winner: "A" };
-    case RoundVerdict.B_WIN:
-      return { label: t("verdict.bWin"), type: "danger", winner: "B" };
-    case RoundVerdict.TIE_REMATCH:
-      return { label: t("verdict.tieRematch"), type: "warning", winner: "none" };
-    case RoundVerdict.A_DISCONNECT_LOSS:
-      return { label: t("verdict.aDisconnectLoss"), type: "info", winner: "B" };
-    case RoundVerdict.B_DISCONNECT_LOSS:
-      return { label: t("verdict.bDisconnectLoss"), type: "info", winner: "A" };
-    default:
-      return { label: t("common.unknown"), type: "info", winner: "none" };
-  }
+  const winner =
+    v === RoundVerdict.A_WIN || v === RoundVerdict.B_DISCONNECT_LOSS
+      ? "A"
+      : v === RoundVerdict.B_WIN || v === RoundVerdict.A_DISCONNECT_LOSS
+        ? "B"
+        : "none";
+  const type: TagType =
+    winner === "A" ? "primary" : winner === "B" ? "danger" : v === RoundVerdict.TIE_REMATCH ? "warning" : "info";
+  return { label: t(verdictLabelKey(v)), type, winner };
 }
 
 export function pickTypeLabel(pk: PickType | number): string {
@@ -192,22 +221,35 @@ export function accountTypeInfo(
   }
 }
 
+/** 比赛状态 → i18n 键 */
+export function matchStatusLabelKey(status: MatchStatus | number): string {
+  switch (status) {
+    case MatchStatus.CREATED:
+      return "matchStatus.created";
+    case MatchStatus.RUNNING:
+      return "matchStatus.running";
+    case MatchStatus.PAUSED:
+      return "matchStatus.paused";
+    case MatchStatus.ENDED:
+      return "matchStatus.ended";
+    default:
+      return "common.unknown";
+  }
+}
+
 /** 比赛状态标签 + 标签色 */
 export function matchStatusInfo(
   status: MatchStatus | number,
 ): { label: string; type: TagType } {
-  switch (status) {
-    case MatchStatus.CREATED:
-      return { label: t("matchStatus.created"), type: "info" };
-    case MatchStatus.RUNNING:
-      return { label: t("matchStatus.running"), type: "warning" };
-    case MatchStatus.PAUSED:
-      return { label: t("matchStatus.paused"), type: "danger" };
-    case MatchStatus.ENDED:
-      return { label: t("matchStatus.ended"), type: "success" };
-    default:
-      return { label: t("common.unknown"), type: "info" };
-  }
+  const type: TagType =
+    status === MatchStatus.RUNNING
+      ? "warning"
+      : status === MatchStatus.PAUSED
+        ? "danger"
+        : status === MatchStatus.ENDED
+          ? "success"
+          : "info";
+  return { label: t(matchStatusLabelKey(status)), type };
 }
 
 /** 图池类别（ML/IL/CP/CT/EX/TB）全称 + 主题色（大小写不敏感，未知→null）。 */
@@ -250,24 +292,37 @@ export function ctTagLabel(tag: string): string {
   return known.includes(tag) ? t(key) : tag;
 }
 
+/** 赛事状态 → i18n 键 */
+export function tournamentStatusLabelKey(status: TournamentStatus | number): string {
+  switch (status) {
+    case TournamentStatus.DRAFT:
+      return "tournamentStatus.draft";
+    case TournamentStatus.READY:
+      return "tournamentStatus.ready";
+    case TournamentStatus.IN_PROGRESS:
+      return "tournamentStatus.inProgress";
+    case TournamentStatus.COMPLETED:
+      return "tournamentStatus.completed";
+    case TournamentStatus.CANCELLED:
+      return "tournamentStatus.cancelled";
+    default:
+      return "common.unknown";
+  }
+}
+
 /** 赛事状态标签 + 标签色 */
 export function tournamentStatusInfo(
   status: TournamentStatus | number,
 ): { label: string; type: TagType } {
-  switch (status) {
-    case TournamentStatus.DRAFT:
-      return { label: t("tournamentStatus.draft"), type: "info" };
-    case TournamentStatus.READY:
-      return { label: t("tournamentStatus.ready"), type: "info" };
-    case TournamentStatus.IN_PROGRESS:
-      return { label: t("tournamentStatus.inProgress"), type: "warning" };
-    case TournamentStatus.COMPLETED:
-      return { label: t("tournamentStatus.completed"), type: "success" };
-    case TournamentStatus.CANCELLED:
-      return { label: t("tournamentStatus.cancelled"), type: "danger" };
-    default:
-      return { label: t("common.unknown"), type: "info" };
-  }
+  const type: TagType =
+    status === TournamentStatus.IN_PROGRESS
+      ? "warning"
+      : status === TournamentStatus.COMPLETED
+        ? "success"
+        : status === TournamentStatus.CANCELLED
+          ? "danger"
+          : "info";
+  return { label: t(tournamentStatusLabelKey(status)), type };
 }
 
 /** 赛制标签 */
