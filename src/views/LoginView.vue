@@ -4,24 +4,25 @@ import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import { useI18n } from "vue-i18n";
 import { useAuthStore } from "@/stores/auth";
-import { AccountType } from "@/api/types";
+import type { LoginEndpoint } from "@/api/types";
 
 const { t } = useI18n();
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
 
-/** 可指定进入的端；value 为空串表示自动（按角色优先级落默认端） */
-const ENDPOINTS = [
-  { value: "/admin/matches", role: AccountType.ADMIN, labelKey: "role.admin" },
-  { value: "/referee", role: AccountType.REFEREE, labelKey: "role.referee" },
-  { value: "/director", role: AccountType.DIRECTOR, labelKey: "role.director" },
-  { value: "/player", role: AccountType.PLAYER, labelKey: "role.player" },
+/** 可指定进入的端；endpoint 为空串表示自动（按角色优先级落默认端）。
+ * 权限由后端登录接口校验（无该角色 → 403 ENDPOINT_FORBIDDEN 不签发令牌）。 */
+const ENDPOINTS: { value: LoginEndpoint; path: string; labelKey: string }[] = [
+  { value: "admin", path: "/admin/matches", labelKey: "role.admin" },
+  { value: "referee", path: "/referee", labelKey: "role.referee" },
+  { value: "director", path: "/director", labelKey: "role.director" },
+  { value: "player", path: "/player", labelKey: "role.player" },
 ];
 
 const username = ref("");
 const password = ref("");
-const endpoint = ref("");
+const endpoint = ref<LoginEndpoint | "">("");
 const loading = ref(false);
 
 async function onSubmit(): Promise<void> {
@@ -33,22 +34,12 @@ async function onSubmit(): Promise<void> {
   const ok = await auth.login({
     username: username.value.trim(),
     password: password.value,
+    endpoint: endpoint.value === "" ? undefined : endpoint.value,
   });
   loading.value = false;
   if (ok) {
-    let dest = auth.roleHome();
     const picked = ENDPOINTS.find((e) => e.value === endpoint.value);
-    if (picked) {
-      if (auth.hasRole(picked.role)) {
-        dest = picked.value;
-      } else {
-        // 登录成功但无该端权限：提示后仍按角色进默认端
-        ElMessage.error(
-          t("login.noPermission", { role: t(picked.labelKey) }),
-        );
-      }
-    }
-    router.replace(dest);
+    router.replace(picked ? picked.path : auth.roleHome());
   }
 }
 </script>

@@ -145,9 +145,14 @@ export type BracketSide = (typeof BracketSide)[keyof typeof BracketSide];
 // 领域模型（REST 返回结构）
 // ---------------------------------------------------------------------------
 
+/** 登录端标识（admin/referee/director/player），后端据此校验角色 */
+export type LoginEndpoint = "admin" | "referee" | "director" | "player";
+
 export interface LoginRequest {
   username: string;
   password: string;
+  /** 可选登录端：无对应角色则后端 403 ENDPOINT_FORBIDDEN 且不签发令牌 */
+  endpoint?: LoginEndpoint | null;
 }
 
 export interface TokenResponse {

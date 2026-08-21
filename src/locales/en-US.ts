@@ -159,7 +159,7 @@ const messages: MessageSchema = {
   "login.requireBoth": "Please enter username and password",
   "login.endpoint": "Endpoint",
   "login.endpointAuto": "Auto (by role)",
-  "login.noPermission": "This account has no access to the {role} endpoint — entering the default one by role",
+  "login.noPermission": "This account has no {role} access — sign-in denied",
   "login.failed": "Login failed — check the network or backend address",
   "login.expired": "Your session has expired — please log in again",
   "login.hint": "After login you enter the endpoint for your role (admin / referee / director / player). One account may hold multiple roles and you can switch between them in the top bar. The backend address can be set via {urlKey} in {env}; in development the Vite same-origin proxy is used by default.",

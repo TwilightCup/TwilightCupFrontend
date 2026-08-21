@@ -37,11 +37,15 @@ import type {
 } from "./types";
 
 export class ApiError extends Error {
+  /** HTTP 状态码 */
   code: number;
-  constructor(code: number, message: string) {
+  /** 后端错误体的稳定字符串码（如登录的 ENDPOINT_FORBIDDEN），供按码分支/i18n；无则 undefined */
+  errorCode?: string;
+  constructor(code: number, message: string, errorCode?: string) {
     super(message);
     this.name = "ApiError";
     this.code = code;
+    this.errorCode = errorCode;
   }
 }
 
@@ -78,6 +82,15 @@ function extractMsg(data: unknown, status: number, fallback: string): string {
   return fallback || `HTTP ${status}`;
 }
 
+/** 取错误体的稳定字符串码（CodedHTTPException 输出 {"msg", "code"}）；缺失返回 undefined */
+function extractErrorCode(data: unknown): string | undefined {
+  if (data && typeof data === "object") {
+    const c = (data as Record<string, unknown>).code;
+    if (typeof c === "string" && c.length > 0) return c;
+  }
+  return undefined;
+}
+
 async function request<T>(
   path: string,
   options: RequestInit & { token?: string } = {},
@@ -104,7 +117,11 @@ async function request<T>(
     // 带令牌的请求被 401 拒绝 = 会话已死（过期/吊销）→ 统一登出跳登录；
     // 登录接口本身不带令牌（口令错误也是 401），不受影响
     if (res.status === 401 && token) notifySessionExpired();
-    throw new ApiError(res.status, extractMsg(data, res.status, `HTTP ${res.status}`));
+    throw new ApiError(
+      res.status,
+      extractMsg(data, res.status, `HTTP ${res.status}`),
+      extractErrorCode(data),
+    );
   }
   return data as T;
 }
