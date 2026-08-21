@@ -4,14 +4,24 @@ import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import { useI18n } from "vue-i18n";
 import { useAuthStore } from "@/stores/auth";
+import { AccountType } from "@/api/types";
 
 const { t } = useI18n();
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
 
+/** 可指定进入的端；value 为空串表示自动（按角色优先级落默认端） */
+const ENDPOINTS = [
+  { value: "/admin/matches", role: AccountType.ADMIN, labelKey: "role.admin" },
+  { value: "/referee", role: AccountType.REFEREE, labelKey: "role.referee" },
+  { value: "/director", role: AccountType.DIRECTOR, labelKey: "role.director" },
+  { value: "/player", role: AccountType.PLAYER, labelKey: "role.player" },
+];
+
 const username = ref("");
 const password = ref("");
+const endpoint = ref("");
 const loading = ref(false);
 
 async function onSubmit(): Promise<void> {
@@ -26,7 +36,19 @@ async function onSubmit(): Promise<void> {
   });
   loading.value = false;
   if (ok) {
-    router.replace(auth.roleHome());
+    let dest = auth.roleHome();
+    const picked = ENDPOINTS.find((e) => e.value === endpoint.value);
+    if (picked) {
+      if (auth.hasRole(picked.role)) {
+        dest = picked.value;
+      } else {
+        // 登录成功但无该端权限：提示后仍按角色进默认端
+        ElMessage.error(
+          t("login.noPermission", { role: t(picked.labelKey) }),
+        );
+      }
+    }
+    router.replace(dest);
   }
 }
 </script>
@@ -76,6 +98,17 @@ async function onSubmit(): Promise<void> {
             show-password
             @keyup.enter="onSubmit"
           />
+        </el-form-item>
+        <el-form-item :label="$t('login.endpoint')">
+          <el-select v-model="endpoint" style="width: 100%">
+            <el-option :label="$t('login.endpointAuto')" value="" />
+            <el-option
+              v-for="e in ENDPOINTS"
+              :key="e.value"
+              :label="$t(e.labelKey)"
+              :value="e.value"
+            />
+          </el-select>
         </el-form-item>
         <el-button
           type="primary"
