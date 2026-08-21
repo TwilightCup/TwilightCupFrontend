@@ -11,7 +11,7 @@
  * 数据：onMounted 连 WS（director.connect），WS 断 / 无 match → mock 兜底（绝不黑屏）。
  * 导播配置（RTMP/HLS/PB/历史）走 useDirectorConfig（localStorage），?edit=1 唤出面板。
  */
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useDirectorStore } from "@/stores/director";
 import { PlayerStatus, type LevelTime } from "@/api/types";
@@ -66,6 +66,15 @@ const isMock = computed(() => !liveReady.value);
 function onSaved(patch: Parameters<typeof save>[1]): void {
   save(params.matchId, patch);
 }
+
+// 控制台 config_update 广播（WS）：实时并入本场景配置并落库
+// （store 已先落库一份，此处合并幂等；未挂载时由 store 的落库兜底）
+watch(
+  () => director.remoteConfig,
+  (c) => {
+    if (c) save(params.matchId, c);
+  },
+);
 
 onMounted(() => {
   load(params.matchId, params);

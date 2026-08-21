@@ -108,7 +108,13 @@ export interface ClientDraftSync {
 export interface ClientDirectorCommand {
   type: "director_command";
   /** 指令类别 */
-  action: "switch_scene" | "soon_start" | "soon_pause" | "soon_reset" | "soon_set_target";
+  action:
+    | "switch_scene"
+    | "soon_start"
+    | "soon_pause"
+    | "soon_reset"
+    | "soon_set_target"
+    | "config_update";
   /** 指令载荷（按 action 不同含义） */
   payload: Record<string, unknown>;
   // switch_scene:   { scene: "soon" }
@@ -116,6 +122,8 @@ export interface ClientDirectorCommand {
   // soon_pause:     {}
   // soon_reset:     {}
   // soon_set_target: { target_ms: 300000 }
+  // config_update:  { config: { rtmpA, rtmpB, hlsA, hlsB, pbA, pbB, histA, histB } }
+  //                 （直播配置实时下发，八键可部分缺失；服务端原样透传）
 }
 
 export type ClientMessage =

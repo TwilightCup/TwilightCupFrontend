@@ -106,8 +106,21 @@ watch(
 function saveConfig(): void {
   if (!director.matchId) return;
   saveCfg(director.matchId, { ...cfgForm });
+  // WS 广播 config_update：已打开的舞台（可能另一浏览器/机器）实时并入；
+  // 后端只发给同账号其他导播连接（排除本发送方），无回环
+  director.sendDirectorCommand("config_update", { config: { ...cfgForm } });
   ElMessage.success(t("directorView.cfgSaved"));
 }
+
+// 其他控制台（同账号另一浏览器）保存的配置广播过来：并入本地面板与舞台链接
+watch(
+  () => director.remoteConfig,
+  (c) => {
+    if (!c || !director.matchId) return;
+    saveCfg(director.matchId, c);
+    Object.assign(cfgForm, c);
+  },
+);
 
 /** 合并舞台：单 OBS 源承载全部场景（叠加信息 / 比赛详情 / 图池 / 赛程图）。
  *  链接附带已保存的导播配置（rtmp/hls/pb/hist 参数）——舞台可能在另一浏览器/

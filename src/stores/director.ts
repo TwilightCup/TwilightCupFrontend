@@ -30,6 +30,10 @@ import type { ServerMessage } from "@/ws/protocol";
 import { send } from "@/ws/protocol";
 import { ConnStatus, MatchSocket } from "@/ws/socket";
 import { useAuthStore } from "./auth";
+import {
+  mergeStoredConfig,
+  type DirectorConfig,
+} from "@/scenes/composables/useDirectorConfig";
 import { t as tr } from "@/locales";
 
 export interface PlayerLive {
@@ -232,6 +236,13 @@ export const useDirectorStore = defineStore("director", () => {
           if (s.startedAt !== null && s.pausedAt === null) s.pausedAt = Date.now();
         } else if (msg.action === "soon_reset") {
           soonCmdState.value = { targetMs: soonCmdState.value.targetMs, startedAt: null, pausedAt: null };
+        } else if (msg.action === "config_update" && msg.payload?.config) {
+          // 直播配置实时下发（控制台保存 → 舞台/其他控制台，后端排除发送者）：
+          // 落库（舞台此刻可能不在比赛场景，挂载后 load 才能读到）+ 更新 ref
+          // 供已挂载的 MatchScene / 控制台面板实时并入。
+          const patch = msg.payload.config as Partial<DirectorConfig>;
+          remoteConfig.value = patch;
+          if (matchId.value) mergeStoredConfig(matchId.value, patch);
         }
         break;
       default:
@@ -298,16 +309,24 @@ export const useDirectorStore = defineStore("director", () => {
     startedAt: null,
     pausedAt: null,
   });
+  /** 最近一次 config_update 广播的配置（已同步落库；ref 供已挂载场景响应） */
+  const remoteConfig = ref<Partial<DirectorConfig> | null>(null);
 
   /**
    * 发送导演指令到后端，后端广播给同账号其他导播连接（OBS 舞台）。
    * 同时更新本地状态（控制台自身也是 director 连接，但后端广播 exclude sender）。
    */
   function sendDirectorCommand(
-    action: "switch_scene" | "soon_start" | "soon_pause" | "soon_reset" | "soon_set_target",
+    action:
+      | "switch_scene"
+      | "soon_start"
+      | "soon_pause"
+      | "soon_reset"
+      | "soon_set_target"
+      | "config_update",
     payload?: Record<string, unknown>,
   ): boolean {
-    // 同步本地状态
+    // 同步本地状态（config_update 无需：发送方本地已保存，后端广播排除发送者）
     if (action === "switch_scene") {
       currentSceneCmd.value = (payload?.scene as string) ?? null;
     } else if (action === "soon_set_target" && payload?.target_ms) {
@@ -399,6 +418,7 @@ export const useDirectorStore = defineStore("director", () => {
     // 导演指令（WS 广播 → 舞台）
     currentSceneCmd,
     soonCmdState,
+    remoteConfig,
     sendDirectorCommand,
     connect,
     connectWithAuth,

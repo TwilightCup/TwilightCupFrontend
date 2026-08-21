@@ -59,6 +59,20 @@ function write(matchId: string, cfg: DirectorConfig): void {
 }
 
 /**
+ * 合并写入某场比赛的配置（非组件上下文用）：WS 收到 config_update 广播时由
+ * director store 调——舞台此刻可能不在比赛场景（MatchScene 未挂载读不到），
+ * 先落库，之后任意场景挂载 load() 都能读到最新值。
+ */
+export function mergeStoredConfig(
+  matchId: string,
+  patch: Partial<DirectorConfig>,
+): DirectorConfig {
+  const merged = { ...read(matchId), ...patch };
+  write(matchId, merged);
+  return merged;
+}
+
+/**
  * 导播配置：响应式 config + load/save。
  * load 会合并「URL 覆盖 > localStorage > 空」，并把非空 URL 值落库。
  */
