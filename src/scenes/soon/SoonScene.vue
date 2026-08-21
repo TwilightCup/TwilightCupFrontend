@@ -3,8 +3,8 @@
  * Coming Soon / 倒计时背景场景。
  *
  * 合成器浪潮背景之上：
- *   上部：品牌 logo + 赛事名 + 赛事状态（真实赛事取自 /me/tournaments；
- *         孤立比赛回退比赛名/比赛状态，均双语）
+ *   上部：品牌 logo + 赛事名 + 赛事状态（含默认赛事容器，取自
+ *         GET /me/tournaments/{id}；拉取失败回退比赛名/比赛状态，均双语）
  *   屏幕正中央（绝对居中）："即将开始 / Coming Soon" 双语或倒计时数字，
  *   倒计时结束显示"马上开始 / Starting Soon"（由导播控制台经 WS 广播操控）
  *
@@ -14,7 +14,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useDirectorStore } from "@/stores/director";
 import { api } from "@/api/client";
-import { DEFAULT_TOURNAMENT_ID, type TournamentOut } from "@/api/types";
+import type { TournamentOut } from "@/api/types";
 import {
   matchStatusLabelKey,
   phaseLabelKey,
@@ -30,8 +30,8 @@ const { params, sharedBg } = useSceneContext();
 const DEFAULT_LOGO = "/logo.png";
 
 // ---- 赛事信息（logo 下：赛事名 + 赛事状态）----
-// 真实赛事从 /me/tournaments 取名字与状态；默认容器（孤立比赛）名字无意义，
-// 回退当前比赛名 + 比赛状态；再兜底品牌名。
+// 一律显示赛事名 + 赛事状态：真实赛事与默认赛事（孤立比赛容器）都经
+// GET /me/tournaments/{id} 读取；拉取失败才回退当前比赛名/比赛状态，再兜底品牌名。
 const tournament = ref<TournamentOut | null>(null);
 
 const eventName = computed(
@@ -89,7 +89,15 @@ const statusTag = computed(() => {
 /** 赛事元数据只拉一次（挂载时）；场景切换重挂会重拉，端点轻量可接受 */
 async function loadTournament(): Promise<void> {
   const tid = params.tournamentId;
-  if (!params.token || !tid || tid === DEFAULT_TOURNAMENT_ID) return;
+  if (!params.token || !tid) return;
+  // 单赛事端点：默认赛事（孤立比赛容器）不在 /me/tournaments 列表里，
+  // 但比赛参与者可经它读到赛事名/状态。
+  try {
+    tournament.value = await api.getMyTournament(tid, params.token);
+    return;
+  } catch {
+    // 端点不可用（旧后端）/ 无权限 → 再试列表端点兜底
+  }
   try {
     const list = await api.listMyTournaments(params.token);
     tournament.value = list.find((x: TournamentOut) => x.id === tid) ?? null;

@@ -348,6 +348,17 @@ export const api = {
     return request<TournamentOut[]>("/me/tournaments", { method: "GET", token });
   },
 
+  /**
+   * 赛事详情（赛事成员可读）。与列表端点不同，默认赛事（孤立比赛容器）
+   * 不在 /me/tournaments 列表里，但参与过其名下比赛的账号可经本端点读取。
+   */
+  getMyTournament(tournamentId: string, token: string): Promise<TournamentOut> {
+    return request<TournamentOut>(
+      `/me/tournaments/${encodeURIComponent(tournamentId)}`,
+      { method: "GET", token },
+    );
+  },
+
   /** 赛事对阵树（赛事成员可读；含已结束对阵的 score_a/score_b） */
   getMyBracket(tournamentId: string, token: string): Promise<BracketView> {
     return request<BracketView>(

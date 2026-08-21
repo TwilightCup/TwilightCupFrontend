@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import { useI18n } from "vue-i18n";
@@ -15,6 +15,10 @@ import {
   setCurrentScene,
   type SceneKey,
 } from "@/scenes/stage/useStageScene";
+import {
+  useDirectorConfig,
+  type DirectorConfig,
+} from "@/scenes/composables/useDirectorConfig";
 
 const { t } = useI18n();
 const auth = useAuthStore();
@@ -66,8 +70,67 @@ async function copyUrl(url: string): Promise<void> {
   }
 }
 
-/** 合并舞台：单 OBS 源承载全部场景（叠加信息 / 比赛详情 / 图池 / 赛程图） */
-const stageUrl = computed(() => director.stageUrl);
+// ---- 导播配置（RTMP/HLS/PB/历史）：控制台集中编辑，保存后写入舞台链接 ----
+const { config: cfgConfig, load: loadCfg, save: saveCfg } = useDirectorConfig();
+/** 表单本地副本：编辑中不落库，点保存才写 localStorage + 更新舞台链接 */
+const cfgForm = reactive<DirectorConfig>({
+  rtmpA: "",
+  rtmpB: "",
+  hlsA: "",
+  hlsB: "",
+  pbA: "",
+  pbB: "",
+  histA: "",
+  histB: "",
+});
+const cfgFields: { key: keyof DirectorConfig; label: string; area: boolean }[] = [
+  { key: "rtmpA", label: "scenes.edit.rtmpA", area: false },
+  { key: "rtmpB", label: "scenes.edit.rtmpB", area: false },
+  { key: "hlsA", label: "scenes.edit.hlsA", area: false },
+  { key: "hlsB", label: "scenes.edit.hlsB", area: false },
+  { key: "pbA", label: "scenes.edit.pbA", area: false },
+  { key: "pbB", label: "scenes.edit.pbB", area: false },
+  { key: "histA", label: "scenes.edit.histA", area: true },
+  { key: "histB", label: "scenes.edit.histB", area: true },
+];
+// matchId 在 auth_ok 后才有；连接建立即载入该场已存配置
+watch(
+  () => director.matchId,
+  (id) => {
+    if (!id) return;
+    loadCfg(id, {});
+    Object.assign(cfgForm, cfgConfig);
+  },
+  { immediate: true },
+);
+function saveConfig(): void {
+  if (!director.matchId) return;
+  saveCfg(director.matchId, { ...cfgForm });
+  ElMessage.success(t("directorView.cfgSaved"));
+}
+
+/** 合并舞台：单 OBS 源承载全部场景（叠加信息 / 比赛详情 / 图池 / 赛程图）。
+ *  链接附带已保存的导播配置（rtmp/hls/pb/hist 参数）——舞台可能在另一浏览器/
+ *  机器（localStorage 不通），配置只能经 URL 下发；舞台加载时会采用并落本地。 */
+const CFG_URL_KEYS: Record<keyof DirectorConfig, string> = {
+  rtmpA: "rtmp_a",
+  rtmpB: "rtmp_b",
+  hlsA: "hls_a",
+  hlsB: "hls_b",
+  pbA: "pb_a",
+  pbB: "pb_b",
+  histA: "hist_a",
+  histB: "hist_b",
+};
+const stageUrl = computed(() => {
+  const base = director.stageUrl;
+  if (!base) return "";
+  const qs = (Object.keys(CFG_URL_KEYS) as (keyof DirectorConfig)[])
+    .filter((k) => cfgConfig[k])
+    .map((k) => `${CFG_URL_KEYS[k]}=${encodeURIComponent(cfgConfig[k])}`)
+    .join("&");
+  return qs ? `${base}&${qs}` : base;
+});
 
 // ---- 场景切换（写 localStorage → 合并舞台跨标签监听切换）----
 const sceneBtnLabels: Record<SceneKey, string> = {
@@ -318,6 +381,39 @@ onUnmounted(() => {
           </div>
         </div>
 
+        <!-- 导播配置：RTMP/HLS/PB/历史，保存后写入舞台链接（跨浏览器随链接下发） -->
+        <div class="card">
+          <div class="card-title">{{ $t("directorView.cfgTitle") }}</div>
+          <p class="hint">{{ $t("directorView.cfgHint") }}</p>
+          <div class="cfg-grid">
+            <label v-for="f in cfgFields" :key="f.key" class="cfg-field">
+              <span class="lbl">{{ $t(f.label) }}</span>
+              <el-input
+                v-if="!f.area"
+                v-model="cfgForm[f.key]"
+                size="small"
+                :placeholder="f.key.startsWith('rtmp') ? 'rtmp://...' : f.key.startsWith('hls') ? 'https://.../a.m3u8' : ''"
+              />
+              <el-input
+                v-else
+                v-model="cfgForm[f.key]"
+                type="textarea"
+                :rows="2"
+              />
+            </label>
+          </div>
+          <div class="cfg-foot">
+            <el-button
+              size="small"
+              type="primary"
+              :disabled="!director.matchId"
+              @click="saveConfig()"
+            >
+              {{ $t("common.save") }}
+            </el-button>
+          </div>
+        </div>
+
         <!-- 直播画面链接：合并舞台单源（全部场景在其中渲染 + 控制台切场景） -->
         <div class="card">
           <div class="card-title">{{ $t("directorView.sceneTitle") }}</div>
@@ -552,6 +648,26 @@ onUnmounted(() => {
   display: flex;
   gap: 8px;
   margin-top: 4px;
+}
+.cfg-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+}
+.cfg-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.cfg-field .lbl {
+  font-size: 11px;
+  color: var(--tc-text-dim);
+}
+.cfg-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
 }
 .warn {
   margin: 8px 0 0;
