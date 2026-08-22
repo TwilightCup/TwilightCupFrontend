@@ -37,8 +37,8 @@ export const MOCK_MAPPOOL: Mappool = {
     {
       name: CategoryKind.CT,
       picks: [
-        mkPick("CT-01", "词条·Pinch", PickType.SINGLE, CategoryKind.CT, "Pinch"),
-        mkPick("CT-02", "词条·Glitchless", PickType.SINGLE, CategoryKind.CT, "Glitchless"),
+        mkPick("CT-01", "词条·Pinch", PickType.SINGLE, CategoryKind.CT, "Pinch", 8),
+        mkPick("CT-02", "词条·Glitchless", PickType.SINGLE, CategoryKind.CT, "Glitchless", 12),
       ],
     },
     {
@@ -58,6 +58,7 @@ function mkPick(
   type: PickType,
   category: string,
   tag: string | null = null,
+  retryCount: number | null = null,
 ) {
   return {
     code,
@@ -66,5 +67,6 @@ function mkPick(
     collection: { raw: {} },
     category,
     tag,
+    retry_count: retryCount,
   };
 }
