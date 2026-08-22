@@ -272,6 +272,8 @@ export interface SrvSystem {
   type: "system";
   text: string;
   kind: string;
+  /** 展示前缀：全场广播恒为 "Twilight"（定向 error 回执无此字段，沿用 System） */
+  sender?: "Twilight" | "System";
   ts: string;
 }
 export interface SrvReadyState {

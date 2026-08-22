@@ -343,7 +343,7 @@ export const useMatchStore = defineStore("match", () => {
         pushChat({
           id: `live-${liveSeq++}`,
           kind: "system",
-          senderName: "System",
+          senderName: msg.sender ?? "Twilight",
           text: msg.text,
           ts: msg.ts,
           systemKind: msg.kind,
@@ -500,7 +500,7 @@ export const useMatchStore = defineStore("match", () => {
     return {
       id: m.id,
       kind: m.is_system ? "system" : "user",
-      senderName: m.is_system ? "System" : m.sender_name,
+      senderName: m.sender_name, // 系统消息为 "Twilight"（旧记录可能是 "System"，按存储值展示）
       text: m.text,
       ts: m.ts,
       systemKind: m.is_system ? "info" : undefined,
