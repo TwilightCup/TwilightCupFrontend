@@ -55,11 +55,12 @@ const valueLeft = computed(
 
 <template>
   <div class="diff">
+    <!-- track overflow:hidden 掩盖游标辉光超出条体的部分 -->
     <div class="track">
       <div class="fill a" :style="{ width: `calc(50% + ${offsetPct}%)` }" />
       <div class="fill b" :style="{ width: `calc(50% - ${offsetPct}%)` }" />
+      <div class="cursor" :style="{ left: `calc(50% + ${offsetPct}%)` }" />
     </div>
-    <div class="cursor" :style="{ left: `calc(50% + ${offsetPct}%)` }" />
     <div ref="valueEl" class="value" :style="{ left: valueLeft }">{{ diffText }}</div>
   </div>
 </template>
@@ -73,6 +74,7 @@ const valueLeft = computed(
   position: relative;
   height: 1.2vh;
   min-height: 10px;
+  overflow: hidden; /* 游标辉光限制在条体内 */
   background: rgba(8, 0, 20, 0.7);
   box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.5);
 }
@@ -91,7 +93,7 @@ const valueLeft = computed(
   right: 0;
   background: var(--syn-b);
 }
-/* 白色游标：直角，不出条体（与条体等高） */
+/* 白色游标：直角、与条体等高；置于 track 内，辉光经 overflow:hidden 只在条内显示 */
 .cursor {
   position: absolute;
   top: 0;
