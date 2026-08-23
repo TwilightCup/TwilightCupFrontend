@@ -103,10 +103,10 @@ const valueLeft = computed(
   transition: left 0.3s linear;
   z-index: 1;
 }
-/* 偏差值：游标正下方、条体外部，随游标同步移动（水平 clamp 在画面内） */
+/* 偏差值：顶部贴紧游标底部（仅留小空隙），随游标同步移动（水平 clamp 在画面内） */
 .value {
   position: absolute;
-  top: calc(1.2vh + 0.9vh);
+  top: calc(1.2vh + 0.2vh);
   transform: translateX(-50%);
   font-size: clamp(16px, 2.6vh, 30px);
   font-weight: 800;
