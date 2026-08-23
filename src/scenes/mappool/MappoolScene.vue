@@ -14,7 +14,7 @@
  * draft_sync → 后端广播 draft_state → director.draft，经 useDraftStatus 解析）。
  * hosted（合并舞台）模式下 WS 由舞台根统一连，本组件只读 store。
  */
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 
 import { useDirectorStore, type DirectorChatLine } from "@/stores/director";
@@ -113,8 +113,47 @@ function cardPickedTags(code: string): string[] {
 }
 
 // ---- 左下角聊天区（实时 WS 流；样式对齐管理端日志的单行聊天） ----
-const CHAT_SHOW = 5;
-const chatLines = computed(() => director.chatLines.slice(-CHAT_SHOW));
+/** 渲染窗口：可见区约 5 行，多持几行供顶部同边距截断显示与上滚动效 */
+const CHAT_HOLD = 12;
+/** 合并窗：新到消息先等该窗口收集近同时到达的伙伴（如聊天命令 + 服务器
+ *  反馈），到点作为一批一次滚出；动画进行中再到的消息经 FLIP 从当前位置
+ *  平滑并入正在进行的滚动，视觉上与既有新消息一起滚出来 */
+const CHAT_COALESCE_MS = 150;
+const shownChat = ref<DirectorChatLine[]>([]);
+/** 已观察（入过队）的最大 id：每次 watcher 触发即更新——合并窗内多次触发
+ *  才不会把早前已入队的消息重复收集（重复 key 会渲染两份） */
+let lastSeenId = 0;
+let pendingChat: DirectorChatLine[] = [];
+let chatFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** 初始装载存量（appear 播整块升起进场），此后增量走批量调度 */
+shownChat.value = director.chatLines.slice(-CHAT_HOLD);
+lastSeenId = shownChat.value[shownChat.value.length - 1]?.id ?? 0;
+
+function flushPendingChat(): void {
+  chatFlushTimer = null;
+  if (!pendingChat.length) return;
+  const batch = pendingChat;
+  pendingChat = [];
+  shownChat.value.push(...batch);
+  if (shownChat.value.length > CHAT_HOLD) {
+    shownChat.value.splice(0, shownChat.value.length - CHAT_HOLD);
+  }
+}
+
+watch(
+  () => director.chatLines.length,
+  () => {
+    const fresh = director.chatLines.filter((l) => l.id > lastSeenId);
+    if (!fresh.length) return;
+    lastSeenId = fresh[fresh.length - 1]!.id;
+    pendingChat.push(...fresh);
+    // 首条到时开合并窗；窗内后续到达共用同一次 flush（整批一次滚出）
+    if (!chatFlushTimer) {
+      chatFlushTimer = setTimeout(flushPendingChat, CHAT_COALESCE_MS);
+    }
+  },
+);
 /** 名字着色类（与管理端一致：A 蓝 / B 橙 / 裁判黄 / 其余灰） */
 function senderClass(line: DirectorChatLine): string {
   if (line.kind === "system") return "sys";
@@ -208,6 +247,7 @@ onMounted(() => {
 onUnmounted(() => {
   ro?.disconnect();
   if (onWinResize) window.removeEventListener("resize", onWinResize);
+  if (chatFlushTimer) clearTimeout(chatFlushTimer);
   if (!hosted) director.disconnect();
 });
 </script>
@@ -271,19 +311,22 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- 左下角比赛聊天：固定满尺寸常显（消息不足也占满 5 行高），
-               单行样式对齐管理端日志（时间 + 着色名 + 文本） -->
+          <!-- 左下角比赛聊天：固定满尺寸常显，消息底部锚定、顶部同边距截断，
+               新消息自底部滑入并推动整块上滚（TransitionGroup FLIP；
+               appear 使切场景重挂载时存量消息也从底部升起） -->
           <aside class="chat-box">
-            <div
-              v-for="line in chatLines"
-              :key="line.id"
-              class="chat-line"
-              :class="{ sys: line.kind === 'system' }"
-            >
-              <span class="cl-time">{{ shortTime(line.ts) }}</span>
-              <span class="cl-name" :class="`cl-${senderClass(line)}`">{{ line.sender }}</span>
-              <span class="cl-text">{{ line.text }}</span>
-            </div>
+            <TransitionGroup tag="div" class="chat-lines" name="chat" appear>
+              <div
+                v-for="line in shownChat"
+                :key="line.id"
+                class="chat-line"
+                :class="{ sys: line.kind === 'system' }"
+              >
+                <span class="cl-time">{{ shortTime(line.ts) }}</span>
+                <span class="cl-name" :class="`cl-${senderClass(line)}`">{{ line.sender }}</span>
+                <span class="cl-text">{{ line.text }}</span>
+              </div>
+            </TransitionGroup>
           </aside>
         </div>
       </div>
@@ -374,20 +417,45 @@ onUnmounted(() => {
   box-sizing: border-box;
   height: calc(5 * 22px + 4 * 8px + 2 * 14px + 2 * 2px);
   padding: 14px 18px;
-  display: flex;
-  flex-direction: column;
-  /* 消息不足 5 行时整块垂直居中（满 5 行恰好填满，无可见变化） */
-  justify-content: center;
-  gap: 8px;
   border-radius: 14px;
   border: 2px solid var(--syn-border);
   /* 半透明板：背景动画隐约透出，与词条板一致 */
   background: var(--syn-panel);
   pointer-events: none;
 }
+/* 消息区：贴底锚定（不足 5 行也靠底，最早的消息同样自底部进入）；
+   溢出在顶部按同边距截断——裁剪边界即上下 14px 内边距线，与底部对齐 */
+.chat-lines {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 8px;
+  overflow: hidden;
+}
+/* 新消息自底部滑入：起始位移 = 自身行高 + 行距（先落在裁剪区外不可见） */
+.chat-enter-active {
+  transition: transform 0.35s ease-out, opacity 0.35s ease-out;
+}
+.chat-enter-from {
+  transform: translateY(calc(100% + 8px));
+  opacity: 0;
+}
+/* 既有行整体上移（FLIP move），与新消息滑入合成整块连续上滚 */
+.chat-move {
+  transition: transform 0.35s ease-out;
+}
+/* 滑出渲染窗口的旧行：瞬时移除（顶部裁剪区外，无可动画内容） */
+.chat-leave-active {
+  display: none;
+}
 .chat-line {
   display: flex;
-  align-items: baseline;
+  /* 顶部对齐：折行消息的时间 / 名字对齐第一行（居中会悬在多行文本中部）。
+     不可用 baseline——mono 时间（14px）与正文（17px）混排时行高 = 跨字号
+     最大上伸 + 最大下伸，比 22px 高约 1px，5 行累计溢出必裁顶；顶部对齐
+     各行盒严格 22px（单行时与居中显示无异），高度算式才精确成立 */
+  align-items: flex-start;
   font-size: 17px;
   /* 固定行高：与 .chat-box 高度算式配对 */
   line-height: 22px;
