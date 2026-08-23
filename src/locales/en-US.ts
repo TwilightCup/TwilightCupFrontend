@@ -631,7 +631,6 @@ const messages: MessageSchema = {
   "levelForm.displayNameDefaultPlaceholder": "Official default: {name} (leave empty to use it)",
   "levelForm.labelLogo": "Cover image",
   "levelForm.logoHint": "png/jpg/webp/gif, ≤5MB",
-  "levelForm.logoDefaultHint": "Official default artwork (not customized)",
   "levelForm.createBtn": "Create level",
 
   // ── tournament detail ────────────────────────────────────────────────
