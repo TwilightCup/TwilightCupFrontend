@@ -199,10 +199,10 @@ const overflowing = computed(
   () => totalRows.value > 0 && availForRowArea.value / totalRows.value < MIN_ROW_H,
 );
 
-/** 内容底部贴聊天盒顶沿时距画布底部的距离：聊天底距 30 + 满高 174 + 空隙 16
+/** 内容底部贴聊天盒顶沿时距画布底部的距离：聊天底距 34 + 满高 174 + 空隙 16
  *  （与 CSS .chat-box 的 bottom/height 配对）。行高预算仍按整幅画布（PAD_B=38），
  *  聊天不占行高——内容装得下才下沉贴靠，装不下自动回顶部对齐避免裁顶。 */
-const CHAT_TOP_RESERVE = 220;
+const CHAT_TOP_RESERVE = 224;
 /** 行的实际渲染高度占行预算的比例（与 MapCard --card-h / CtTagBoard .tag-board
  *  的高度算式配对）——rowH 只是布局预算，行盒真实高度是它的比例折算 */
 const CARD_H_RATIO = 0.66;
@@ -235,8 +235,48 @@ let onWinResize: (() => void) | null = null;
 const BOARD_MARGIN = 24;
 
 function updateScale(w: number, h: number): void {
+  vpW.value = w;
+  vpH.value = h;
   scale.value = Math.min((w - BOARD_MARGIN) / BOARD_W, (h - BOARD_MARGIN) / BOARD_H);
+  // 变换应用后量一次画布与聊天盒屏幕坐标（自检读数用；双 rAF 确保渲染后）
+  if (debugGeo) {
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        const snap = (
+          el: HTMLElement | null,
+        ): { l: number; t: number; r: number; b: number } | null => {
+          const r = el?.getBoundingClientRect();
+          return r
+            ? {
+                l: Math.round(r.left),
+                t: Math.round(r.top),
+                r: Math.round(r.right),
+                b: Math.round(r.bottom),
+              }
+            : null;
+        };
+        boardRect.value = snap(boardEl.value);
+        chatRect.value = snap(chatEl.value);
+      }),
+    );
+  }
 }
+
+// ---- ?debug=1 几何自检：伪元素边框显示 16:9 画布实际边界，读出视口/缩放/
+//      留白与画布屏幕坐标（outline 在 transform 元素上可能不绘制，故用伪元素） ----
+const debugGeo = new URLSearchParams(globalThis.location.search).has("debug");
+const vpW = ref(0);
+const vpH = ref(0);
+const letterbox = computed(() => ({
+  x: Math.max(0, (vpW.value - BOARD_W * scale.value) / 2),
+  y: Math.max(0, (vpH.value - BOARD_H * scale.value) / 2),
+}));
+/** 画布在视口内的屏幕坐标（缩放变换后的真实落点） */
+const boardEl = ref<HTMLElement | null>(null);
+const boardRect = ref<{ l: number; t: number; r: number; b: number } | null>(null);
+/** 聊天盒屏幕坐标（对照 board 坐标即可判定它挂在哪个包含块上） */
+const chatEl = ref<HTMLElement | null>(null);
+const chatRect = ref<{ l: number; t: number; r: number; b: number } | null>(null);
 
 onMounted(() => {
   void load(params.token, params.matchId, params.tournamentId);
@@ -281,7 +321,9 @@ onUnmounted(() => {
       <!-- 视口（缩放测量基准）→ 居中 16:9 画布 -->
       <div ref="wrapEl" class="viewport">
         <div
+          ref="boardEl"
           class="board"
+          :class="{ 'debug-outline': debugGeo }"
           :style="{ transform: `translate(-50%, -50%) scale(${scale})` }"
         >
           <div
@@ -332,7 +374,7 @@ onUnmounted(() => {
           <!-- 左下角比赛聊天：固定满尺寸常显，消息底部锚定、顶部同边距截断，
                新消息自底部滑入并推动整块上滚（TransitionGroup FLIP；
                appear 使切场景重挂载时存量消息也从底部升起） -->
-          <aside class="chat-box">
+          <aside ref="chatEl" class="chat-box">
             <TransitionGroup tag="div" class="chat-lines" name="chat" appear>
               <div
                 v-for="line in shownChat"
@@ -355,6 +397,19 @@ onUnmounted(() => {
       </div>
 
       <div v-if="isMock" class="mock-badge">{{ t("scenes.mockBadge") }}</div>
+
+      <!-- 几何自检：视口尺寸 / 缩放比 / 横纵留白 / 画布与聊天盒屏幕坐标（黄框=16:9 画布） -->
+      <div v-if="debugGeo" class="debug-geo">
+        viewport {{ vpW }}×{{ vpH }} · scale {{ scale.toFixed(3) }} · 留白 横
+        {{ letterbox.x.toFixed(0) }}px / 纵 {{ letterbox.y.toFixed(0) }}px<br />
+        board L{{ boardRect?.l ?? "?" }} T{{ boardRect?.t ?? "?" }} R{{
+          boardRect?.r ?? "?"
+        }}
+        B{{ boardRect?.b ?? "?" }} · chat L{{ chatRect?.l ?? "?" }} T{{
+          chatRect?.t ?? "?"
+        }}
+        R{{ chatRect?.r ?? "?" }} B{{ chatRect?.b ?? "?" }}
+      </div>
     </template>
   </div>
 </template>
@@ -371,11 +426,15 @@ onUnmounted(() => {
   z-index: 20;
   overflow: hidden;
 }
-/* 固定 1920×1080 画布：绝对居中 + 等比缩放（--card-w 按列数给行内卡片宽度） */
+/* 固定 1920×1080 画布：绝对居中 + 等比缩放（--card-w 按列数给行内卡片宽度）。
+   场景页无全局 border-box，必须显式声明——否则 1920×1080 被当作内容盒，
+   加上左右 56 / 底 38 内边距后实际盒子 2032×1118，居中缩放与聊天卡的
+   绝对定位参照全部错位（曾表现为 OBS 中聊天卡贴左） */
 .board {
   position: absolute;
   left: 50%;
   top: 50%;
+  box-sizing: border-box;
   width: 1920px;
   height: 1080px;
   /* 顶部不留 padding：池的顶部让位由脚本 poolTop 动态给（顶栏在视口层不缩放） */
@@ -404,11 +463,11 @@ onUnmounted(() => {
 .pool.overflowing {
   overflow-y: auto;
 }
-/* 整体下沉：最下行底部压到聊天盒顶沿上方（220 = 底距30 + 满高174 + 空隙16，
-   换算池内下边距 220 − 画布底距38 = 182）。pinned 由脚本判定：内容装得下才贴靠 */
+/* 整体下沉：最下行底部压到聊天盒顶沿上方（224 = 底距34 + 满高174 + 空隙16，
+   换算池内下边距 224 − 画布底距38 = 186）。pinned 由脚本判定：内容装得下才贴靠 */
 .pool.pinned {
   justify-content: flex-end;
-  padding-bottom: 182px;
+  padding-bottom: 186px;
 }
 .group {
   flex-shrink: 0;
@@ -443,7 +502,8 @@ onUnmounted(() => {
 .chat-box {
   position: absolute;
   left: 34px;
-  bottom: 30px;
+  /* 底距与左侧边距一致（34px），聊天盒贴画布左下角 */
+  bottom: 34px;
   width: 660px;
   /* 固定满尺寸：5 行内容 + 4 间距 + 上下内边距与边框（场景页无全局
      border-box，须显式声明否则 height 只含内容区） */
@@ -545,5 +605,32 @@ onUnmounted(() => {
 .notice-card {
   padding: 24px 32px;
   font-size: 15px;
+}
+
+/* ---- ?debug=1 几何自检 ---- */
+/* 伪元素画边框：outline 在 transform 元素上可能整条不绘制（实测 Chrome 仅
+   顶部露出 1px、OBS 完全不可见），伪元素是普通盒必定渲染 */
+.board.debug-outline::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 4px solid #ffef3d;
+  z-index: 999;
+  pointer-events: none;
+}
+.debug-geo {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  z-index: 40;
+  font-size: 18px;
+  line-height: 1.4;
+  font-weight: 700;
+  color: #0a0118;
+  background: #ffef3d;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-family: "SFMono-Regular", "Menlo", "Consolas", "Liberation Mono", monospace;
+  pointer-events: none;
 }
 </style>
