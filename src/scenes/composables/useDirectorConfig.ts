@@ -1,5 +1,5 @@
 /**
- * 导播场景页配置持久化（RTMP/HLS 流地址 + PB + 历史战绩）。
+ * 导播场景页配置持久化（RTMP/HLS 流地址）。
  *
  * 仿 src/stores/draft.ts 的 localStorage 模式：按 matchId 键控（无 matchId 用 "_global_"），
  * JSON 序列化，try/catch 容错。导播在编辑面板填一次，刷新 / OBS 重开即恢复。
@@ -16,10 +16,6 @@ export interface DirectorConfig {
   rtmpB: string;
   hlsA: string;
   hlsB: string;
-  pbA: string;
-  pbB: string;
-  histA: string;
-  histB: string;
 }
 
 const EMPTY: DirectorConfig = {
@@ -27,10 +23,6 @@ const EMPTY: DirectorConfig = {
   rtmpB: "",
   hlsA: "",
   hlsB: "",
-  pbA: "",
-  pbB: "",
-  histA: "",
-  histB: "",
 };
 
 const PREFIX = "twc-director-cfg";
@@ -87,10 +79,6 @@ export function useDirectorConfig() {
       rtmpB: url.rtmpB || stored.rtmpB,
       hlsA: url.hlsA || stored.hlsA,
       hlsB: url.hlsB || stored.hlsB,
-      pbA: url.pbA || stored.pbA,
-      pbB: url.pbB || stored.pbB,
-      histA: url.histA || stored.histA,
-      histB: url.histB || stored.histB,
     };
     Object.assign(config, merged);
     write(matchId, merged);

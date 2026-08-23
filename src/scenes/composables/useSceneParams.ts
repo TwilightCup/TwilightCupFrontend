@@ -19,23 +19,13 @@ export interface SceneParams {
   hlsA: string;
   /** 选手 B 浏览器可播流（HLS） */
   hlsB: string;
-  /** 选手 A PB 文本（单行） */
-  pbA: string;
-  /** 选手 B PB 文本 */
-  pbB: string;
-  /** 选手 A 历史速通战绩（多行） */
-  histA: string;
-  /** 选手 B 历史速通战绩 */
-  histB: string;
   /** 编辑态（=1 唤出导播配置面板） */
   editMode: boolean;
-  /** 赛事 logo URL 覆盖值（空则用默认 /logo.png） */
-  logoUrl: string;
-  /** 进度条满偏对应的计时差（毫秒），默认 60000 */
+  /** 偏差条满偏对应的计时差（毫秒），默认 60000 */
   gapMs: number;
 }
 
-/** 缺省满偏计时差：60s 差 → 进度条满偏 */
+/** 缺省满偏计时差：60s 差 → 偏差条满偏 */
 const DEFAULT_GAP_MS = 60_000;
 
 /** 解析当前页面 URL 的场景参数。 */
@@ -50,12 +40,7 @@ export function useSceneParams(): SceneParams {
     rtmpB: get("rtmp_b"),
     hlsA: get("hls_a"),
     hlsB: get("hls_b"),
-    pbA: get("pb_a"),
-    pbB: get("pb_b"),
-    histA: get("hist_a"),
-    histB: get("hist_b"),
     editMode: p.get("edit") === "1",
-    logoUrl: get("logo"),
     gapMs: parseGap(get("gap")),
   };
 }

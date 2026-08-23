@@ -122,8 +122,8 @@ export interface ClientDirectorCommand {
   // soon_pause:     {}
   // soon_reset:     {}
   // soon_set_target: { target_ms: 300000 }
-  // config_update:  { config: { rtmpA, rtmpB, hlsA, hlsB, pbA, pbB, histA, histB } }
-  //                 （直播配置实时下发，八键可部分缺失；服务端原样透传）
+  // config_update:  { config: { rtmpA, rtmpB, hlsA, hlsB } }
+  //                 （直播配置实时下发，四键可部分缺失；服务端原样透传）
 }
 
 export type ClientMessage =

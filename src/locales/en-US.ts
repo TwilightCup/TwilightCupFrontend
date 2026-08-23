@@ -1017,10 +1017,6 @@ const messages: MessageSchema = {
   "scenes.edit.rtmpB": "Player B RTMP (red)",
   "scenes.edit.hlsA": "Player A HLS (playable)",
   "scenes.edit.hlsB": "Player B HLS (playable)",
-  "scenes.edit.pbA": "Player A PB",
-  "scenes.edit.pbB": "Player B PB",
-  "scenes.edit.histA": "Player A history",
-  "scenes.edit.histB": "Player B history",
   "scenes.edit.save": "Save",
   "scenes.edit.close": "Close",
   "scenes.bracket.title": "Bracket",
@@ -1035,12 +1031,7 @@ const messages: MessageSchema = {
   "scenes.mappool.title": "Mappool",
   "scenes.mappool.empty": "No mappool data",
   "scenes.mappool.mockHint": "Mappool (sample)",
-  "scenes.match.title": "Match",
-  "scenes.match.score": "Score",
   "scenes.match.waitingSignal": "Awaiting signal",
-  "scenes.match.forfeit": "Forfeit",
-  "scenes.match.pb": "PB",
-  "scenes.match.history": "No speedrun history",
   "scenes.tug.faster": "Leading",
 
   // ── format fallback ──────────────────────────────────────────────────
