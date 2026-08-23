@@ -12,15 +12,17 @@ import { computed, type ComputedRef } from "vue";
 
 import type { Pick } from "@/api/types";
 
-/** 单个选图的终态（ban / protect / pick 互斥，规则上每 code 至多一条） */
+/** 单个选图的终态（ban / pick 互斥，规则上每 code 至多一条；protect 单独跟踪） */
 export interface PickCardStatus {
-  kind: "ban" | "protect" | "pick";
+  kind: "ban" | "pick";
   by: "A" | "B";
 }
 
 export interface DraftStatus {
   /** code → 终态 */
   statusByCode: Map<string, PickCardStatus>;
+  /** code → protect 方（protect 整场有效，pick 后仍保留角标叠加显示） */
+  protectedByCode: Map<string, "A" | "B">;
   /** code → 裁判指定的重试次数（无则 undefined，卡片回退 pick.retry_count） */
   retryByCode: Map<string, number | undefined>;
   /** picks 最后一条的 code（当前回合）；无 pick 过为 null */
@@ -35,6 +37,7 @@ export interface DraftStatus {
 
 const EMPTY: DraftStatus = {
   statusByCode: new Map(),
+  protectedByCode: new Map(),
   retryByCode: new Map(),
   activePickCode: null,
   bannedTags: [],
@@ -70,14 +73,17 @@ export function parseDraftStatus(raw: unknown): DraftStatus {
   const pickedTagsByCode = new Map<string, string[]>();
   let activePickCode: string | null = null;
 
-  // 1) ban / protect 动作（后到的覆盖先到的；规则上同 code 不会重复操作）
+  // 1) ban / protect 动作（后到的覆盖先到的；规则上同 code 不会重复操作）。
+  //    ban 入终态；protect 单独跟踪（pick 后仍保留，卡片角标持续显示）
   const actions = Array.isArray((raw as { actions?: unknown }).actions)
     ? ((raw as { actions: unknown[] }).actions as RawAction[])
     : [];
+  const protectedByCode = new Map<string, "A" | "B">();
   for (const a of actions) {
     if (!a || typeof a.code !== "string" || !isSide(a.by) || !isActionKind(a.kind))
       continue;
-    statusByCode.set(a.code, { kind: a.kind, by: a.by });
+    if (a.kind === "ban") statusByCode.set(a.code, { kind: "ban", by: a.by });
+    else protectedByCode.set(a.code, a.by);
   }
 
   // 2) picks（跨回合累积）：终态 pick + 重试次数 + 当前回合词条高亮
@@ -113,7 +119,7 @@ export function parseDraftStatus(raw: unknown): DraftStatus {
         }
       : { A: null, B: null };
 
-  return { statusByCode, retryByCode, activePickCode, bannedTags, tagBanBy, pickedTagsByCode };
+  return { statusByCode, protectedByCode, retryByCode, activePickCode, bannedTags, tagBanBy, pickedTagsByCode };
 }
 
 /** 图池卡片可消费的组合入口：响应式解析 draft ref（null-safe）。 */

@@ -2,19 +2,22 @@
 /**
  * 图池单卡：横向长条矩形（1920×1080 画布坐标内布局，高度由父级 --row-h 指定）。
  *
- * 构成：背景图（logo_url cover，失败/无图回退类别色底 + 纹理）+ 左侧高对比
+ * 构成：背景图（logo_url cover；无自定义图时按名称回退官方关卡背景
+ * pickDefaultBg，再无 / 加载失败回退类别色底）+ 左侧高对比
  * 类别色块 + 居中标题（名称 + 重试次数「N Attempts」小字）。
  * CT 候选词条不渲染在卡内，集中在 CT 类别下方的词条板（见 CtTagBoard.vue）。
  *
  * BP 三态（选手色 --pc / 辉光 --pc-glow 由 side 类内联提供）：
  * - ban：内容统一大幅变暗 + 选手色亮边框 + 右下角向内切角三角形内禁止图标；
- * - protect：选手色边框 + 右上角护盾角标，不变暗；
+ * - protect：仅右上角护盾切角角标（无边框无辉光；整场有效，该选图之后被 pick
+ *   时角标保留并与 pick 边框叠加，配色用 protect 方选手色）；
  * - pick：选手色边框；新被选中瞬间高亮闪烁数次后回落常亮微辉。
  */
 import { computed, onUnmounted, ref, watch } from "vue";
 
 import type { CategoryKind, Pick } from "@/api/types";
 import { categoryKindInfo } from "@/utils/format";
+import { pickDefaultBg } from "@/utils/mappool";
 import type { PickCardStatus } from "./useDraftStatus";
 
 const props = defineProps<{
@@ -22,13 +25,16 @@ const props = defineProps<{
   kind: CategoryKind;
   /** BP 终态（null = 中性） */
   status: PickCardStatus | null;
+  /** protect 方（整场有效；null = 未被 protect） */
+  protectedBy: "A" | "B" | null;
   /** 重试次数（draft 指定值优先，回退 pick.retry_count；由父级经 retryOf 解析） */
   retry: number | null;
 }>();
 
 const kindShort = computed(() => categoryKindInfo(props.kind)?.short ?? props.kind);
 
-const logoSrc = computed(() => props.pick.logo_url ?? null);
+/** 背景图：自定义展示图优先，否则按选图名称回退官方关卡默认背景 */
+const logoSrc = computed(() => props.pick.logo_url ?? pickDefaultBg(props.pick));
 /** 图片加载失败（网络/对象缺失）→ 回退占位 */
 const imgFailed = ref(false);
 const showImage = computed(() => !!logoSrc.value && !imgFailed.value);
@@ -76,6 +82,10 @@ const stKind = computed(() => props.status?.kind ?? null);
 const sideClass = computed(() =>
   props.status ? (props.status.by === "A" ? "by-a" : "by-b") : null,
 );
+/** protect 方 → 角标配色类（--prot 与终态 --pc 独立：protect 方与 pick 方可能不同） */
+const protClass = computed(() =>
+  props.protectedBy ? (props.protectedBy === "A" ? "prot-a" : "prot-b") : null,
+);
 
 // ---- pick 闪烁：状态「新变为」pick 时脉冲数次（动画结束回落常亮） ----
 const flashing = ref(false);
@@ -102,12 +112,10 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="card" :class="[stKind && `st-${stKind}`, sideClass, { flashing }]">
+  <div class="card" :class="[stKind && `st-${stKind}`, sideClass, protClass, { flashing }]">
     <!-- 内容层（ban 时整体变暗；边框/切角在外层保持亮色） -->
     <div class="content" :style="{ background: showImage ? '#000' : bgColor }">
       <img v-if="showImage" :src="logoSrc!" :alt="pick.name" @error="imgFailed = true" />
-      <!-- 占位纹理：对角细线，呼应合成器浪潮 -->
-      <div class="stripes" />
 
       <div class="cat" :class="{ dark: tagDark }" :style="{ background: tagBg }">
         {{ kindShort }}
@@ -129,8 +137,8 @@ onUnmounted(() => {
       </svg>
     </div>
 
-    <!-- protect：右上角护盾角标 -->
-    <div v-else-if="stKind === 'protect'" class="shield">
+    <!-- protect：右上角护盾角标（整场有效，不随终态消失） -->
+    <div v-if="protectedBy" class="shield">
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path
           d="M12 2l8 3v6c0 5-3.4 9.3-8 11-4.6-1.7-8-6-8-11V5l8-3z"
@@ -153,17 +161,20 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-/* ---- 选手色（ban/protect/pick 边框与角标共用） ---- */
-.card.by-a {
+/* ---- 选手色：终态边框/角标（--pc）与 protect 护盾（--prot）各自独立 ---- */
+.card.by-a,
+.card.prot-a {
   --pc: var(--syn-a);
   --pc-glow: rgba(61, 139, 255, 0.55);
+  --prot: var(--syn-a);
 }
-.card.by-b {
+.card.by-b,
+.card.prot-b {
   --pc: var(--syn-b);
   --pc-glow: rgba(255, 107, 74, 0.55);
+  --prot: var(--syn-b);
 }
 .card.st-ban,
-.card.st-protect,
 .card.st-pick {
   box-shadow: 0 0 16px var(--pc-glow);
 }
@@ -171,7 +182,6 @@ onUnmounted(() => {
    显式 z-index 高于 .cat/.text 的 2——否则闪烁动画结束后 filter 移除、
    内容层不再是层叠上下文，类别标签会反过来盖住边框 */
 .card.st-ban::after,
-.card.st-protect::after,
 .card.st-pick::after {
   content: "";
   position: absolute;
@@ -202,22 +212,11 @@ onUnmounted(() => {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, rgba(5, 0, 15, 0.72) 0%, rgba(5, 0, 15, 0.5) 50%, rgba(5, 0, 15, 0.72) 100%);
+  background: linear-gradient(90deg, rgba(5, 0, 15, 0.5) 0%, rgba(5, 0, 15, 0.3) 50%, rgba(5, 0, 15, 0.5) 100%);
   pointer-events: none;
 }
 .card.st-ban .content {
   filter: brightness(0.32) saturate(0.35);
-}
-
-.stripes {
-  position: absolute;
-  inset: 0;
-  background-image: repeating-linear-gradient(
-    45deg,
-    rgba(255, 255, 255, 0.04) 0 2px,
-    transparent 2px 12px
-  );
-  pointer-events: none;
 }
 
 /* ---- 左侧类别色块 ---- */
@@ -233,7 +232,6 @@ onUnmounted(() => {
   letter-spacing: 1px;
   color: #fff;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
-  box-shadow: 2px 0 10px rgba(0, 0, 0, 0.45);
 }
 .cat.dark {
   color: #1a0b02;
@@ -297,45 +295,49 @@ onUnmounted(() => {
   }
 }
 
-/* ---- ban 右下切角三角 + 禁止图标 ---- */
+/* ---- ban 右下切角三角 + 禁止图标：斜边严格 45°，上端起自卡片右上角、
+   落到卡片底部（方形盒宽=高=卡片高，斜边在盒内天然 45°） ---- */
 .notch {
   position: absolute;
+  top: 0;
   right: 0;
-  bottom: 0;
-  width: calc(var(--card-h) * 1.1);
-  height: calc(var(--card-h) * 1.1);
+  width: var(--card-h);
+  height: 100%;
   background: var(--pc);
   clip-path: polygon(100% 0, 100% 100%, 0 100%);
-  z-index: 6; /* 高于内边框 z-5，切角盖在边框转角上 */
+  z-index: 7; /* 高于内边框 z-5 与其余图层，切角整体盖在边框之上 */
 }
+/* 图标中心 = 直角三角形重心（距两直角边各 1/3 边长；23% = 图标半宽 46%/2） */
 .no-icon {
   position: absolute;
-  right: 12%;
-  bottom: 12%;
-  width: 42%;
-  height: 42%;
+  right: calc(100% / 3 - 23%);
+  bottom: calc(100% / 3 - 23%);
+  width: 46%;
+  height: 46%;
   color: #0a0118;
-  z-index: 7;
+  z-index: 8;
 }
 
-/* ---- protect 护盾角标 ---- */
+/* ---- protect 护盾角标：斜边严格 45°，下端起自卡片右下角、反向落到卡片
+   顶部（与 ban 切角同尺寸方形盒，clip 方向镜像） ---- */
 .shield {
   position: absolute;
   top: 0;
   right: 0;
-  width: calc(var(--card-h) * 0.72);
-  height: calc(var(--card-h) * 0.72);
-  background: var(--pc);
+  width: var(--card-h);
+  height: 100%;
+  background: var(--prot);
   clip-path: polygon(0 0, 100% 0, 100% 100%);
-  z-index: 6; /* 高于内边框 z-5 */
+  z-index: 7; /* 高于内边框 z-5 与其余图层，pick 后角标叠在边框之上 */
 }
+/* 图标中心 = 直角三角形重心（同 ban 图标，方向朝右上角） */
 .shield svg {
   position: absolute;
-  top: 12%;
-  right: 12%;
+  top: calc(100% / 3 - 23%);
+  right: calc(100% / 3 - 23%);
   width: 46%;
   height: 46%;
   color: #0a0118;
-  z-index: 7;
+  z-index: 8;
 }
 </style>

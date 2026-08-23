@@ -18,6 +18,7 @@ import {
   type Pick,
 } from "@/api/types";
 import { t as tr } from "@/locales";
+import { officialLevelBg, officialLevelIdOf } from "@/utils/officialLevels";
 
 /** 把类别名（如 "ml"/"ML "）归一为固定 kind；无法识别返回 null（视作普通分组，不参与 ban/pick 规则）。 */
 export function categoryKindOf(name?: string | null): CK | null {
@@ -32,6 +33,31 @@ export const CT_TAG_BASE: string[] = [...CT_TAGS];
 /** 单关 CT 选图可选的词条集合（基础 + Achievement）。 */
 export function ctTagsFor(single: boolean): string[] {
   return single ? [...CT_TAG_BASE, CT_TAG_ACHIEVEMENT] : [...CT_TAG_BASE];
+}
+
+/**
+ * 选图默认背景图：无自定义展示图（logo_url）时按名称回退官方关卡背景。
+ * 名称解析（容忍「Carry 12」「Dark% CP」这类带重试/模式后缀的写法，取整串与首词分别匹配）：
+ * - 「Any%」→ Ice（全游戏流程，以 Ice 作视觉代表）；
+ * - 「X%」→ X 对应关卡（X 为官方展示名，如 Dark → Halloween）；
+ * - 单关「X …」→ X 对应关卡背景（如 Red Rock → RedRock）。
+ * 未命中（自定义名 / 非官方关）→ null，卡片回退类别色底。
+ */
+export function pickDefaultBg(pick: Pick): string | null {
+  const name = pick.name.trim();
+  if (!name) return null;
+  const first = name.split(/\s+/)[0]!;
+  for (const cand of [name, first]) {
+    const key = cand.endsWith("%") ? cand.slice(0, -1) : cand;
+    if (!key) continue;
+    if (key === "Any") return officialLevelBg("Ice");
+    const id = officialLevelIdOf(key);
+    if (id) {
+      const bg = officialLevelBg(id);
+      if (bg) return bg;
+    }
+  }
+  return null;
 }
 
 /** 解码 `Pick.tag` 为 CT 词条数组（仅保留已知枚举值；兼容旧自由文本→空数组）。 */

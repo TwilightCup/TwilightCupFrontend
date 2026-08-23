@@ -80,8 +80,15 @@ const ctCandidates = computed(() => {
 
 // ---- BP 状态（WS draft_state → director.draft） ----
 const draftStatus = useDraftStatus(computed(() => director.draft));
-/** 词条板高亮：当前回合 pick 携带的词条。回合结束（ROUND_END / MATCH_END，
- *  含裁判强制结束）即复位——需求「回合重置」，下一轮 pick 后重新点亮。 */
+/** code → 选图所属类别 kind（词条板只对 CT 选图的词条作出反应） */
+const kindByCode = computed(() => {
+  const m = new Map<string, CategoryKind>();
+  for (const g of groups.value) for (const p of g.picks) m.set(p.code, g.kind);
+  return m;
+});
+/** 词条板高亮：当前回合 pick 携带的词条（仅 CT 选图——非 CT 选图即便带有
+ * tag 字段也不点亮）。回合结束（ROUND_END / MATCH_END，含裁判强制结束）即
+ * 复位——需求「回合重置」，下一轮 pick 后重新点亮。 */
 const activePickTags = computed(() => {
   if (
     director.phase === MatchPhase.ROUND_END ||
@@ -91,7 +98,8 @@ const activePickTags = computed(() => {
     return [];
   }
   const code = draftStatus.value.activePickCode;
-  return code ? (draftStatus.value.pickedTagsByCode.get(code) ?? []) : [];
+  if (!code || kindByCode.value.get(code) !== "CT") return [];
+  return draftStatus.value.pickedTagsByCode.get(code) ?? [];
 });
 const activePickSide = computed(() => {
   const code = draftStatus.value.activePickCode;
@@ -194,6 +202,7 @@ onUnmounted(() => {
                     :pick="p"
                     :kind="g.kind"
                     :status="draftStatus.statusByCode.get(p.code) ?? null"
+                    :protected-by="draftStatus.protectedByCode.get(p.code) ?? null"
                     :retry="retryOf(draftStatus, p)"
                   />
                 </div>
