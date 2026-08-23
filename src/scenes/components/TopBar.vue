@@ -5,9 +5,10 @@
  *
  * 三分区通栏（左右镜像）：
  *   左：上排 Player-A 角色胶囊（选手 A 主题色）+ 其右侧比分指示器（占原
- *       名称位），名称 + 灰色 ID 在标签正下方（与标签同侧边距）
+ *       名称位），名称在标签正下方（与标签同侧边距）
  *   中：上层赛事标题（REST 赛事名，空则回退 TWILIGHT CUP）
- *       下层比赛标题胶囊（纯白填充 + 文字 SVG mask 挖孔镂空，透出背景动画）
+ *       下层比赛标题胶囊（纯白填充 + 文字 SVG mask 挖孔镂空，透出背景动画；
+ *       底部与选手名称底部对齐，间距公式见 .mid 注释）
  *   右：与左侧完全水平镜像，指示器从右向左点亮
  *
  * 比分指示器：获胜所需局数个正方形空心轮廓，每胜一局点亮一格（选手色 + 辉光）。
@@ -26,9 +27,7 @@ export interface TopBarMock {
   tournamentName: string;
   matchName: string;
   nameA: string;
-  uidA: string;
   nameB: string;
-  uidB: string;
   winsA: number;
   winsB: number;
   /** 指示器格数（= 获胜所需局数） */
@@ -81,8 +80,6 @@ const eventName = computed(
 const matchTitle = computed(() => props.mock?.matchName ?? director.matchName);
 const nameA = computed(() => props.mock?.nameA ?? director.nameOf("A"));
 const nameB = computed(() => props.mock?.nameB ?? director.nameOf("B"));
-const uidA = computed(() => props.mock?.uidA ?? director.usernameA);
-const uidB = computed(() => props.mock?.uidB ?? director.usernameB);
 const winsA = computed(() => props.mock?.winsA ?? director.winsA);
 const winsB = computed(() => props.mock?.winsB ?? director.winsB);
 
@@ -115,7 +112,6 @@ const pipCount = computed(() => {
       </div>
       <div class="who">
         <span class="name">{{ nameA }}</span>
-        <span v-if="uidA" class="uid">{{ uidA }}</span>
       </div>
     </div>
 
@@ -169,7 +165,6 @@ const pipCount = computed(() => {
       </div>
       <div class="who">
         <span class="name">{{ nameB }}</span>
-        <span v-if="uidB" class="uid">{{ uidB }}</span>
       </div>
     </div>
   </header>
@@ -231,12 +226,9 @@ const pipCount = computed(() => {
   color: #fff;
   white-space: nowrap;
 }
-/* 名称 + ID：B 侧右对齐；超长省略号保护布局 */
+/* 名称：B 侧右对齐；超长省略号保护布局 */
 .who {
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
 }
 .side.b .who {
   align-items: flex-end;
@@ -252,16 +244,6 @@ const pipCount = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   text-shadow: 0 2px 10px rgba(10, 1, 24, 0.6);
-}
-.uid {
-  max-width: 24ch;
-  font-size: 17px;
-  line-height: 1.2;
-  letter-spacing: 0.5px;
-  color: var(--syn-text-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 /* 比分指示器：胜局数个正方形空心轮廓；B 侧 row-reverse → 从右向左点亮 */
 .pips {
@@ -291,14 +273,18 @@ const pipCount = computed(() => {
     0 0 12px var(--pc-glow),
     0 0 3px var(--pc-glow);
 }
-/* 中央：上层赛事标题，下层比赛标题胶囊（顶部与两侧名称同幅下沉） */
+/* 中央：上层赛事标题，下层比赛标题胶囊（顶部与两侧同幅下沉）。
+   间距按「胶囊底部 = 选手名称底部」对齐公式求得（自画面顶算起）：
+   名称底 = 10(顶距) + 26(标签/比分行) + 8(行距) + 34×1.15(名称行) = 83.1
+   胶囊底 = 10(顶距) + 36(赛事行 line-height) + gap + 26(胶囊高) → gap = 11.1
+   （改 .head/.side gap/.name/.event/.match-pill 任一尺寸时同步此值） */
 .mid {
   min-width: 0;
   padding-top: 10px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 7px;
+  gap: 11.1px;
 }
 .event {
   max-width: 46ch;
@@ -308,6 +294,8 @@ const pipCount = computed(() => {
   padding: 20px 24px;
   margin: -20px -24px;
   font-size: 30px;
+  /* 行高定值：胶囊与名称的底部对齐公式依赖确定行高（见 .mid 注释） */
+  line-height: 36px;
   font-weight: 900;
   letter-spacing: 4px;
   color: var(--syn-text);
