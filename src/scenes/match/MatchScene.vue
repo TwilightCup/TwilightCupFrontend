@@ -3,7 +3,7 @@
  * 比赛详情场景页根组件（直播主界面，需求见 ignored/黄昏杯导播端比赛详情页面需求.md）。
  *
  * 布局（1920×1080）：
- *   顶部：预留区（选手名 / 比分 / 赛事品牌等，下一步实现）
+ *   顶部：信息栏 TopBar（选手名/比分指示器/赛事·比赛标题，需求见顶栏文档）
  *   中部：双 4:3 选手画面满宽无缝并列（16:9 推流裁左右）
  *   下部：多关偏差条（单关隐藏）→ 双方计时器（主大字 + 副小字，屏幕中轴对称）
  *
@@ -20,7 +20,8 @@ import SynthwaveBg from "@/scenes/components/SynthwaveBg.vue";
 import DirectorConfigPanel from "@/scenes/components/DirectorConfigPanel.vue";
 import { useSceneContext } from "@/scenes/composables/useSceneContext";
 import { useDirectorConfig } from "@/scenes/composables/useDirectorConfig";
-import { MOCK_MATCH } from "@/scenes/mock/matchDetail";
+import { MOCK_MATCH, MOCK_TOPBAR } from "@/scenes/mock/matchDetail";
+import TopBar from "@/scenes/components/TopBar.vue";
 import { useMatchTiming } from "./useMatchTiming";
 import DiffBar from "./DiffBar.vue";
 import PlayerTimer from "./PlayerTimer.vue";
@@ -28,7 +29,7 @@ import StreamFrame from "./StreamFrame.vue";
 
 const { t } = useI18n();
 const director = useDirectorStore();
-const { params, hosted, sharedBg } = useSceneContext();
+const { params, hosted, sharedBg, sharedTopBar } = useSceneContext();
 const { config, load, save } = useDirectorConfig();
 
 const panelOpen = ref(params.editMode);
@@ -117,8 +118,11 @@ onUnmounted(() => {
 
     <template v-else>
       <div class="content">
-        <!-- 顶部预留区：选手名 / 比分 / 赛事品牌（下一步实现） -->
-        <header class="top-reserved" />
+        <!-- 顶部信息栏：三分区（选手A / 赛事·比赛信息 / 选手B），mock 时传演示值；
+             hosted 模式下舞台常驻单实例顶栏（sharedTopBar），此处让位只留占位 -->
+        <header class="top-zone">
+          <TopBar v-if="!sharedTopBar" :mock="isMock ? MOCK_TOPBAR : undefined" />
+        </header>
 
         <!-- 双 4:3 选手画面：水平居中、无缝衔接、满屏宽 -->
         <section class="streams">
@@ -162,10 +166,12 @@ onUnmounted(() => {
   flex-direction: column;
   overflow: hidden;
 }
-/* 顶部预留区（下一步实现品牌 / 比分区）：吸收纵向误差的弹性空间 */
-.top-reserved {
+/* 顶部信息栏区：贴画面顶部，剩余空隙沉到下方吸收纵向误差 */
+.top-zone {
   flex: 1;
   min-height: 5vh;
+  display: flex;
+  align-items: flex-start;
 }
 /* 双 4:3 画面：各占半宽无缝拼合（合计 8:3），满铺 1920px */
 .streams {

@@ -1014,6 +1014,10 @@ const messages = {
   // ── 导播场景页（scenes.html 多入口）─────────────────────────────────
   "scenes.noToken": "缺少 token：请在 URL 上带 ?token=<导播 JWT>",
   "scenes.mockBadge": "示例数据",
+  // 顶部信息栏（TopBar：比赛详情 / 图池场景共用；品牌回退按需求文档定死英文）
+  "scenes.topbar.brandFallback": "TWILIGHT CUP",
+  "scenes.topbar.playerA": "Player-A",
+  "scenes.topbar.playerB": "Player-B",
   "scenes.refresh": "刷新",
   "scenes.edit.title": "导播配置",
   "scenes.edit.rtmpA": "选手A RTMP（蓝）",

@@ -5,10 +5,13 @@
  * 1920×1080 固定画布（16:9），居中呈示并按视口等比缩放（ResizeObserver →
  * transform: scale），容忍微幅宽高比调整不重叠不溢出。
  *
- * 布局：无页标题，按类别（ML/IL/CP/CT/EX/TB）竖向分带整体靠上；任一类别选图
+ * 布局：顶部信息栏 TopBar（选手/比分/赛事·比赛标题，需求见顶栏文档）——
+ * 视口坐标铺顶、不随画布缩放（与比赛详情页同尺寸同位置），其下按类别
+ * （ML/IL/CP/CT/EX/TB）竖向分带整体靠上；任一类别选图
  * 数 ≥5 → 三列模式（每行至多 3 图、卡片等比收缩），否则双列模式（每行至多
- * 2 图）；每行按本行卡片数水平居中。行高按总行数在画布内预算分摊（越界大池
- * 降级为板内滚动）。左下角为比赛聊天区（样式对齐管理端日志单行聊天）。
+ * 2 图）；每行按本行卡片数水平居中。行高按总行数在画布内预算分摊（扣顶栏
+ * 占位；越界大池降级为板内滚动）。左下角为比赛聊天区（样式对齐管理端日志
+ * 单行聊天）。
  *
  * 数据：图池 REST（useMappoolData，失败 mock 兜底）+ BP 状态 WS（裁判端
  * draft_sync → 后端广播 draft_state → director.draft，经 useDraftStatus 解析）。
@@ -19,6 +22,7 @@ import { useI18n } from "vue-i18n";
 
 import { useDirectorStore, type DirectorChatLine } from "@/stores/director";
 import SynthwaveBg from "@/scenes/components/SynthwaveBg.vue";
+import TopBar from "@/scenes/components/TopBar.vue";
 import { useSceneContext } from "@/scenes/composables/useSceneContext";
 import { useDraftStatus, retryOf } from "./useDraftStatus";
 import { useMappoolData, type MappoolGroup } from "./useMappoolData";
@@ -31,15 +35,18 @@ import CtTagBoard from "./CtTagBoard.vue";
 
 const { t } = useI18n();
 const director = useDirectorStore();
-const { params, hosted, sharedBg } = useSceneContext();
+const { params, hosted, sharedBg, sharedTopBar } = useSceneContext();
 const { groups, isMock, load } = useMappoolData();
 
 // ---- 画布与布局常量（全部 1920×1080 板内 px，可整体调参） ----
 const BOARD_W = 1920;
 const BOARD_H = 1080;
+/** 池内容与顶栏的间隙（画布坐标系；顶栏不随画布缩放） */
 const PAD_T = 34;
 /** 行高预算按整幅画布扣上下边距（聊天是左下角悬浮层，不占行高预算） */
 const PAD_B = 38;
+/** 顶部信息栏视口占位：高 104 + 与池内容的间距 18（与 TopBar 组件高度配对） */
+const TOPBAR_BLOCK = 122;
 const R_GAP = 10; // 行间距（类别之间同此间距，无类别头）
 const CARD_GAP = 24; // 行内卡间距
 const MIN_ROW_H = 46;
@@ -172,8 +179,15 @@ function senderClass(line: DirectorChatLine): string {
   }
 }
 
-/** 行区可用高度（无页标题，扣上下边距；类别间无头、间距同行距） */
-const availForRowArea = computed(() => BOARD_H - PAD_T - PAD_B);
+/** 池内容画布坐标顶部偏移：顶栏不随画布缩放（视口坐标铺顶，与比赛详情页
+ *  同尺寸），画布内等效占位 = TOPBAR_BLOCK / scale，再加 PAD_T 间隙。
+ *  scale 未测得时用未缩放值兜底（首帧同步测一次后即被覆盖） */
+const poolTop = computed(() =>
+  scale.value > 0 ? Math.ceil(TOPBAR_BLOCK / scale.value) + PAD_T : TOPBAR_BLOCK + PAD_T,
+);
+
+/** 行区可用高度（扣顶栏占位与上下边距；类别间无头、间距同行距） */
+const availForRowArea = computed(() => BOARD_H - poolTop.value - PAD_B);
 
 const rowH = computed(() => {
   if (!totalRows.value) return MIN_ROW_H;
@@ -202,7 +216,7 @@ const pinnedToChat = computed(() => {
     cardRows * rowH.value * CARD_H_RATIO +
     (hasCtBoard ? rowH.value * TAGBOARD_H_RATIO : 0) +
     (totalRows.value - 1) * R_GAP;
-  return contentH <= BOARD_H - PAD_T - CHAT_TOP_RESERVE;
+  return contentH <= BOARD_H - poolTop.value - CHAT_TOP_RESERVE;
 });
 
 function chunk(picks: Pick[], n: number): Pick[][] {
@@ -273,6 +287,7 @@ onUnmounted(() => {
           <div
             class="pool"
             :class="[colsClass, { overflowing, pinned: pinnedToChat }]"
+            :style="{ marginTop: `${poolTop}px` }"
           >
             <section v-for="g in layout" :key="g.kind" class="group">
               <div class="rows">
@@ -332,6 +347,11 @@ onUnmounted(() => {
             </TransitionGroup>
           </aside>
         </div>
+
+        <!-- 顶部信息栏：视口坐标铺顶、不随画布缩放（与比赛详情页同尺寸同位置）；
+             位于画布之上，池顶部已按 scale 动态让位（脚本 poolTop）。
+             hosted 模式下舞台常驻单实例顶栏（sharedTopBar），此处不渲染 -->
+        <TopBar v-if="!sharedTopBar" class="view-top" />
       </div>
 
       <div v-if="isMock" class="mock-badge">{{ t("scenes.mockBadge") }}</div>
@@ -358,9 +378,19 @@ onUnmounted(() => {
   top: 50%;
   width: 1920px;
   height: 1080px;
-  padding: 34px 56px 38px;
+  /* 顶部不留 padding：池的顶部让位由脚本 poolTop 动态给（顶栏在视口层不缩放） */
+  padding: 0 56px 38px;
   display: flex;
   flex-direction: column;
+}
+/* 顶部信息栏（视口层）：铺满视口宽、贴画面顶部、不随画布缩放——与比赛
+   详情页同尺寸同位置；压在画布之上，池顶部让位见脚本 poolTop */
+.view-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
 }
 .pool {
   flex: 1;

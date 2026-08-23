@@ -5,13 +5,17 @@
  * 职责：
  *  1. 读一次 URL（token/match/tournament/...）—— 舞台 URL 由导播控制台拼好（含 tournament）。
  *  2. 连唯一 director store WS（内嵌场景不得再连，由 useSceneContext.hosted 守卫）。
- *  3. provide SceneContext（hosted:true, sharedBg:true）给 5 个内嵌场景。
+ *  3. provide SceneContext（hosted:true, sharedBg:true, sharedTopBar:true）
+ *    给 5 个内嵌场景。
  *  4. 渲染单个共享 SynthwaveBg + <Transition> 在 5 场景间交叉淡入切换。
  *  5. 监听 WS director_cmd 消息 + localStorage 兜底（同进程 Chrome 标签页）即时切换。
+ *  6. 顶部信息栏常驻单实例（仅 match/mappool 场景显示，v-show 切换不重挂）：
+ *    跨场景切换零闪烁——两场景各自内嵌的顶栏在 hosted 模式下让位（sharedTopBar）。
  */
-import { onMounted, onUnmounted, provide, ref, shallowRef, watch } from "vue";
+import { computed, onMounted, onUnmounted, provide, ref, shallowRef, watch } from "vue";
 import { useDirectorStore } from "@/stores/director";
 import SynthwaveBg from "@/scenes/components/SynthwaveBg.vue";
+import TopBar from "@/scenes/components/TopBar.vue";
 import { useSceneParams } from "@/scenes/composables/useSceneParams";
 import {
   SCENE_CONTEXT_KEY,
@@ -30,14 +34,19 @@ import SoonScene from "@/scenes/soon/SoonScene.vue";
 const params = useSceneParams();
 const director = useDirectorStore();
 
-// 内嵌场景：host 管 WS + 提供共享背景
+// 内嵌场景：host 管 WS + 提供共享背景与常驻顶栏
 provide<SceneContext>(SCENE_CONTEXT_KEY, {
   params,
   hosted: true,
   sharedBg: true,
+  sharedTopBar: true,
 });
 
 const currentScene = ref<SceneKey>("match");
+/** 顶栏只在带选手/比赛信息的两场景显示（同实例 v-show，切换不闪） */
+const showTopBar = computed(
+  () => currentScene.value === "match" || currentScene.value === "mappool",
+);
 let unbind: (() => void) | null = null;
 
 onMounted(() => {
@@ -81,6 +90,12 @@ watch(currentScene, syncComponent, { immediate: true });
         <component :is="activeComponent" :key="currentScene" />
       </Transition>
     </div>
+
+    <!-- 常驻顶栏：切场景不重挂（同实例），进出带顶栏的场景组时淡入淡出
+         （match↔mappool 间 showTopBar 不变，不触发任何过渡） -->
+    <Transition name="topbar-fade">
+      <TopBar v-show="showTopBar" class="stage-top" />
+    </Transition>
   </div>
 </template>
 
@@ -95,6 +110,14 @@ watch(currentScene, syncComponent, { immediate: true });
   height: 100%;
   width: 100%;
 }
+/* 常驻顶栏：贴舞台顶、铺满宽，压在全部场景层之上（场景内已让位） */
+.stage-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 30;
+}
 
 /* 场景交叉淡入：切换瞬间新旧场景短暂重叠（absolute 定位） */
 .scene-xfade-enter-active,
@@ -107,6 +130,16 @@ watch(currentScene, syncComponent, { immediate: true });
   opacity: 0;
 }
 .scene-xfade-leave-to {
+  opacity: 0;
+}
+
+/* 常驻顶栏显隐过渡：与场景交叉淡入同节奏（v-show 切换，元素不重挂） */
+.topbar-fade-enter-active,
+.topbar-fade-leave-active {
+  transition: opacity 0.45s ease;
+}
+.topbar-fade-enter-from,
+.topbar-fade-leave-to {
   opacity: 0;
 }
 </style>

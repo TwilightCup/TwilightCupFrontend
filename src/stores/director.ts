@@ -114,6 +114,10 @@ export const useDirectorStore = defineStore("director", () => {
 
   const nameA = ref(tr("seat.a"));
   const nameB = ref(tr("seat.b"));
+  /** 双方选手用户名（ID）：auth_ok 只带展示名，username 经 loadMeta 的
+   *  getMyMatch 补齐（顶栏 ID 行用；拉取前为空串由视图决定显隐） */
+  const usernameA = ref("");
+  const usernameB = ref("");
 
   const matchName = ref("");
   /** 比赛状态（MatchStatus；首回合前 REST 拉到，Coming Soon 场景兜底显示用） */
@@ -293,12 +297,17 @@ export const useDirectorStore = defineStore("director", () => {
   async function loadMeta(): Promise<void> {
     if (!matchId.value || !tokenRef.value) return;
     // 1) /me/matches/{id}：首回合前即可用（match_log 要首回合后才生成），
-    //    尽早补比赛名/状态/赛事归属（Coming Soon 场景与舞台 URL 依赖）。
+    //    尽早补比赛名/状态/赛事归属（Coming Soon 场景与舞台 URL 依赖），
+    //    并顺带存双方 username 与 BO/胜点（顶栏比分指示器在首个判决前就有据可依）。
     try {
       const m = await api.getMyMatch(matchId.value, tokenRef.value);
       matchName.value = m.name || matchName.value;
       matchStatus.value = m.status;
       tournamentId.value = m.tournament_id || tournamentId.value;
+      usernameA.value = m.player_a_username || "";
+      usernameB.value = m.player_b_username || "";
+      boFormat.value = m.bo_format || boFormat.value;
+      winThreshold.value = m.win_threshold || winThreshold.value;
     } catch {
       // token 无权限等，忽略（下面 match_log 再试一次）
     }
@@ -439,6 +448,8 @@ export const useDirectorStore = defineStore("director", () => {
     // 名字 / 元数据
     nameA,
     nameB,
+    usernameA,
+    usernameB,
     matchName,
     matchStatus,
     boFormat,

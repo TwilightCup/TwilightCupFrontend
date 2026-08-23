@@ -7,6 +7,7 @@
  * （偏差条 + 副计时器）。后端连上后由 WS 实时覆盖。
  */
 import { AttemptStatus, type Attempt, type LevelTime } from "@/api/types";
+import type { TopBarMock } from "@/scenes/components/TopBar.vue";
 
 export const MOCK_MATCH = {
   /** 演示模式：true = 多关（偏差条 + 副计时器），false = 单关 */
@@ -30,4 +31,17 @@ export const MOCK_MATCH = {
     { index: 1, status: AttemptStatus.VALID, time_ms: 39870 },
   ] as Attempt[],
   attemptsB: [{ index: 0, status: AttemptStatus.VALID, time_ms: 38940 }] as Attempt[],
+};
+
+/** 顶部信息栏 mock（MatchScene mock 模式传给 TopBar 演示完整版式） */
+export const MOCK_TOPBAR: TopBarMock = {
+  tournamentName: "TWILIGHT CUP",
+  matchName: "黄昏杯 · 胜者组半决赛",
+  nameA: "HeyBlack",
+  uidA: "heyblack233",
+  nameB: "星野",
+  uidB: "hoshino",
+  winsA: 3,
+  winsB: 2,
+  pipCount: 5,
 };

@@ -1011,6 +1011,10 @@ const messages: MessageSchema = {
   // ── director broadcast scenes (scenes.html MPE entries) ─────────────
   "scenes.noToken": "Missing token: add ?token=<director JWT> to the URL",
   "scenes.mockBadge": "Sample data",
+  // TopBar (shared by match scene / mappool scene; brand fallback fixed per spec)
+  "scenes.topbar.brandFallback": "TWILIGHT CUP",
+  "scenes.topbar.playerA": "Player-A",
+  "scenes.topbar.playerB": "Player-B",
   "scenes.refresh": "Refresh",
   "scenes.edit.title": "Director Config",
   "scenes.edit.rtmpA": "Player A RTMP (blue)",
