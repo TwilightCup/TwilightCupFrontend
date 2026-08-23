@@ -199,10 +199,10 @@ const overflowing = computed(
   () => totalRows.value > 0 && availForRowArea.value / totalRows.value < MIN_ROW_H,
 );
 
-/** 内容底部贴聊天盒顶沿时距画布底部的距离：聊天底距 34 + 满高 174 + 空隙 16
+/** 内容底部贴聊天盒顶沿时距画布底部的距离：聊天底距 12 + 满高 199 + 空隙 16
  *  （与 CSS .chat-box 的 bottom/height 配对）。行高预算仍按整幅画布（PAD_B=38），
  *  聊天不占行高——内容装得下才下沉贴靠，装不下自动回顶部对齐避免裁顶。 */
-const CHAT_TOP_RESERVE = 224;
+const CHAT_TOP_RESERVE = 227;
 /** 行的实际渲染高度占行预算的比例（与 MapCard --card-h / CtTagBoard .tag-board
  *  的高度算式配对）——rowH 只是布局预算，行盒真实高度是它的比例折算 */
 const CARD_H_RATIO = 0.66;
@@ -231,13 +231,13 @@ const scale = ref(0);
 let ro: ResizeObserver | null = null;
 let onWinResize: (() => void) | null = null;
 
-/** 画布安全边：贴边 scale 会因亚像素取整被裁 1~2px，留少量呼吸空间 */
-const BOARD_MARGIN = 24;
-
 function updateScale(w: number, h: number): void {
   vpW.value = w;
   vpH.value = h;
-  scale.value = Math.min((w - BOARD_MARGIN) / BOARD_W, (h - BOARD_MARGIN) / BOARD_H);
+  // 满幅缩放（无安全边）：画布外缘本就无可见内容（池有 56/38 内边距、聊天卡
+  // 距边 12px），亚像素裁 1~2px 无碍。此前 24px 安全边在 16:9 下造成横 21 /
+  // 纵 12 的不等留白，使聊天卡侧/底边距不等，已去除
+  scale.value = Math.min(w / BOARD_W, h / BOARD_H);
   // 变换应用后量一次画布与聊天盒屏幕坐标（自检读数用；双 rAF 确保渲染后）
   if (debugGeo) {
     requestAnimationFrame(() =>
@@ -463,11 +463,11 @@ onUnmounted(() => {
 .pool.overflowing {
   overflow-y: auto;
 }
-/* 整体下沉：最下行底部压到聊天盒顶沿上方（224 = 底距34 + 满高174 + 空隙16，
-   换算池内下边距 224 − 画布底距38 = 186）。pinned 由脚本判定：内容装得下才贴靠 */
+/* 整体下沉：最下行底部压到聊天盒顶沿上方（227 = 底距12 + 满高199 + 空隙16，
+   换算池内下边距 227 − 画布底距38 = 189）。pinned 由脚本判定：内容装得下才贴靠 */
 .pool.pinned {
   justify-content: flex-end;
-  padding-bottom: 186px;
+  padding-bottom: 189px;
 }
 .group {
   flex-shrink: 0;
@@ -501,14 +501,15 @@ onUnmounted(() => {
 /* ---- 左下角聊天区（OBS 只读展示；单行样式对齐管理端日志） ---- */
 .chat-box {
   position: absolute;
-  left: 34px;
-  /* 底距与左侧边距一致（34px），聊天盒贴画布左下角 */
-  bottom: 34px;
-  width: 660px;
+  /* 侧面/底部边距一致（12px）；满幅缩放下 16:9 视口的画布边即画面边，
+   *  视觉边距同为 12px */
+  left: 12px;
+  bottom: 12px;
+  width: 780px;
   /* 固定满尺寸：5 行内容 + 4 间距 + 上下内边距与边框（场景页无全局
      border-box，须显式声明否则 height 只含内容区） */
   box-sizing: border-box;
-  height: calc(5 * 22px + 4 * 8px + 2 * 14px + 2 * 2px);
+  height: calc(5 * 27px + 4 * 8px + 2 * 14px + 2 * 2px);
   padding: 14px 18px;
   border-radius: 14px;
   border: 2px solid var(--syn-border);
@@ -545,13 +546,13 @@ onUnmounted(() => {
 .chat-line {
   display: flex;
   /* 顶部对齐：折行消息的时间 / 名字对齐第一行（居中会悬在多行文本中部）。
-     不可用 baseline——mono 时间（14px）与正文（17px）混排时行高 = 跨字号
-     最大上伸 + 最大下伸，比 22px 高约 1px，5 行累计溢出必裁顶；顶部对齐
-     各行盒严格 22px（单行时与居中显示无异），高度算式才精确成立 */
+     不可用 baseline——mono 时间（16px）与正文（21px）混排时行高 = 跨字号
+     最大上伸 + 最大下伸，比 27px 高约 1px，5 行累计溢出必裁顶；顶部对齐
+     各行盒严格 27px（单行时与居中显示无异），高度算式才精确成立 */
   align-items: flex-start;
-  font-size: 17px;
+  font-size: 21px;
   /* 固定行高：与 .chat-box 高度算式配对 */
-  line-height: 22px;
+  line-height: 27px;
 }
 /* 系统行整体变暗（与管理端一致） */
 .chat-line.sys .cl-name,
@@ -559,14 +560,14 @@ onUnmounted(() => {
   color: var(--syn-text-dim);
 }
 .cl-time {
-  width: 64px;
+  width: 72px;
   flex-shrink: 0;
-  font-size: 14px;
+  font-size: 16px;
   color: var(--syn-text-dim);
   font-family: "SFMono-Regular", "Menlo", "Consolas", "Liberation Mono", monospace;
 }
 .cl-name {
-  width: 130px;
+  width: 150px;
   flex-shrink: 0;
   font-weight: 700;
   text-align: right;
