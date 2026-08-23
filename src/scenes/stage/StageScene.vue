@@ -73,7 +73,7 @@ watch(currentScene, syncComponent, { immediate: true });
 </script>
 
 <template>
-  <div class="stage scanlines">
+  <div class="stage">
     <SynthwaveBg />
 
     <div class="stage-host">

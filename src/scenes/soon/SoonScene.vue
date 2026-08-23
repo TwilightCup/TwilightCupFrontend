@@ -122,7 +122,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="scene scanlines">
+  <div class="scene">
     <SynthwaveBg v-if="!sharedBg" />
 
     <div class="content soon-content">

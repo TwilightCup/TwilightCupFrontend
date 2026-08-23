@@ -83,21 +83,6 @@ body,
     0 8px 32px rgba(0, 0, 0, 0.4);
 }
 
-/* 全屏扫描线覆盖（贴在最上层，不挡交互） */
-.scanlines::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  pointer-events: none;
-  background: repeating-linear-gradient(
-    0deg,
-    rgba(0, 0, 0, 0.16) 0 1px,
-    transparent 1px 3px
-  );
-  mix-blend-mode: multiply;
-}
-
 /* mock 角标：右上角提示当前为假数据 */
 .mock-badge {
   position: fixed;

@@ -35,7 +35,7 @@ onUnmounted(stop);
 </script>
 
 <template>
-  <div class="scene scanlines">
+  <div class="scene">
     <SynthwaveBg v-if="!sharedBg" />
 
     <div v-if="!params.token" class="notice">

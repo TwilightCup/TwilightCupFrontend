@@ -161,7 +161,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="scene scanlines">
+  <div class="scene">
     <SynthwaveBg v-if="!sharedBg" />
 
     <div v-if="!params.token" class="notice">
@@ -233,7 +233,7 @@ onUnmounted(() => {
 .viewport {
   position: absolute;
   inset: 0;
-  /* 卡片层压过全部背景元素（SynthwaveBg z-index:0；仍在扫描线 z-50 之下） */
+  /* 卡片层压过全部背景元素（SynthwaveBg z-index:0） */
   z-index: 20;
   overflow: hidden;
 }
