@@ -188,6 +188,22 @@ export const useDirectorStore = defineStore("director", () => {
         countdownRemaining.value = null;
         countdownSource.value = null;
         break;
+      case "pick_announced": {
+        // 裁判选图确定（进入 PREP 前）即重置上一回合数据：场景计时 / 偏差条
+        // 提前归零，并以预览 pick 提前切换多关 / 单关布局。
+        // round_start 仍是权威（重复赋值幂等，届时补上真实 round_id）。
+        currentRound.value = {
+          roundId: "",
+          pick: msg.pick,
+          collection: msg.collection,
+          type: msg.pick.type,
+        };
+        playerA.value = freshPlayer();
+        playerB.value = freshPlayer();
+        matchWinner.value = null;
+        lastResult.value = null;
+        break;
+      }
       case "round_start":
         currentRound.value = {
           roundId: msg.round_id,

@@ -1020,10 +1020,6 @@ const messages = {
   "scenes.edit.rtmpB": "选手B RTMP（红）",
   "scenes.edit.hlsA": "选手A HLS（可播）",
   "scenes.edit.hlsB": "选手B HLS（可播）",
-  "scenes.edit.pbA": "选手A PB",
-  "scenes.edit.pbB": "选手B PB",
-  "scenes.edit.histA": "选手A 历史战绩",
-  "scenes.edit.histB": "选手B 历史战绩",
   "scenes.edit.save": "保存",
   "scenes.edit.close": "关闭",
   "scenes.bracket.title": "赛程图",
@@ -1038,12 +1034,7 @@ const messages = {
   "scenes.mappool.title": "图池",
   "scenes.mappool.empty": "暂无图池数据",
   "scenes.mappool.mockHint": "图池（示例）",
-  "scenes.match.title": "比赛详情",
-  "scenes.match.score": "比分",
   "scenes.match.waitingSignal": "等待信号",
-  "scenes.match.forfeit": "弃权",
-  "scenes.match.pb": "PB",
-  "scenes.match.history": "暂无历史战绩",
   "scenes.tug.faster": "领先",
 
   // ── format fallback ──────────────────────────────────────────────────

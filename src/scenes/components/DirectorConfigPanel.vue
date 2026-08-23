@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 导播配置弹层：编辑选手 A/B 的 RTMP / HLS 流地址 + PB + 历史战绩。
+ * 导播配置弹层：编辑选手 A/B 的 RTMP / HLS 流地址。
  *
  * 由 ?edit=1 自动唤起，或齿轮按钮手动唤起。保存即写 localStorage 并 emit('saved')，
  * 场景页据此实时反映。OBS 抓图前应关闭此面板（点遮罩或保存均可）。
@@ -36,19 +36,14 @@ watch(
 interface Field {
   key: keyof DirectorConfig;
   label: string;
-  area: boolean; // 文本域（多行）vs 单行输入
   placeholder: string;
 }
 
 const fields: Field[] = [
-  { key: "rtmpA", label: t("scenes.edit.rtmpA"), area: false, placeholder: "rtmp://..." },
-  { key: "rtmpB", label: t("scenes.edit.rtmpB"), area: false, placeholder: "rtmp://..." },
-  { key: "hlsA", label: t("scenes.edit.hlsA"), area: false, placeholder: "https://.../a.m3u8" },
-  { key: "hlsB", label: t("scenes.edit.hlsB"), area: false, placeholder: "https://.../b.m3u8" },
-  { key: "pbA", label: t("scenes.edit.pbA"), area: false, placeholder: "0:42.318" },
-  { key: "pbB", label: t("scenes.edit.pbB"), area: false, placeholder: "0:42.318" },
-  { key: "histA", label: t("scenes.edit.histA"), area: true, placeholder: "..." },
-  { key: "histB", label: t("scenes.edit.histB"), area: true, placeholder: "..." },
+  { key: "rtmpA", label: t("scenes.edit.rtmpA"), placeholder: "rtmp://..." },
+  { key: "rtmpB", label: t("scenes.edit.rtmpB"), placeholder: "rtmp://..." },
+  { key: "hlsA", label: t("scenes.edit.hlsA"), placeholder: "https://.../a.m3u8" },
+  { key: "hlsB", label: t("scenes.edit.hlsB"), placeholder: "https://.../b.m3u8" },
 ];
 
 function close(): void {
@@ -73,8 +68,7 @@ function save(): void {
         <div class="grid">
           <label v-for="f in fields" :key="f.key" class="field">
             <span class="lbl">{{ f.label }}</span>
-            <textarea v-if="f.area" v-model="form[f.key]" rows="3" :placeholder="f.placeholder" />
-            <input v-else v-model="form[f.key]" :placeholder="f.placeholder" />
+            <input v-model="form[f.key]" :placeholder="f.placeholder" />
           </label>
         </div>
 
@@ -143,8 +137,7 @@ function save(): void {
   color: var(--syn-text-dim);
   letter-spacing: 0.4px;
 }
-input,
-textarea {
+input {
   background: rgba(10, 1, 24, 0.7);
   border: 1px solid var(--syn-border);
   border-radius: 8px;
@@ -152,10 +145,8 @@ textarea {
   padding: 7px 10px;
   font: inherit;
   font-size: 13px;
-  resize: vertical;
 }
-input:focus,
-textarea:focus {
+input:focus {
   outline: none;
   border-color: var(--syn-border-bright);
   box-shadow: 0 0 0 2px rgba(34, 227, 255, 0.18);

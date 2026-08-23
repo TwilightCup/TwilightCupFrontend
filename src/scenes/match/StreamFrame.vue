@@ -1,10 +1,11 @@
 <script setup lang="ts">
 /**
- * 选手直播框（4:3）。
+ * 选手直播卡（4:3）。16:9 推流经 object-fit:cover 居中裁去左右两侧，铺满卡片。
  *
- * 浏览器不能直放 RTMP（仅 ingest）：给了转码 HLS（hlsUrl）→ <video autoplay muted> 直放
- * （Safari 原生 HLS；其余浏览器若需 hls.js 再后补，当前不引重依赖）。否则 synthwave 占位：
- * 大号选手名 + 霓虹 LIVE/等待信号 + RTMP URL 小字（供 OBS 参考）。
+ * 浏览器不能直放 RTMP（仅 ingest）：给了转码 HLS（hlsUrl）→ <video autoplay muted>
+ * 直放（Safari 原生 HLS；其余浏览器若需 hls.js 再后补，当前不引重依赖）。
+ * 未推流：透出卡片背景（合成器动画 + 扫描线）+ 选手主题色内边框 + 等待信号 +
+ * RTMP URL 小字（供 OBS 参考）；推流接入后画面完整覆盖卡片区域（无边框）。
  *
  * side='A' 蓝（左）、'B' 红（右）。
  */
@@ -13,7 +14,6 @@ import { bi } from "@/utils/bilingual";
 
 const props = defineProps<{
   side: "A" | "B";
-  name: string;
   hlsUrl: string;
   rtmpUrl: string;
 }>();
@@ -33,39 +33,27 @@ const hasVideo = computed(() => !!props.hlsUrl);
     />
     <div v-else class="placeholder">
       <div class="live">● {{ bi("scenes.match.waitingSignal") }}</div>
-      <div class="pname" :class="side">{{ name }}</div>
       <div v-if="rtmpUrl" class="rtmp">{{ rtmpUrl }}</div>
-      <div v-else class="rtmp dim">{{ bi("scenes.match.waitingSignal") }}</div>
     </div>
   </div>
 </template>
 
 <style scoped>
+/* 双卡各占半宽无缝拼成 8:3，满铺 1920px（外层 .streams 控制） */
 .frame {
   position: relative;
   width: 100%;
   aspect-ratio: 4 / 3;
-  border-radius: 14px;
   overflow: hidden;
-  border: 3px solid var(--syn-border);
-  background: rgba(8, 0, 20, 0.85);
-  box-shadow: 0 0 30px rgba(0, 0, 0, 0.5);
-}
-.frame.A {
-  border-color: var(--syn-a);
-  box-shadow: 0 0 24px rgba(61, 139, 255, 0.35);
-}
-.frame.B {
-  border-color: var(--syn-b);
-  box-shadow: 0 0 24px rgba(255, 107, 74, 0.35);
+  background: #050010;
 }
 .video {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: cover; /* 16:9 → 4:3：裁去左右 */
   background: #000;
 }
-/* 占位：动画渐变 + 扫描线 */
+/* 占位：动画渐变 + 扫描线 + 主题色内边框（推流后不渲染，画面完整覆盖） */
 .placeholder {
   position: absolute;
   inset: 0;
@@ -89,12 +77,18 @@ const hasVideo = computed(() => !!props.hlsUrl);
   );
   pointer-events: none;
 }
+.frame.A .placeholder {
+  box-shadow: inset 0 0 0 3px var(--syn-a), inset 0 0 24px rgba(61, 139, 255, 0.25);
+}
+.frame.B .placeholder {
+  box-shadow: inset 0 0 0 3px var(--syn-b), inset 0 0 24px rgba(255, 107, 74, 0.25);
+}
 @keyframes shift {
   0%, 100% { background-position: 0 0; }
   50% { background-position: 100% 100%; }
 }
 .live {
-  font-size: clamp(12px, 1.1vw, 16px);
+  font-size: clamp(12px, 1.4vw, 20px);
   font-weight: 800;
   color: var(--syn-magenta);
   letter-spacing: 1px;
@@ -103,18 +97,6 @@ const hasVideo = computed(() => !!props.hlsUrl);
 }
 @keyframes blink {
   50% { opacity: 0.4; }
-}
-.pname {
-  font-size: clamp(22px, 3vw, 46px);
-  font-weight: 900;
-  z-index: 1;
-  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.7);
-}
-.pname.A {
-  color: var(--syn-a);
-}
-.pname.B {
-  color: var(--syn-b);
 }
 .rtmp {
   z-index: 1;
@@ -125,8 +107,5 @@ const hasVideo = computed(() => !!props.hlsUrl);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.rtmp.dim {
-  font-style: italic;
 }
 </style>
