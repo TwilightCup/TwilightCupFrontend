@@ -176,9 +176,9 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: 1fr 1fr;
 }
-/* 偏差条：横向贯穿大部分屏宽 */
+/* 偏差条：满画面宽，上缘贴紧选手画面下缘 */
 .diff-zone {
-  padding: 1.6vh 10vw 0;
+  padding: 0;
 }
 /* 计时器：双列以画面水平中心为锚（A 列靠右、B 列靠左），锚定画面底部 */
 .timers {
