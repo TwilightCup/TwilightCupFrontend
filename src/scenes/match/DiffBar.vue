@@ -2,7 +2,7 @@
 /**
  * 多关偏差条：以游标为界，左侧填 A 主题色、右侧填 B 主题色；白色竖向游标
  * （直角、不出条体）+ 游标正下方（条外）跟随移动的偏差值（纯白绝对值，
- * 不足 1 分钟显示 SS.cc，达到 1 分钟后显示 MM:SS.cc）。
+ * 不足 1 分钟显示 S.cc，达到 1 分钟后进位为 M:SS.cc，均不补零）。
  *
  * 条体直角无描边、满宽，上缘由外层贴紧选手画面下缘。偏差值随游标移动，
  * 但水平位置经 clamp 限制在画面内（触边时向内收，不再溢出屏幕）。
@@ -25,14 +25,14 @@ const offsetPct = computed(() => {
   return ratio * 50;
 });
 
-/** 偏差值文本：绝对值，SS.cc；≥1 分钟进位为 MM:SS.cc（厘秒） */
+/** 偏差值文本：绝对值，S.cc 不补零；≥1 分钟进位为 M:SS.cc（厘秒） */
 const diffText = computed(() => {
   const cs = Math.max(0, Math.round(Math.abs(props.diffMs) / 10));
   const m = Math.floor(cs / 6000);
   const s = Math.floor((cs % 6000) / 100);
   const c = cs % 100;
-  const tail = `${String(s).padStart(2, "0")}.${String(c).padStart(2, "0")}`;
-  return m > 0 ? `${String(m).padStart(2, "0")}:${tail}` : tail;
+  const tail = `${s}.${String(c).padStart(2, "0")}`;
+  return m > 0 ? `${m}:${tail}` : tail;
 });
 
 // ---- 偏差值水平限位：量取自身半宽，clamp 在 [半宽, 100%−半宽] 内 ----
