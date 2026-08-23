@@ -138,8 +138,6 @@ onUnmounted(() => {
         </section>
       </div>
 
-      <button class="scene-gear" :title="t('scenes.edit.title')" @click="panelOpen = true">⚙</button>
-
       <div v-if="isMock" class="mock-badge">{{ t("scenes.mockBadge") }}</div>
 
       <DirectorConfigPanel
