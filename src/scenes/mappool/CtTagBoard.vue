@@ -238,10 +238,11 @@ function maskId(tg: string): string {
   }
 }
 /* 被 pick：SVG 层画胶囊并用文本 mask 挖真孔——胶囊底透明，孔内直接透出板与背景。
-   文本 span 转隐形 ghost 仅负责撑尺寸；描边色与 SVG 填充同色形成完整胶囊轮廓 */
+   文本 span 转隐形 ghost 仅负责撑尺寸；边框转透明只留宽度（与其他态同尺寸不抖动），
+   胶囊轮廓完全由 SVG 层绘制（外沿即原边框外沿，无缩进缝隙） */
 .tag.picked {
   background: transparent;
-  border-color: var(--pc, var(--syn-cyan));
+  border-color: transparent;
   color: transparent;
 }
 .txt.ghost {
@@ -249,12 +250,15 @@ function maskId(tg: string): string {
 }
 /* 胶囊形由 CSS 圆角裁剪 SVG 得到：SVG rect 的 rx/ry 各自独立钳位（999 → w/2 与
    h/2），宽扁矩形会退化成内切椭圆、四个圆角填不满；CSS border-radius 按比例
-   缩放才是真胶囊，故 rect 不带 rx、整块填满后在此裁形 */
+   缩放才是真胶囊，故 rect 不带 rx、整块填满后在此裁形。
+   左上角 -1px + calc 尺寸铺到边框盒（外沿 = 原边框外沿，无缝隙）；尺寸必须
+   显式给——svg 是替换元素，只写 inset 不会拉伸，会回落到固有尺寸 300×150 */
 .knock {
   position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  left: -1px;
+  top: -1px;
+  width: calc(100% + 2px);
+  height: calc(100% + 2px);
   border-radius: 999px;
   overflow: hidden;
   pointer-events: none;
