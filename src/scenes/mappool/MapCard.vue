@@ -4,7 +4,8 @@
  *
  * 构成：背景图（logo_url cover；无自定义图时按名称回退官方关卡背景
  * pickDefaultBg，再无 / 加载失败回退类别色底）+ 左侧高对比
- * 类别色块 + 居中标题（名称 + 重试次数「N Attempts」小字）。
+ * 类别色块 + 居中标题（名称严格居中；重试次数「N Attempts」小字挂标题
+ * 右沿独立显示，不挤偏标题）。
  * CT 候选词条集中展示在 CT 类别下方的词条板（见 CtTagBoard.vue）；被 pick
  * 的 CT 选图在卡右下角持久横排展示携带词条（pick 方选手色、文本真镂空
  * 透出卡片背景，做法同词条板；不随回合重置）。
@@ -135,8 +136,10 @@ onUnmounted(() => {
 
       <div class="text">
         <div class="title-row">
-          <span class="name">{{ pick.name }}</span>
-          <span v-if="retry != null" class="retry">{{ retry }} Attempts</span>
+          <span class="name-wrap">
+            <span class="name">{{ pick.name }}</span>
+            <span v-if="retry != null" class="retry">{{ retry }} Attempts</span>
+          </span>
         </div>
       </div>
     </div>
@@ -296,27 +299,39 @@ onUnmounted(() => {
 }
 .title-row {
   display: flex;
-  align-items: baseline;
   justify-content: center;
-  gap: 0.5em;
   min-width: 0;
   line-height: 1.2;
+}
+/* 名称盒按内容宽参与居中（标题真正居中不被 attempts 挤偏），超宽自身截断 */
+.name-wrap {
+  display: flex;
+  /* flex 基线对齐取各子项行内真实文字基线——inline-block + overflow:hidden
+     的合成基线是盒底边，会把 attempts 拉到标题盒底 */
+  align-items: baseline;
+  max-width: 100%;
+  min-width: 0;
   white-space: nowrap;
-  overflow: hidden;
 }
 .name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: calc(var(--row-h, 96px) * 0.4);
   font-weight: 800;
   color: var(--syn-text);
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
-/* 重试次数：与标题同色、字号略小，后缀 Attempts */
+/* 重试次数：零宽 flex 项参与基线对齐（字形底随字体度量精确一致），文本向
+   右溢出可见；负右 margin 抵消占位，标题居中不受影响。小号浅灰注释体 */
 .retry {
-  font-size: calc(var(--row-h, 96px) * 0.3);
-  font-weight: 600;
-  color: var(--syn-text);
   flex-shrink: 0;
+  width: 0;
+  margin-left: 0.45em;
+  margin-right: -0.45em;
+  font-size: calc(var(--row-h, 96px) * 0.22);
+  font-weight: 600;
+  color: var(--syn-text-dim);
+  white-space: nowrap;
 }
 
 /* ---- pick 闪烁：只闪内容层，边框保持稳定 ---- */
