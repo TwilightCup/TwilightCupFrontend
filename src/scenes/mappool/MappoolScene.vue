@@ -205,7 +205,7 @@ const overflowing = computed(
 const CHAT_TOP_RESERVE = 227;
 /** 行的实际渲染高度占行预算的比例（与 MapCard --card-h / CtTagBoard .tag-board
  *  的高度算式配对）——rowH 只是布局预算，行盒真实高度是它的比例折算 */
-const CARD_H_RATIO = 0.66;
+const CARD_H_RATIO = 0.75;
 const TAGBOARD_H_RATIO = 0.92;
 /** 图池整体下沉：最下行底部贴近聊天盒顶部（按真实渲染高度判定装不装得下） */
 const pinnedToChat = computed(() => {

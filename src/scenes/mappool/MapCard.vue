@@ -4,7 +4,7 @@
  *
  * 构成：背景图（logo_url cover；无自定义图时按名称回退官方关卡背景
  * pickDefaultBg，再无 / 加载失败回退类别色底）+ 左侧高对比
- * 类别色块 + 居中标题（名称严格居中；重试次数「N Attempts」小字挂标题
+ * 类别色块 + 居中标题（名称严格居中；重试次数「xN」小字挂标题
  * 右沿独立显示，不挤偏标题）。
  * CT 候选词条集中展示在 CT 类别下方的词条板（见 CtTagBoard.vue）；被 pick
  * 的 CT 选图在卡右下角持久横排展示携带词条（pick 方选手色、文本真镂空
@@ -138,7 +138,7 @@ onUnmounted(() => {
         <div class="title-row">
           <span class="name-wrap">
             <span class="name">{{ pick.name }}</span>
-            <span v-if="retry != null" class="retry">{{ retry }} Attempts</span>
+            <span v-if="retry != null" class="retry">x{{ retry }}</span>
           </span>
         </div>
       </div>
@@ -199,7 +199,7 @@ onUnmounted(() => {
 
 <style scoped>
 .card {
-  --card-h: calc(var(--row-h, 96px) * 0.66); /* 贴合标题文本（0.4×行高×1.2 行距）+ 充足余量 */
+  --card-h: calc(var(--row-h, 96px) * 0.75); /* 标题文本（0.45×行高×1.2 行距）+ 均匀余量 */
   position: relative;
   width: var(--card-w, 100%);
   height: var(--card-h);
@@ -275,7 +275,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: calc(var(--row-h, 96px) * 0.24);
+  font-size: calc(var(--row-h, 96px) * 0.3);
   font-weight: 900;
   letter-spacing: 1px;
   color: #fff;
@@ -317,7 +317,7 @@ onUnmounted(() => {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: calc(var(--row-h, 96px) * 0.4);
+  font-size: calc(var(--row-h, 96px) * 0.45);
   font-weight: 800;
   color: var(--syn-text);
 }
@@ -328,7 +328,7 @@ onUnmounted(() => {
   width: 0;
   margin-left: 0.45em;
   margin-right: -0.45em;
-  font-size: calc(var(--row-h, 96px) * 0.22);
+  font-size: calc(var(--row-h, 96px) * 0.25);
   font-weight: 600;
   color: var(--syn-text-dim);
   white-space: nowrap;
@@ -418,7 +418,8 @@ onUnmounted(() => {
   position: relative;
   padding: 0.08em 0.55em;
   border-radius: 999px;
-  font-size: calc(var(--row-h, 96px) * 0.2);
+  /* 与词条板 .tag 同字号（0.27×行高），角标与板上词条等大 */
+  font-size: calc(var(--row-h, 96px) * 0.27);
   font-weight: 800;
   line-height: 1.25;
   white-space: nowrap;
@@ -442,7 +443,7 @@ onUnmounted(() => {
 }
 .knock-text {
   font-family: inherit;
-  font-size: calc(var(--row-h, 96px) * 0.2);
+  font-size: calc(var(--row-h, 96px) * 0.27);
   font-weight: 800;
 }
 </style>
