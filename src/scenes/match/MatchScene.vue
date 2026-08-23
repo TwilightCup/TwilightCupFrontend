@@ -180,11 +180,12 @@ onUnmounted(() => {
 .diff-zone {
   padding: 1.6vh 10vw 0;
 }
-/* 计时器：中轴对称，锚定画面底部 */
+/* 计时器：双列以画面水平中心为锚（A 列靠右、B 列靠左），锚定画面底部 */
 .timers {
   height: 14.5vh;
   display: grid;
   grid-template-columns: 1fr 1fr;
+  column-gap: 4vw;
   align-content: end;
   padding-bottom: 2.6vh;
 }
