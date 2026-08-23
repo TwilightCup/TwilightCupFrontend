@@ -628,8 +628,10 @@ const messages: MessageSchema = {
   "levelForm.nameExists": "Level name \"{name}\" already exists",
   "levelForm.labelDisplayName": "Display name",
   "levelForm.displayNamePlaceholder": "Display name, e.g. Mansion",
+  "levelForm.displayNameDefaultPlaceholder": "Official default: {name} (leave empty to use it)",
   "levelForm.labelLogo": "Cover image",
   "levelForm.logoHint": "png/jpg/webp/gif, ≤5MB",
+  "levelForm.logoDefaultHint": "Official default artwork (not customized)",
   "levelForm.createBtn": "Create level",
 
   // ── tournament detail ────────────────────────────────────────────────

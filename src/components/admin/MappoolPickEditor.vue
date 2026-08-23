@@ -8,6 +8,7 @@ import { useAdminStore } from "@/stores/admin";
 import { useAuthStore } from "@/stores/auth";
 import { CategoryKind, PickType, type Level, type Pick } from "@/api/types";
 import { categoryKindOf } from "@/utils/mappool";
+import { officialDisplayName } from "@/utils/officialLevels";
 
 /**
  * 单个选图编辑器。直接 mutate 父级传入的 reactive pick 引用。
@@ -177,11 +178,10 @@ function levelStatus(v: string): LvStatus {
   return "unknown";
 }
 
-/** 关卡显示名：display_name（name）；相同则仅 name。 */
+/** 关卡显示名：有效展示名（自定义 > 官方默认）（name）；相同则仅 name。 */
 function levelLabelOf(l: Level): string {
-  return l.display_name && l.display_name !== l.name
-    ? `${l.display_name}（${l.name}）`
-    : l.name;
+  const dn = l.display_name || officialDisplayName(l.name);
+  return dn && dn !== l.name ? `${dn}（${l.name}）` : l.name;
 }
 
 interface LvOption {

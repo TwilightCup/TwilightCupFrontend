@@ -11,6 +11,7 @@ import { api, ApiError } from "@/api/client";
 import { useAdminStore } from "@/stores/admin";
 import { useAuthStore } from "@/stores/auth";
 import type { Level } from "@/api/types";
+import { officialDisplayName, officialLevelBg } from "@/utils/officialLevels";
 
 const props = defineProps<{
   modelValue: boolean;
@@ -47,6 +48,17 @@ const rules = computed<FormRules>(() => ({
     ? []
     : [{ required: true, message: t("levelForm.nameRequired"), trigger: "blur" }],
 }));
+
+/** 展示名占位：关卡名命中官方 ID 时提示官方默认展示名，否则通用占位 */
+const displayNamePlaceholder = computed(() => {
+  const official = officialDisplayName(form.name.trim());
+  return official
+    ? t("levelForm.displayNameDefaultPlaceholder", { name: official })
+    : t("levelForm.displayNamePlaceholder");
+});
+
+/** 官方默认背景图（未自定义 logo 时的展示回退，随输入的关卡名实时变化） */
+const defaultBgUrl = computed(() => officialLevelBg(form.name.trim()));
 
 watch(
   () => props.modelValue,
@@ -174,7 +186,7 @@ async function onSubmit(): Promise<void> {
       <el-form-item :label="$t('levelForm.labelDisplayName')">
         <el-input
           v-model="form.displayName"
-          :placeholder="$t('levelForm.displayNamePlaceholder')"
+          :placeholder="displayNamePlaceholder"
         />
       </el-form-item>
       <el-form-item :label="$t('levelForm.labelLogo')">
@@ -184,6 +196,11 @@ async function onSubmit(): Promise<void> {
             <el-button link type="danger" :disabled="logoUploading" @click="onRemoveLogo">
               {{ $t("pickEditor.logoRemoveBtn") }}
             </el-button>
+          </div>
+          <!-- 未自定义且命中官方关卡：预览内置默认背景图（只读，无删除按钮） -->
+          <div v-else-if="defaultBgUrl" class="logo-preview">
+            <img :src="defaultBgUrl" :alt="form.displayName || form.name" />
+            <span class="hint">{{ $t('levelForm.logoDefaultHint') }}</span>
           </div>
           <el-upload
             :show-file-list="false"

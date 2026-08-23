@@ -631,8 +631,10 @@ const messages = {
   "levelForm.nameExists": "关卡名「{name}」已存在",
   "levelForm.labelDisplayName": "展示名",
   "levelForm.displayNamePlaceholder": "展示用名称，如 Mansion",
+  "levelForm.displayNameDefaultPlaceholder": "官方默认：{name}（留空即采用）",
   "levelForm.labelLogo": "展示图",
   "levelForm.logoHint": "png/jpg/webp/gif，≤5MB",
+  "levelForm.logoDefaultHint": "官方默认展示图（未自定义）",
   "levelForm.createBtn": "创建关卡",
 
   // ── 赛事详情（TournamentDetailView） ─────────────────────────────────
