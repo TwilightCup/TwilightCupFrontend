@@ -126,8 +126,8 @@ onUnmounted(() => {
           <StreamFrame side="B" :hls-url="config.hlsB" :rtmp-url="config.rtmpB" />
         </section>
 
-        <!-- 多关偏差条（单关模式整体隐藏） -->
-        <section v-if="isMulti" class="diff-zone">
+        <!-- 多关偏差条（单关模式降为透明占位，不参与布局收缩） -->
+        <section class="diff-zone" :class="{ off: !isMulti }">
           <DiffBar :diff-ms="diffMs" :gap-ms="params.gapMs" />
         </section>
 
@@ -176,9 +176,13 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: 1fr 1fr;
 }
-/* 偏差条：满画面宽，上缘贴紧选手画面下缘 */
+/* 偏差条：满画面宽，上缘贴紧选手画面下缘；单关模式透明占位避免布局偏移 */
 .diff-zone {
   padding: 0;
+  transition: opacity 0.3s ease;
+}
+.diff-zone.off {
+  opacity: 0;
 }
 /* 计时器：双列以画面水平中心为锚（A 列靠右、B 列靠左），锚定画面底部 */
 .timers {

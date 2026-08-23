@@ -22,7 +22,8 @@ defineProps<{
       <div class="main">{{ main }}</div>
       <div class="rule" />
     </div>
-    <div v-if="sub != null" class="sub">{{ sub }}</div>
+    <!-- 副计时器隐藏时降为透明占位（保留行高，避免主计时器位置偏移） -->
+    <div class="sub" :class="{ ghost: sub == null }">{{ sub }}</div>
   </div>
 </template>
 
@@ -72,6 +73,11 @@ defineProps<{
   font-weight: 700;
   color: #fff;
   line-height: 1.1;
+  min-height: 1.1em; /* 空内容时保留行高占位 */
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
+  transition: opacity 0.3s ease;
+}
+.sub.ghost {
+  opacity: 0;
 }
 </style>
