@@ -5,9 +5,10 @@
  * 1920×1080 固定画布（16:9），居中呈示并按视口等比缩放（ResizeObserver →
  * transform: scale），容忍微幅宽高比调整不重叠不溢出。
  *
- * 布局：按类别（ML/IL/CP/CT/EX/TB）竖向分带；任一类别选图数 ≥5 → 三列模式
- * （每行至多 3 图、卡片等比收缩），否则双列模式（每行至多 2 图）；每行按本行
- * 卡片数水平居中。行高按总行数在画布内预算分摊（越界大池降级为板内滚动）。
+ * 布局：无页标题，按类别（ML/IL/CP/CT/EX/TB）竖向分带整体靠上；任一类别选图
+ * 数 ≥5 → 三列模式（每行至多 3 图、卡片等比收缩），否则双列模式（每行至多
+ * 2 图）；每行按本行卡片数水平居中。行高按总行数在画布内预算分摊（越界大池
+ * 降级为板内滚动）。左下角为比赛聊天区（样式对齐管理端日志单行聊天）。
  *
  * 数据：图池 REST（useMappoolData，失败 mock 兜底）+ BP 状态 WS（裁判端
  * draft_sync → 后端广播 draft_state → director.draft，经 useDraftStatus 解析）。
@@ -16,12 +17,13 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 
-import { useDirectorStore } from "@/stores/director";
+import { useDirectorStore, type DirectorChatLine } from "@/stores/director";
 import SynthwaveBg from "@/scenes/components/SynthwaveBg.vue";
 import { useSceneContext } from "@/scenes/composables/useSceneContext";
 import { useDraftStatus, retryOf } from "./useDraftStatus";
 import { useMappoolData, type MappoolGroup } from "./useMappoolData";
 import { ctTagsFor } from "@/utils/mappool";
+import { shortTime } from "@/utils/format";
 import { bi } from "@/utils/bilingual";
 import { MatchPhase, PickType, type CategoryKind, type Pick } from "@/api/types";
 import MapCard from "./MapCard.vue";
@@ -36,8 +38,8 @@ const { groups, isMock, load } = useMappoolData();
 const BOARD_W = 1920;
 const BOARD_H = 1080;
 const PAD_T = 34;
+/** 行高预算按整幅画布扣上下边距（聊天是左下角悬浮层，不占行高预算） */
 const PAD_B = 38;
-const HEAD_H = 64; // 页标题区（含下间距）
 const R_GAP = 10; // 行间距（类别之间同此间距，无类别头）
 const CARD_GAP = 24; // 行内卡间距
 const MIN_ROW_H = 46;
@@ -106,8 +108,26 @@ const activePickSide = computed(() => {
   return code ? (draftStatus.value.statusByCode.get(code)?.by ?? null) : null;
 });
 
-/** 行区可用高度（扣去页标题；类别间无头、间距同行距） */
-const availForRowArea = computed(() => BOARD_H - PAD_T - PAD_B - HEAD_H);
+// ---- 左下角聊天区（实时 WS 流；样式对齐管理端日志的单行聊天） ----
+const CHAT_SHOW = 5;
+const chatLines = computed(() => director.chatLines.slice(-CHAT_SHOW));
+/** 名字着色类（与管理端一致：A 蓝 / B 橙 / 裁判黄 / 其余灰） */
+function senderClass(line: DirectorChatLine): string {
+  if (line.kind === "system") return "sys";
+  switch (line.seat) {
+    case "PLAYER_A":
+      return "pa";
+    case "PLAYER_B":
+      return "pb";
+    case "REFEREE":
+      return "ref";
+    default:
+      return "sys";
+  }
+}
+
+/** 行区可用高度（无页标题，扣上下边距；类别间无头、间距同行距） */
+const availForRowArea = computed(() => BOARD_H - PAD_T - PAD_B);
 
 const rowH = computed(() => {
   if (!totalRows.value) return MIN_ROW_H;
@@ -118,6 +138,26 @@ const rowH = computed(() => {
 const overflowing = computed(
   () => totalRows.value > 0 && availForRowArea.value / totalRows.value < MIN_ROW_H,
 );
+
+/** 内容底部贴聊天盒顶沿时距画布底部的距离：聊天底距 30 + 满高 174 + 空隙 16
+ *  （与 CSS .chat-box 的 bottom/height 配对）。行高预算仍按整幅画布（PAD_B=38），
+ *  聊天不占行高——内容装得下才下沉贴靠，装不下自动回顶部对齐避免裁顶。 */
+const CHAT_TOP_RESERVE = 220;
+/** 行的实际渲染高度占行预算的比例（与 MapCard --card-h / CtTagBoard .tag-board
+ *  的高度算式配对）——rowH 只是布局预算，行盒真实高度是它的比例折算 */
+const CARD_H_RATIO = 0.66;
+const TAGBOARD_H_RATIO = 0.92;
+/** 图池整体下沉：最下行底部贴近聊天盒顶部（按真实渲染高度判定装不装得下） */
+const pinnedToChat = computed(() => {
+  if (!totalRows.value || overflowing.value) return false;
+  const hasCtBoard = groups.value.some((g) => g.kind === "CT");
+  const cardRows = totalRows.value - (hasCtBoard ? 1 : 0);
+  const contentH =
+    cardRows * rowH.value * CARD_H_RATIO +
+    (hasCtBoard ? rowH.value * TAGBOARD_H_RATIO : 0) +
+    (totalRows.value - 1) * R_GAP;
+  return contentH <= BOARD_H - PAD_T - CHAT_TOP_RESERVE;
+});
 
 function chunk(picks: Pick[], n: number): Pick[][] {
   const rows: Pick[][] = [];
@@ -183,11 +223,10 @@ onUnmounted(() => {
           class="board"
           :style="{ transform: `translate(-50%, -50%) scale(${scale})` }"
         >
-          <header class="head">
-            <h1 class="title neon-text">{{ bi("scenes.mappool.title") }}</h1>
-          </header>
-
-          <div class="pool" :class="[colsClass, { overflowing }]">
+          <div
+            class="pool"
+            :class="[colsClass, { overflowing, pinned: pinnedToChat }]"
+          >
             <section v-for="g in layout" :key="g.kind" class="group">
               <div class="rows">
                 <div
@@ -226,6 +265,21 @@ onUnmounted(() => {
               {{ bi("scenes.mappool.empty") }}
             </div>
           </div>
+
+          <!-- 左下角比赛聊天：固定满尺寸常显（消息不足也占满 5 行高），
+               单行样式对齐管理端日志（时间 + 着色名 + 文本） -->
+          <aside class="chat-box">
+            <div
+              v-for="line in chatLines"
+              :key="line.id"
+              class="chat-line"
+              :class="{ sys: line.kind === 'system' }"
+            >
+              <span class="cl-time">{{ shortTime(line.ts) }}</span>
+              <span class="cl-name" :class="`cl-${senderClass(line)}`">{{ line.sender }}</span>
+              <span class="cl-text">{{ line.text }}</span>
+            </div>
+          </aside>
         </div>
       </div>
 
@@ -257,31 +311,23 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
 }
-.head {
-  height: 64px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-}
-.title {
-  margin: 0;
-  font-size: 44px;
-  font-weight: 900;
-  letter-spacing: 3px;
-}
 .pool {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 10px; /* 类别之间与行距一致，整体紧凑 */
-  /* 卡片贴合标题后整体变矮，块在画布内垂直居中 */
-  justify-content: center;
+  /* 无页标题，整体靠上；聊天为左下角悬浮层（半透明、不挡交互） */
+  justify-content: flex-start;
 }
 .pool.overflowing {
   overflow-y: auto;
-  /* 居中 + 滚动会裁掉顶部，溢出降级时回到顶部对齐 */
-  justify-content: flex-start;
+}
+/* 整体下沉：最下行底部压到聊天盒顶沿上方（220 = 底距30 + 满高174 + 空隙16，
+   换算池内下边距 220 − 画布底距38 = 182）。pinned 由脚本判定：内容装得下才贴靠 */
+.pool.pinned {
+  justify-content: flex-end;
+  padding-bottom: 182px;
 }
 .group {
   flex-shrink: 0;
@@ -310,6 +356,75 @@ onUnmounted(() => {
   text-align: center;
   padding: 200px 0;
   font-size: 22px;
+}
+
+/* ---- 左下角聊天区（OBS 只读展示；单行样式对齐管理端日志） ---- */
+.chat-box {
+  position: absolute;
+  left: 34px;
+  bottom: 30px;
+  width: 660px;
+  /* 固定满尺寸：5 行内容 + 4 间距 + 上下内边距与边框（场景页无全局
+     border-box，须显式声明否则 height 只含内容区） */
+  box-sizing: border-box;
+  height: calc(5 * 22px + 4 * 8px + 2 * 14px + 2 * 2px);
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-radius: 14px;
+  border: 2px solid var(--syn-border);
+  /* 半透明板：背景动画隐约透出，与词条板一致 */
+  background: var(--syn-panel);
+  pointer-events: none;
+}
+.chat-line {
+  display: flex;
+  align-items: baseline;
+  font-size: 17px;
+  /* 固定行高：与 .chat-box 高度算式配对 */
+  line-height: 22px;
+}
+/* 系统行整体变暗（与管理端一致） */
+.chat-line.sys .cl-name,
+.chat-line.sys .cl-text {
+  color: var(--syn-text-dim);
+}
+.cl-time {
+  width: 64px;
+  flex-shrink: 0;
+  font-size: 14px;
+  color: var(--syn-text-dim);
+  font-family: "SFMono-Regular", "Menlo", "Consolas", "Liberation Mono", monospace;
+}
+.cl-name {
+  width: 130px;
+  flex-shrink: 0;
+  font-weight: 700;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-left: 2px;
+}
+/* 名字按身份着色：A 蓝 / B 橙 / 裁判黄 / 其余灰（与管理端一致） */
+.cl-sys {
+  color: var(--syn-text-dim);
+}
+.cl-pa {
+  color: var(--syn-a);
+}
+.cl-pb {
+  color: var(--syn-b);
+}
+.cl-ref {
+  color: #f0a020;
+}
+.cl-text {
+  margin-left: 10px;
+  color: var(--syn-text);
+  word-break: break-word;
+  white-space: pre-wrap;
 }
 .notice {
   position: absolute;

@@ -56,6 +56,16 @@ interface LogLine {
   text: string;
 }
 
+/** 场景页聊天行（结构化，供导播场景按身份着色渲染，样式对齐管理端日志） */
+export interface DirectorChatLine {
+  id: number;
+  ts: string;
+  kind: "chat" | "system";
+  seat: SeatName | "";
+  sender: string;
+  text: string;
+}
+
 const MAX_LOG = 200;
 
 function clock(): string {
@@ -117,6 +127,16 @@ export const useDirectorStore = defineStore("director", () => {
   const metaReady = ref(false);
 
   const messages = ref<LogLine[]>([]);
+
+  /** 聊天行（时间正序追加；仅实时 WS 流，无历史回填——场景页接入即从当下开始） */
+  const chatLines = ref<DirectorChatLine[]>([]);
+  let chatSeq = 0;
+  function pushChatLine(line: Omit<DirectorChatLine, "id">): void {
+    chatLines.value.push({ id: ++chatSeq, ...line });
+    if (chatLines.value.length > MAX_LOG) {
+      chatLines.value.splice(0, chatLines.value.length - MAX_LOG);
+    }
+  }
 
   /** ban/pick 草稿状态（裁判端权威上报、后端转发；供叠加层渲染 ban/pick 动画） */
   const draft = ref<Record<string, unknown> | null>(null);
@@ -207,9 +227,11 @@ export const useDirectorStore = defineStore("director", () => {
         if (msg.seat === "PLAYER_A") nameA.value = msg.sender_name;
         else if (msg.seat === "PLAYER_B") nameB.value = msg.sender_name;
         log("chat", `${msg.sender_name}：${msg.text}`, msg.ts);
+        pushChatLine({ ts: msg.ts, kind: "chat", seat: msg.seat, sender: msg.sender_name, text: msg.text });
         break;
       case "system":
         log("system", msg.text, msg.ts);
+        pushChatLine({ ts: msg.ts, kind: "system", seat: "", sender: msg.sender ?? "Twilight", text: msg.text });
         break;
       case "error":
         log("error", tr("log.errorLog", { code: msg.code, msg: msg.msg }));
@@ -411,6 +433,7 @@ export const useDirectorStore = defineStore("director", () => {
     metaReady,
     // 日志
     messages,
+    chatLines,
     draft,
     // 派生 / 动作
     isMulti,
