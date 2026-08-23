@@ -90,7 +90,8 @@ const kindByCode = computed(() => {
 });
 /** 词条板高亮：当前回合 pick 携带的词条（仅 CT 选图——非 CT 选图即便带有
  * tag 字段也不点亮）。回合结束（ROUND_END / MATCH_END，含裁判强制结束）即
- * 复位——需求「回合重置」，下一轮 pick 后重新点亮。 */
+ * 复位——需求「回合重置」，下一轮 pick 后重新点亮。卡片右下角的词条角标
+ * 不走此门控，见 cardPickedTags。 */
 const activePickTags = computed(() => {
   if (
     director.phase === MatchPhase.ROUND_END ||
@@ -107,9 +108,11 @@ const activePickSide = computed(() => {
   const code = draftStatus.value.activePickCode;
   return code ? (draftStatus.value.statusByCode.get(code)?.by ?? null) : null;
 });
-/** 本卡为当前回合 pick 时携带的词条（仅 CT；回合结束复位，与词条板同步清空） */
+/** 本卡被 pick 时携带的词条（仅 CT；整场持久显示，不随回合重置——区别于
+ *  词条板的「回合复位」，与 ban/pick 终态同为整场有效） */
 function cardPickedTags(code: string): string[] {
-  return draftStatus.value.activePickCode === code ? activePickTags.value : [];
+  if (kindByCode.value.get(code) !== "CT") return [];
+  return draftStatus.value.pickedTagsByCode.get(code) ?? [];
 }
 
 // ---- 左下角聊天区（实时 WS 流；样式对齐管理端日志的单行聊天） ----

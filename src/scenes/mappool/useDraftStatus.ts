@@ -5,8 +5,10 @@
  * 转发），形状对齐裁判端 src/stores/draft.ts 的 DraftState。此处做防御性解析——
  * 形状不对/字段缺失一律得空状态，绝不让 OBS 画面抛错。
  *
- * 「回合重置」语义：picks 跨回合累积，但只有最后一条（当前回合所玩选图）的
- * tags 保持高亮；新 pick 到来后上一回合的词条自动回默认，无需额外清理逻辑。
+ * 「回合重置」语义：picks 跨回合累积，每条 pick 携带的词条按 code 持久记录
+ * （选图卡片右下角的词条角标据此整场显示）；词条板的高亮只取当前回合
+ * activePick 的词条并由消费侧按阶段门控复位，新 pick 到来后上一回合的
+ * 词条自动回默认，无需额外清理逻辑。
  */
 import { computed, type ComputedRef } from "vue";
 
@@ -31,7 +33,7 @@ export interface DraftStatus {
   bannedTags: string[];
   /** 各方 ban 的词条（TAG_BAN 环节每方一个；供词条板按选手色划线） */
   tagBanBy: { A: string | null; B: string | null };
-  /** code → 当前回合 pick 携带的高亮词条（仅 activePick 的 tags） */
+  /** code → 该选图被 pick 时携带的词条（跨回合持久，不随回合重置） */
   pickedTagsByCode: Map<string, string[]>;
 }
 
@@ -86,7 +88,9 @@ export function parseDraftStatus(raw: unknown): DraftStatus {
     else protectedByCode.set(a.code, a.by);
   }
 
-  // 2) picks（跨回合累积）：终态 pick + 重试次数 + 当前回合词条高亮
+  // 2) picks（跨回合累积）：终态 pick + 重试次数 + 词条（每条 pick 携带的
+  //    词条按 code 持久记录、跨回合不复位；词条板的「回合重置」由消费侧
+  //    只取 activePick + 阶段门控实现，与此处持久数据无关）
   const picks = Array.isArray((raw as { picks?: unknown }).picks)
     ? ((raw as { picks: unknown[] }).picks as RawPick[])
     : [];
@@ -94,14 +98,11 @@ export function parseDraftStatus(raw: unknown): DraftStatus {
     if (!p || typeof p.code !== "string" || !isSide(p.by)) continue;
     statusByCode.set(p.code, { kind: "pick", by: p.by });
     if (typeof p.retry === "number") retryByCode.set(p.code, p.retry);
-    activePickCode = p.code; // 最后一条即当前回合
-  }
-  if (activePickCode != null) {
-    const active = picks.find((p) => p && p.code === activePickCode);
-    if (active && Array.isArray(active.tags)) {
-      const tags = active.tags.filter((t): t is string => typeof t === "string");
-      if (tags.length) pickedTagsByCode.set(activePickCode, tags);
+    if (Array.isArray(p.tags)) {
+      const tags = p.tags.filter((t): t is string => typeof t === "string");
+      if (tags.length) pickedTagsByCode.set(p.code, tags);
     }
+    activePickCode = p.code; // 最后一条即当前回合
   }
 
   // 3) TAG_BAN 禁用词条 + 各方归属（划线按选手色）

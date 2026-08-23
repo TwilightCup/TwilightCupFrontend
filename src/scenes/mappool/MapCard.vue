@@ -5,9 +5,9 @@
  * 构成：背景图（logo_url cover；无自定义图时按名称回退官方关卡背景
  * pickDefaultBg，再无 / 加载失败回退类别色底）+ 左侧高对比
  * 类别色块 + 居中标题（名称 + 重试次数「N Attempts」小字）。
- * CT 候选词条集中展示在 CT 类别下方的词条板（见 CtTagBoard.vue）；当前
- * 回合 pick 携带的词条另在本卡右下角横排小胶囊复现（pick 方选手色、
- * 文本真镂空透出卡片背景，做法同词条板）。
+ * CT 候选词条集中展示在 CT 类别下方的词条板（见 CtTagBoard.vue）；被 pick
+ * 的 CT 选图在卡右下角持久横排展示携带词条（pick 方选手色、文本真镂空
+ * 透出卡片背景，做法同词条板；不随回合重置）。
  *
  * BP 三态（选手色 --pc / 辉光 --pc-glow 由 side 类内联提供）：
  * - ban：内容统一大幅变暗 + 选手色亮边框 + 右下角向内切角三角形内禁止图标；
@@ -32,7 +32,7 @@ const props = withDefaults(
     protectedBy: "A" | "B" | null;
     /** 重试次数（draft 指定值优先，回退 pick.retry_count；由父级经 retryOf 解析） */
     retry: number | null;
-    /** 当前回合 pick 携带的词条（仅 CT 活跃 pick 有值；回合结束复位为空） */
+    /** 本卡被 pick 时携带的词条（仅 CT；整场持久显示，不随回合重置） */
     pickedTags: string[];
   }>(),
   { pickedTags: () => [] },
@@ -159,8 +159,8 @@ onUnmounted(() => {
       </svg>
     </div>
 
-    <!-- 当前回合 pick 携带的词条（CT）：右下角横排小胶囊（pick 方选手色，
-         文本 SVG mask 真镂空——孔内直接透出卡片背景） -->
+    <!-- 被 pick 的 CT 选图携带的词条：右下角横排小胶囊整场持久显示
+         （pick 方选手色，文本 SVG mask 真镂空——孔内直接透出卡片背景） -->
     <div v-if="pickedTags.length" class="picked-tags">
       <span v-for="tg in pickedTags" :key="tg" class="ptag">
         <svg class="knock" aria-hidden="true">
