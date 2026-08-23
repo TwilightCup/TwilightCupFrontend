@@ -107,6 +107,10 @@ const activePickSide = computed(() => {
   const code = draftStatus.value.activePickCode;
   return code ? (draftStatus.value.statusByCode.get(code)?.by ?? null) : null;
 });
+/** 本卡为当前回合 pick 时携带的词条（仅 CT；回合结束复位，与词条板同步清空） */
+function cardPickedTags(code: string): string[] {
+  return draftStatus.value.activePickCode === code ? activePickTags.value : [];
+}
 
 // ---- 左下角聊天区（实时 WS 流；样式对齐管理端日志的单行聊天） ----
 const CHAT_SHOW = 5;
@@ -243,6 +247,7 @@ onUnmounted(() => {
                     :status="draftStatus.statusByCode.get(p.code) ?? null"
                     :protected-by="draftStatus.protectedByCode.get(p.code) ?? null"
                     :retry="retryOf(draftStatus, p)"
+                    :picked-tags="cardPickedTags(p.code)"
                   />
                 </div>
                 <!-- CT 词条板：整个类别下方一条横幅卡，后续类别自然下移 -->
@@ -371,6 +376,8 @@ onUnmounted(() => {
   padding: 14px 18px;
   display: flex;
   flex-direction: column;
+  /* 消息不足 5 行时整块垂直居中（满 5 行恰好填满，无可见变化） */
+  justify-content: center;
   gap: 8px;
   border-radius: 14px;
   border: 2px solid var(--syn-border);

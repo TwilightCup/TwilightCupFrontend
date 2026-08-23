@@ -5,7 +5,9 @@
  * 构成：背景图（logo_url cover；无自定义图时按名称回退官方关卡背景
  * pickDefaultBg，再无 / 加载失败回退类别色底）+ 左侧高对比
  * 类别色块 + 居中标题（名称 + 重试次数「N Attempts」小字）。
- * CT 候选词条不渲染在卡内，集中在 CT 类别下方的词条板（见 CtTagBoard.vue）。
+ * CT 候选词条集中展示在 CT 类别下方的词条板（见 CtTagBoard.vue）；当前
+ * 回合 pick 携带的词条另在本卡右下角横排小胶囊复现（pick 方选手色、
+ * 文本真镂空透出卡片背景，做法同词条板）。
  *
  * BP 三态（选手色 --pc / 辉光 --pc-glow 由 side 类内联提供）：
  * - ban：内容统一大幅变暗 + 选手色亮边框 + 右下角向内切角三角形内禁止图标；
@@ -13,23 +15,28 @@
  *   时角标保留并与 pick 边框叠加，配色用 protect 方选手色）；
  * - pick：选手色边框；新被选中瞬间高亮闪烁数次后回落常亮微辉。
  */
-import { computed, onUnmounted, ref, watch } from "vue";
+import { computed, onUnmounted, ref, watch, withDefaults } from "vue";
 
 import type { CategoryKind, Pick } from "@/api/types";
 import { categoryKindInfo } from "@/utils/format";
 import { pickDefaultBg } from "@/utils/mappool";
 import type { PickCardStatus } from "./useDraftStatus";
 
-const props = defineProps<{
-  pick: Pick;
-  kind: CategoryKind;
-  /** BP 终态（null = 中性） */
-  status: PickCardStatus | null;
-  /** protect 方（整场有效；null = 未被 protect） */
-  protectedBy: "A" | "B" | null;
-  /** 重试次数（draft 指定值优先，回退 pick.retry_count；由父级经 retryOf 解析） */
-  retry: number | null;
-}>();
+const props = withDefaults(
+  defineProps<{
+    pick: Pick;
+    kind: CategoryKind;
+    /** BP 终态（null = 中性） */
+    status: PickCardStatus | null;
+    /** protect 方（整场有效；null = 未被 protect） */
+    protectedBy: "A" | "B" | null;
+    /** 重试次数（draft 指定值优先，回退 pick.retry_count；由父级经 retryOf 解析） */
+    retry: number | null;
+    /** 当前回合 pick 携带的词条（仅 CT 活跃 pick 有值；回合结束复位为空） */
+    pickedTags: string[];
+  }>(),
+  { pickedTags: () => [] },
+);
 
 const kindShort = computed(() => categoryKindInfo(props.kind)?.short ?? props.kind);
 
@@ -86,6 +93,11 @@ const sideClass = computed(() =>
 const protClass = computed(() =>
   props.protectedBy ? (props.protectedBy === "A" ? "prot-a" : "prot-b") : null,
 );
+
+/** SVG mask id（词条名 slug；前缀 kmc- 区别于词条板的 kmt-，避免同文档 id 冲突） */
+function maskId(tg: string): string {
+  return `kmc-${tg.replace(/[^a-zA-Z0-9]+/g, "-")}`;
+}
 
 // ---- pick 闪烁：状态「新变为」pick 时脉冲数次（动画结束回落常亮） ----
 const flashing = ref(false);
@@ -145,6 +157,39 @@ onUnmounted(() => {
           fill="currentColor"
         />
       </svg>
+    </div>
+
+    <!-- 当前回合 pick 携带的词条（CT）：右下角横排小胶囊（pick 方选手色，
+         文本 SVG mask 真镂空——孔内直接透出卡片背景） -->
+    <div v-if="pickedTags.length" class="picked-tags">
+      <span v-for="tg in pickedTags" :key="tg" class="ptag">
+        <svg class="knock" aria-hidden="true">
+          <defs>
+            <mask :id="maskId(tg)" maskUnits="userSpaceOnUse" x="0" y="0" width="100%" height="100%">
+              <rect x="0" y="0" width="100%" height="100%" fill="#fff" />
+              <text
+                class="knock-text"
+                x="50%"
+                y="50%"
+                text-anchor="middle"
+                dominant-baseline="central"
+                fill="#000"
+              >
+                {{ tg }}
+              </text>
+            </mask>
+          </defs>
+          <rect
+            class="knock-fill"
+            x="0"
+            y="0"
+            width="100%"
+            height="100%"
+            :mask="`url(#${maskId(tg)})`"
+          />
+        </svg>
+        <span class="txt">{{ tg }}</span>
+      </span>
     </div>
   </div>
 </template>
@@ -339,5 +384,50 @@ onUnmounted(() => {
   height: 46%;
   color: #0a0118;
   z-index: 8;
+}
+
+/* ---- 当前回合 pick 词条（CT）：右下角横向小胶囊，底色用 pick 方选手色
+   （--pc 由 pick 状态的 side 类提供；层序高于内边框 z-5、低于切角角标 z-7）。
+   胶囊形由 CSS 圆角裁剪 SVG 得到（rect 不带 rx，缘由见词条板同类注释）；
+   文本 span 转隐形 ghost 只负责撑尺寸 ---- */
+.picked-tags {
+  position: absolute;
+  right: calc(var(--row-h, 96px) * 0.07);
+  bottom: calc(var(--row-h, 96px) * 0.06);
+  display: flex;
+  gap: calc(var(--row-h, 96px) * 0.08);
+  z-index: 6;
+  pointer-events: none;
+}
+.ptag {
+  position: relative;
+  padding: 0.08em 0.55em;
+  border-radius: 999px;
+  font-size: calc(var(--row-h, 96px) * 0.2);
+  font-weight: 800;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+.ptag .txt {
+  visibility: hidden;
+}
+/* svg 是替换元素：尺寸必须显式给，只写 inset 不拉伸（回落固有 300×150） */
+.knock {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.knock-fill {
+  fill: var(--pc);
+}
+.knock-text {
+  font-family: inherit;
+  font-size: calc(var(--row-h, 96px) * 0.2);
+  font-weight: 800;
 }
 </style>
