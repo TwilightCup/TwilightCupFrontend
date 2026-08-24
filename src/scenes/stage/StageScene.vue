@@ -9,8 +9,8 @@
  *    给 5 个内嵌场景。
  *  4. 渲染单个共享 SynthwaveBg + <Transition> 在 5 场景间交叉淡入切换。
  *  5. 监听 WS director_cmd 消息 + localStorage 兜底（同进程 Chrome 标签页）即时切换。
- *  6. 顶部信息栏常驻单实例（仅 match/mappool 场景显示，v-show 切换不重挂）：
- *    跨场景切换零闪烁——两场景各自内嵌的顶栏在 hosted 模式下让位（sharedTopBar）。
+ *  6. 顶部信息栏常驻单实例（match/mappool/categoryinfo 场景显示，v-show 切换不重挂）：
+ *    跨场景切换零闪烁——场景各自内嵌的顶栏在 hosted 模式下让位（sharedTopBar）。
  */
 import { computed, onMounted, onUnmounted, provide, ref, shallowRef, watch } from "vue";
 import { useDirectorStore } from "@/stores/director";
@@ -23,9 +23,10 @@ import {
 } from "@/scenes/composables/useSceneContext";
 import {
   bindStageScene,
+  SCENE_KEYS,
   type SceneKey,
 } from "./useStageScene";
-import Overlay from "@/overlay/Overlay.vue";
+import CategoryInfoScene from "@/scenes/categoryinfo/CategoryInfoScene.vue";
 import MatchScene from "@/scenes/match/MatchScene.vue";
 import MappoolScene from "@/scenes/mappool/MappoolScene.vue";
 import BracketScene from "@/scenes/bracket/BracketScene.vue";
@@ -43,9 +44,12 @@ provide<SceneContext>(SCENE_CONTEXT_KEY, {
 });
 
 const currentScene = ref<SceneKey>("match");
-/** 顶栏只在带选手/比赛信息的两场景显示（同实例 v-show，切换不闪） */
+/** 顶栏只在带选手/比赛信息的场景显示（同实例 v-show，切换不闪） */
 const showTopBar = computed(
-  () => currentScene.value === "match" || currentScene.value === "mappool",
+  () =>
+    currentScene.value === "match" ||
+    currentScene.value === "mappool" ||
+    currentScene.value === "categoryinfo",
 );
 let unbind: (() => void) | null = null;
 
@@ -54,9 +58,14 @@ onMounted(() => {
   unbind = bindStageScene(currentScene);
 
   // WS 广播：控制台发 director_cmd → store 更新 currentSceneCmd → 舞台切场景
+  // （含 state_sync 回放；指令值可能来自后端暂存的历史，按 SCENE_KEYS 校验防脏值）
   const unwatch = watch(
     () => director.currentSceneCmd,
-    (scene) => { if (scene) currentScene.value = scene as SceneKey; },
+    (scene) => {
+      if (scene && (SCENE_KEYS as string[]).includes(scene)) {
+        currentScene.value = scene as SceneKey;
+      }
+    },
   );
   onUnmounted(() => unwatch());
 });
@@ -66,14 +75,16 @@ onUnmounted(() => {
 });
 
 /** 当前场景组件（响应式） */
-const sceneMap: Record<SceneKey, typeof Overlay> = {
-  overlay: Overlay,
+const sceneMap: Record<SceneKey, typeof CategoryInfoScene> = {
+  categoryinfo: CategoryInfoScene,
   match: MatchScene,
   mappool: MappoolScene,
   bracket: BracketScene,
   soon: SoonScene,
 };
-const activeComponent = shallowRef<typeof Overlay>(sceneMap[currentScene.value]);
+const activeComponent = shallowRef<typeof CategoryInfoScene>(
+  sceneMap[currentScene.value],
+);
 // 切换时同步组件引用（Transition 用 key 区分，组件引用也跟着换）
 function syncComponent(): void {
   activeComponent.value = sceneMap[currentScene.value];

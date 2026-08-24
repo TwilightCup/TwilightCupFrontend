@@ -102,6 +102,12 @@ onMounted(() => {
           </el-tag>
         </template>
       </el-table-column>
+      <el-table-column :label="$t('admin.accounts.colSpeedrun')" min-width="120">
+        <template #default="{ row }">
+          <span v-if="row.speedrun_id" class="sr-bind">{{ row.speedrun_id }}</span>
+          <span v-else>{{ $t('common.dash') }}</span>
+        </template>
+      </el-table-column>
       <el-table-column :label="$t('common.createdAt')" width="170">
         <template #default="{ row }">{{ dateTime(row.created_at) }}</template>
       </el-table-column>
@@ -160,5 +166,9 @@ onMounted(() => {
 .acct-table {
   flex: 1;
   min-height: 0;
+}
+.sr-bind {
+  font-family: var(--el-font-family-mono, monospace);
+  font-size: 12px;
 }
 </style>

@@ -135,7 +135,7 @@ const stageUrl = computed(() => {
 
 // ---- 场景切换（写 localStorage → 合并舞台跨标签监听切换）----
 const sceneBtnLabels: Record<SceneKey, string> = {
-  overlay: "directorView.sceneBtnOverlay",
+  categoryinfo: "directorView.sceneBtnCategoryinfo",
   match: "directorView.sceneBtnMatch",
   mappool: "directorView.sceneBtnMappool",
   bracket: "directorView.sceneBtnBracket",
@@ -333,7 +333,7 @@ onUnmounted(() => {
             @update:model-value="(v: string | number | boolean) => onSwitchScene(v as SceneKey)"
           >
             <el-radio-button
-              v-for="key in (['soon','overlay','match','mappool','bracket'] as SceneKey[])"
+              v-for="key in (['soon','categoryinfo','match','mappool','bracket'] as SceneKey[])"
               :key="key"
               :value="key"
             >

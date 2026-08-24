@@ -2,14 +2,11 @@
 /**
  * 顶栏语言切换：列出仓库内已注册的 locale，点击切换并持久化（localStorage.twc_locale）。
  * Element Plus 组件内置文案随语言切换（由 App.vue 的 <el-config-provider> 桥接）。
- * 叠加层路由不显示，避免干扰 OBS 直播画面。
  */
 import { computed } from "vue";
-import { useRoute } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { LOCALES, setLocale, currentLocaleTag } from "@/locales";
 
-const route = useRoute();
 const { t } = useI18n();
 
 const current = computed(() => currentLocaleTag());
@@ -20,12 +17,7 @@ function onCommand(tag: string): void {
 </script>
 
 <template>
-  <el-dropdown
-    v-if="route.path !== '/overlay'"
-    trigger="click"
-    size="small"
-    @command="onCommand"
-  >
+  <el-dropdown trigger="click" size="small" @command="onCommand">
     <span class="lang" :title="t('language.switch')">
       <el-icon><Promotion /></el-icon>
       <span class="label">{{ current }}</span>

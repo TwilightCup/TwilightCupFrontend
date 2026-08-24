@@ -51,8 +51,8 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: fileURLToPath(new URL("./index.html", import.meta.url)),
-        overlay: fileURLToPath(new URL("./overlay.html", import.meta.url)),
         // 导播场景页（合成器浪潮全屏画面，各自一个独立链接）
+        categoryinfo: fileURLToPath(new URL("./categoryinfo.html", import.meta.url)),
         bracket: fileURLToPath(new URL("./bracket.html", import.meta.url)),
         mappool: fileURLToPath(new URL("./mappool.html", import.meta.url)),
         match: fileURLToPath(new URL("./match-scene.html", import.meta.url)),

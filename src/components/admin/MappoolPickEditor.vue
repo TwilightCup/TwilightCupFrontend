@@ -9,6 +9,7 @@ import { useAuthStore } from "@/stores/auth";
 import { CategoryKind, PickType, type Level, type Pick } from "@/api/types";
 import { categoryKindOf } from "@/utils/mappool";
 import { officialDisplayName } from "@/utils/officialLevels";
+import SpeedrunMappingEditor from "@/components/admin/SpeedrunMappingEditor.vue";
 
 /**
  * 单个选图编辑器。直接 mutate 父级传入的 reactive pick 引用。
@@ -510,6 +511,9 @@ async function onRemove(): Promise<void> {
       <div v-if="levelsError" class="lvl-err">{{ levelsError }}</div>
       <div v-if="levelsWarn" class="lvl-warn">{{ levelsWarn }}</div>
     </div>
+
+    <!-- speedrun.com 排行榜映射（导播 categoryinfo 场景拉榜依据） -->
+    <SpeedrunMappingEditor :pick="props.pick" />
   </div>
 </template>
 

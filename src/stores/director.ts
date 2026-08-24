@@ -124,6 +124,9 @@ export const useDirectorStore = defineStore("director", () => {
   const countdownDelay = ref<number | null>(null);
   /** 所属赛事 id（独立比赛为空）；赛程图场景页链接用 */
   const tournamentId = ref("");
+  /** 双方选手的 speedrun.com 账号绑定（REST getMyMatch 拉取；categoryinfo 场景高亮用） */
+  const speedrunA = ref<string | null>(null);
+  const speedrunB = ref<string | null>(null);
   const metaReady = ref(false);
 
   const messages = ref<LogLine[]>([]);
@@ -305,6 +308,8 @@ export const useDirectorStore = defineStore("director", () => {
       tournamentId.value = m.tournament_id || tournamentId.value;
       boFormat.value = m.bo_format || boFormat.value;
       winThreshold.value = m.win_threshold || winThreshold.value;
+      speedrunA.value = m.player_a_speedrun ?? null;
+      speedrunB.value = m.player_b_speedrun ?? null;
     } catch {
       // token 无权限等，忽略（下面 match_log 再试一次）
     }
@@ -483,6 +488,8 @@ export const useDirectorStore = defineStore("director", () => {
     scoringMethodName,
     countdownDelay,
     tournamentId,
+    speedrunA,
+    speedrunB,
     metaReady,
     // 日志
     messages,

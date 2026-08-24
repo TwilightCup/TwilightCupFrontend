@@ -140,8 +140,6 @@ const messages: MessageSchema = {
   "brand.referee": "Twilight Cup · Referee",
   "brand.director": "Twilight Cup · Director",
   "brand.player": "Player Simulator",
-  "brand.overlayFallback": "Twilight Cup",
-
   // ── language ──────────────────────────────────────────────────────────
   "language.label": "Language",
   "language.switch": "Switch language",
@@ -498,7 +496,7 @@ const messages: MessageSchema = {
   "directorView.sceneUnavailable": "Unavailable (needs a tournament / connection)",
   "directorView.sceneSwitchTitle": "Scene switch (merged stage)",
   "directorView.sceneSwitchHint": "Switches instantly on the \"merged stage\" source below via WS broadcast (works across browsers/machines). The stage must already be open — a stage opened later syncs on the next switch.",
-  "directorView.sceneBtnOverlay": "Overlay info",
+  "directorView.sceneBtnCategoryinfo": "Category Info",
   "directorView.sceneBtnMatch": "Match detail",
   "directorView.sceneBtnMappool": "Mappool",
   "directorView.sceneBtnBracket": "Bracket",
@@ -520,10 +518,6 @@ const messages: MessageSchema = {
   "directorView.soonFinished": "Finished",
   "directorView.progLevel": "Level {idx}",
   "directorView.progAttempt": "Attempt {count}",
-
-  // ── overlay ──────────────────────────────────────────────────────────
-  "overlay.noToken": "Missing token. Copy the \"merged stage\" link in the director console and paste the full URL into the OBS browser source.",
-  "overlay.matchWinner": "Player {winner} wins",
 
   // ── Coming Soon scene ──────────────────────────────────────────────
   "soon.noMatch": "Twilight Cup",
@@ -577,6 +571,7 @@ const messages: MessageSchema = {
   "admin.accounts.colUsername": "Username",
   "admin.accounts.colDisplayName": "Display name",
   "admin.accounts.colRoles": "Roles",
+  "admin.accounts.colSpeedrun": "speedrun",
   "admin.accounts.cannotDeleteSelf": "Cannot delete the currently logged-in account",
   "admin.accounts.deleteConfirmMsg": "Delete account \"{username} ({displayName})\"? This cannot be undone.",
   "admin.accounts.deleteConfirmTitle": "Delete account",
@@ -685,6 +680,9 @@ const messages: MessageSchema = {
   "accountForm.labelRoles": "Roles",
   "accountForm.rolesRequired": "Select at least one role",
   "accountForm.adminRoleHint": "Selecting \"Admin\" automatically includes referee + director",
+  "accountForm.labelSpeedrun": "speedrun",
+  "accountForm.speedrunPlaceholder": "speedrun.com username or 8-char user id",
+  "accountForm.speedrunHint": "Bound players are highlighted on the director category-info leaderboard",
   "accountForm.createBtn": "Create",
 
   // ── match form ───────────────────────────────────────────────────────
@@ -824,6 +822,22 @@ const messages: MessageSchema = {
   "pickEditor.logoNeedLogin": "Please sign in first",
   "pickEditor.logoRemoveTitle": "Remove logo",
   "pickEditor.logoRemoveConfirm": "Remove this pick's cover image?",
+  "pickEditor.srTitle": "speedrun.com leaderboard mapping (optional override)",
+  "pickEditor.srCategory": "Category",
+  "pickEditor.srCategoryPlaceholder": "Leave empty to auto-resolve from the pick",
+  "pickEditor.srLevel": "Level",
+  "pickEditor.srLevelPlaceholder": "Required for per-level categories",
+  "pickEditor.srVarPlaceholder": "All",
+  "pickEditor.srPerLevelTag": "IL",
+  "pickEditor.srClear": "Clear mapping",
+  "pickEditor.srLoading": "Loading options from speedrun.com…",
+  "pickEditor.srNone": "No override: the director scene auto-resolves the speedrun.com project from the pick's name / level / tags",
+  "pickEditor.srMappedSummary": "Mapped: {summary}",
+  "pickEditor.srLoadFail": "Failed to load speedrun.com options; switched to manual id input",
+  "pickEditor.srManualCategory": "Category id",
+  "pickEditor.srManualLevel": "Level id",
+  "pickEditor.srManualVars": "Subcategories",
+  "pickEditor.srManualVarsPlaceholder": "varId=valueId, comma separated",
 
   // ── tournament form ──────────────────────────────────────────────────
   "tourneyForm.titleEdit": "Edit tournament",
@@ -1035,6 +1049,22 @@ const messages: MessageSchema = {
   "scenes.mappool.title": "Mappool",
   "scenes.mappool.empty": "No mappool data",
   "scenes.mappool.mockHint": "Mappool (sample)",
+  "scenes.categoryinfo.title": "Leaderboard",
+  "scenes.categoryinfo.noPickTitle": "Awaiting pick",
+  "scenes.categoryinfo.noPickBody": "Once the referee announces the pick, its speedrun.com leaderboard shows up here",
+  "scenes.categoryinfo.noMappingTitle": "No leaderboard",
+  "scenes.categoryinfo.noMappingBody": "Couldn't resolve this pick's speedrun.com project (manual mapping can be set in the mappool editor)",
+  "scenes.categoryinfo.loading": "Loading leaderboard…",
+  "scenes.categoryinfo.error": "Failed to load leaderboard; retries on the next pick",
+  "scenes.categoryinfo.errorRateLimit": "speedrun.com rate limited, please retry later",
+  "scenes.categoryinfo.empty": "No runs on this board yet",
+  "scenes.categoryinfo.rankHeader": "Rank",
+  "scenes.categoryinfo.playerHeader": "Player",
+  "scenes.categoryinfo.timeHeader": "Time",
+  "scenes.categoryinfo.sourceNote": "Source: speedrun.com",
+  "scenes.categoryinfo.refreshedAt": "Updated {time}",
+  "scenes.categoryinfo.highlightLegend": "Highlighted = match players",
+  "scenes.categoryinfo.offlineBadge": "Disconnected",
   "scenes.match.waitingSignal": "Awaiting signal",
   "scenes.tug.faster": "Leading",
 

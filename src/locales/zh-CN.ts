@@ -143,7 +143,6 @@ const messages = {
   "brand.referee": "黄昏杯 · 裁判端",
   "brand.director": "黄昏杯 · 导播端",
   "brand.player": "选手模拟器",
-  "brand.overlayFallback": "黄昏杯",
 
   // ── 语言切换 ──────────────────────────────────────────────────────────
   "language.label": "语言",
@@ -501,7 +500,7 @@ const messages = {
   "directorView.sceneUnavailable": "暂不可用（需所属赛事 / 已连接）",
   "directorView.sceneSwitchTitle": "场景切换（合并舞台）",
   "directorView.sceneSwitchHint": "在下方的「合并舞台」源上即时切换（WS 广播，跨浏览器/机器）。舞台页须已打开；后打开的舞台再点一次场景即可对齐。",
-  "directorView.sceneBtnOverlay": "叠加信息",
+  "directorView.sceneBtnCategoryinfo": "项目信息",
   "directorView.sceneBtnMatch": "比赛详情",
   "directorView.sceneBtnMappool": "图池",
   "directorView.sceneBtnBracket": "赛程图",
@@ -523,10 +522,6 @@ const messages = {
   "directorView.soonFinished": "已结束",
   "directorView.progLevel": "第 {idx} 关",
   "directorView.progAttempt": "第 {count} 次",
-
-  // ── 导播叠加层（Overlay.vue） ────────────────────────────────────────
-  "overlay.noToken": "缺少 token。请在导播控制台复制「合并舞台」链接，将完整 URL 填入 OBS 浏览器源。",
-  "overlay.matchWinner": "选手{winner} 获胜",
 
   // ── Coming Soon 场景 ──────────────────────────────────────────────
   "soon.noMatch": "黄昏杯",
@@ -580,6 +575,7 @@ const messages = {
   "admin.accounts.colUsername": "用户名",
   "admin.accounts.colDisplayName": "展示名",
   "admin.accounts.colRoles": "角色",
+  "admin.accounts.colSpeedrun": "speedrun",
   "admin.accounts.cannotDeleteSelf": "不能删除当前登录的账号",
   "admin.accounts.deleteConfirmMsg": "确认删除账号「{username}（{displayName}）」？该操作不可恢复。",
   "admin.accounts.deleteConfirmTitle": "删除账号",
@@ -688,6 +684,9 @@ const messages = {
   "accountForm.labelRoles": "角色",
   "accountForm.rolesRequired": "至少选择一个角色",
   "accountForm.adminRoleHint": "选「管理员」会自动附带裁判 + 导播",
+  "accountForm.labelSpeedrun": "speedrun",
+  "accountForm.speedrunPlaceholder": "speedrun.com 用户名或 8 位用户 id",
+  "accountForm.speedrunHint": "绑定后导播「项目信息」场景在该选手上榜时高亮其名次",
   "accountForm.createBtn": "创建",
 
   // ── 比赛表单（MatchFormDialog） ──────────────────────────────────────
@@ -827,6 +826,22 @@ const messages = {
   "pickEditor.logoNeedLogin": "请先登录",
   "pickEditor.logoRemoveTitle": "移除 logo",
   "pickEditor.logoRemoveConfirm": "移除该选图的展示图？",
+  "pickEditor.srTitle": "speedrun.com 排行榜映射（可选覆盖）",
+  "pickEditor.srCategory": "分类",
+  "pickEditor.srCategoryPlaceholder": "留空则按选图自动解析",
+  "pickEditor.srLevel": "关卡",
+  "pickEditor.srLevelPlaceholder": "单关分类必选关卡",
+  "pickEditor.srVarPlaceholder": "全部",
+  "pickEditor.srPerLevelTag": "单关",
+  "pickEditor.srClear": "清除映射",
+  "pickEditor.srLoading": "正在从 speedrun.com 拉取选项…",
+  "pickEditor.srNone": "未配置覆盖：导播场景将按选图名称 / 关卡 / 词条自动解析 speedrun.com 项目",
+  "pickEditor.srMappedSummary": "已映射：{summary}",
+  "pickEditor.srLoadFail": "speedrun.com 选项拉取失败，已切换为手动输入 id",
+  "pickEditor.srManualCategory": "分类 id",
+  "pickEditor.srManualLevel": "关卡 id",
+  "pickEditor.srManualVars": "子分类",
+  "pickEditor.srManualVarsPlaceholder": "varId=valueId，逗号分隔",
 
   // ── 赛事表单（TournamentFormDialog） ─────────────────────────────────
   "tourneyForm.titleEdit": "编辑赛事",
@@ -1038,6 +1053,22 @@ const messages = {
   "scenes.mappool.title": "图池",
   "scenes.mappool.empty": "暂无图池数据",
   "scenes.mappool.mockHint": "图池（示例）",
+  "scenes.categoryinfo.title": "项目排行榜",
+  "scenes.categoryinfo.noPickTitle": "等待选图",
+  "scenes.categoryinfo.noPickBody": "裁判宣布选图后，自动展示该项目在 speedrun.com 的排行榜",
+  "scenes.categoryinfo.noMappingTitle": "暂无榜单",
+  "scenes.categoryinfo.noMappingBody": "未能解析该选图的 speedrun.com 项目（可在图池编辑器手动配置映射）",
+  "scenes.categoryinfo.loading": "正在拉取排行榜…",
+  "scenes.categoryinfo.error": "排行榜拉取失败，将在下次选图时重试",
+  "scenes.categoryinfo.errorRateLimit": "speedrun.com 请求限流，请稍后再试",
+  "scenes.categoryinfo.empty": "该榜单暂无成绩",
+  "scenes.categoryinfo.rankHeader": "名次",
+  "scenes.categoryinfo.playerHeader": "选手",
+  "scenes.categoryinfo.timeHeader": "成绩",
+  "scenes.categoryinfo.sourceNote": "数据来源 speedrun.com",
+  "scenes.categoryinfo.refreshedAt": "更新于 {time}",
+  "scenes.categoryinfo.highlightLegend": "高亮 = 本场选手",
+  "scenes.categoryinfo.offlineBadge": "连接已断开",
   "scenes.match.waitingSignal": "等待信号",
   "scenes.tug.faster": "领先",
 
