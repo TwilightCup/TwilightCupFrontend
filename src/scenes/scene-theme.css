@@ -1,8 +1,9 @@
 /**
  * 导播场景页共享主题（合成器浪潮 / synthwave）。
  *
- * 与 overlay.html 一样，场景页是独立入口：**不**引主应用 global.css，配色全在此
- * 固定（不随主题深浅切换）。每个场景的 main.ts import 一次即可复用令牌与工具类。
+ * 与 categoryinfo.html 等场景页一样，场景页是独立入口：**不**引主应用 global.css，
+ * 配色全在此固定（不随主题深浅切换）。每个场景的 main.ts import 一次即可复用
+ * 令牌与工具类。
  *
  * 配色约定（与全局 A/B 一致）：
  *   A（蓝）= #3d8bff   B（红）= #ff6b4a   胜方金 = #ffd166
@@ -39,6 +40,7 @@
 html,
 body,
 #bracket-app,
+#categoryinfo-app,
 #mappool-app,
 #match-app {
   margin: 0;

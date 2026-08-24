@@ -9,8 +9,9 @@
 - **管理员端**（`/admin`）：账号管理（增删改查）、比赛会话管理（赛制 / 图池 /
   角色指派，含可视化图池编辑器）、会话数据查看（比赛日志 / 回合明细 / 聊天）。
 - **选手端**：开发期模拟器（`/player`），模拟「游戏内输出」用于后端联调；仅 `npm run dev` 下启用。
-- **导播端**（`/director`）：只读观赛控制台，并提供 **OBS 浏览器源叠加层**（`/overlay?token=...`，
-  透明背景、带动画）供直播叠加比分 / 倒计时 / 选图 / 判定。
+- **导播端**（`/director`）：只读观赛控制台，并提供 **OBS 合并舞台**（`/stage.html?token=...`，
+  单浏览器源承载全部场景）与各场景独立入口——比赛详情 / 图池 / 赛程图 / 项目信息
+  （裁判宣布选图后展示该项目的 speedrun.com 排行榜 Top 15）。
 
 **多角色账号**：一个账号可同时拥有多个角色（管理员默认兼裁判 + 导播）。登录进默认端后，
 各端顶栏的「切换端」下拉可切到该账号其他角色对应的端；WebSocket 连接按 `?seat=` 指定身份，
@@ -144,23 +145,33 @@ npm run preview -- --host     # 默认 http://0.0.0.0:4173
 模拟器据此自动推进序号。联调流程：裁判端 `mark_prep` + `select_pick` → 双方选手
 `!ready` → 自动倒计时 → 回合开始 → 选手逐关 / 逐次上报 → 双方结束 → 裁判判定。
 
-## 导播端与 OBS 叠加层（`/director` + `/overlay`）
+## 导播端与 OBS 场景页（`/director` + `/stage.html`）
 
 导播登录后进入只读控制台（`/director`），实时展示比分 / 阶段 / 选图 / 双方进度 / 聊天，
-并提供 **OBS 叠加层链接**（含 token）。导播连 WS 后服务端按账号解析 seat=DIRECTOR 自动
+并提供 **OBS 场景页链接**（含 token）。导播连 WS 后服务端按账号解析 seat=DIRECTOR 自动
 订阅广播，全程只读（`director_subscribe` 实为 no-op）。
 
-### OBS 浏览器源叠加层
+### OBS 浏览器源（合并舞台与独立场景页）
 
-控制台点「复制链接」得到 `https://<host>/overlay?token=<jwt>`，填入 OBS 的「浏览器源」
-（建议 1920×1080）：
+控制台点「复制链接」得到 `https://<host>/stage.html?token=<jwt>&match=<id>`，填入 OBS 的
+「浏览器源」（建议 1920×1080）：
 
-- **透明背景**：叠加在游戏画面上，只显示信息层（`body` 置 transparent）。
-- **实时要素**：双方选手名 + 比分、当前阶段、回合开始倒计时、当前选图、回合判定、最终胜方。
-- **动画**：得分时比分弹跳 + 金色高亮、倒计时脉动（≤3 秒红色放大）、阶段切换淡入、
-  选图滑入、判定飞入、胜方奖杯弹出。
-- token 来自导播账号 JWT，叠加层用它自建 WS；后端支持同一导播账号多连接并存，
-  控制台与叠加层可同时在线、互不影响。
+- **合并舞台（推荐）**：单浏览器源承载全部场景（待开始 / 项目信息 / 比赛详情 / 图池 /
+  赛程图），控制台点按钮经 WS 广播即时切换；后打开的舞台由 state_sync + pick_announced
+  回放自动对齐当前场景与选图。
+- **独立场景页**：`match-scene.html` / `mappool.html` / `bracket.html` /
+  `categoryinfo.html` 各自一个 OBS 源（合成器浪潮全屏画面）。
+- **项目信息场景**（`categoryinfo`）：裁判宣布选图后，解析该选图的 speedrun.com
+  项目并拉取排行榜 Top 15（名次 / 选手 / 成绩），本场选手（账号绑定 speedrun.com
+  用户）上榜时以选手色高亮。解析规则：图池编辑器配置的显式映射优先；未配置时
+  自动解析——多关按选图名称匹配全游戏项目（Aztec% / Dark% / Steam% / Any%…，
+  CP 类回退 Checkpoint%），单关按关卡名经官方展示名对照匹配 IL（PC 分类）；
+  子分类全杯 Solo，Glitchless 取选图标题、Checkpoint / Pinch 等取 CT 词条。
+  解析不出的选图（如工坊图）显示占位卡。speedrun.com 数据经**后端同源代理**
+  （`/api/speedrun/*`，需登录令牌）拉取，规避浏览器 / OBS 直连的网络与跨域
+  问题，并由后端 TTL 缓存削峰（上游限流 100 请求/分）。
+- token 来自导播账号 JWT，场景页用它自建 WS（hosted 场景由舞台代连）；后端支持同一
+  导播账号多连接并存，控制台与舞台可同时在线、互不影响。
 
 选手展示名从聊天消息捕获（未发言前为「选手A / 选手B」）；比赛元数据（赛制 / 延迟）在
 `auth_ok` 后拉 `match_log` 补全。
@@ -205,7 +216,7 @@ src/
 │   ├── MatchView.vue       # 裁判端（/referee）
 │   ├── PlayerView.vue      # 选手模拟器（/player，仅 dev）
 │   ├── DirectorView.vue    # 导播控制台（/director）
-│   ├── DirectorOverlay.vue # OBS 叠加层（/overlay?token=，透明 + 动画）
+│   ├── DirectorHomeView.vue # 导播比赛列表（/director）
 │   ├── PendingView.vue     # 兜底占位页（/pending）
 │   └── admin/              # AdminLayout / AccountsView / SessionsView（/admin/*）
 ├── utils/format.ts # 时间格式化 + 枚举中文/配色（含账号类型 / 会话状态）

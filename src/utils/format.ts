@@ -33,6 +33,23 @@ export function formatMs(ms: number | null | undefined): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(mmm).padStart(3, "0")}`;
 }
 
+/**
+ * 秒（speedrun.com 的 times.primary_t 口径）→ 速通计时：
+ * < 1h → "MM:SS.mmm"；≥ 1h → "H:MM:SS.mmm"；null/undefined → "N/A"。
+ */
+export function formatRunTime(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined || Number.isNaN(seconds)) {
+    return t("format.na");
+  }
+  const totalMs = Math.max(0, Math.round(seconds * 1000));
+  const h = Math.floor(totalMs / 3_600_000);
+  const m = Math.floor((totalMs % 3_600_000) / 60_000);
+  const s = Math.floor((totalMs % 60_000) / 1000);
+  const mmm = totalMs % 1000;
+  const mmss = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(mmm).padStart(3, "0")}`;
+  return h > 0 ? `${h}:${mmss}` : mmss;
+}
+
 /** 选手方标签 */
 export function seatLabel(seat: "A" | "B"): string {
   return seat === "A" ? t("seat.a") : t("seat.b");

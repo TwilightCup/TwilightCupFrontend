@@ -188,6 +188,16 @@ export interface Pick {
   logo?: string | null;
   /** logo 的公开访问 URL（桶公开读 + nginx 反代，固定永久有效；由后端输出层填，不持久化）。 */
   logo_url?: string | null;
+  /**
+   * speedrun.com 排行榜映射（**持久化**，管理端图池编辑器配置；游戏固定为
+   * Human: Fall Flat）。导播 categoryinfo 场景按此拉取该项目 Top 榜。
+   * speedrun_category_id 为空 = 未映射（场景显示占位卡）。
+   */
+  speedrun_category_id?: string | null;
+  /** 单关 IL 分类的关卡 id；全游戏分类为 null */
+  speedrun_level_id?: string | null;
+  /** 子分类过滤 {varId: valueId}（如 IL subcategory: Checkpoint%） */
+  speedrun_variables?: Record<string, string>;
 }
 
 export interface LevelTime {
@@ -313,6 +323,8 @@ export interface AccountOut {
   username: string;
   roles: AccountType[];
   display_name: string;
+  /** speedrun.com 账号绑定（用户名或 8 位用户 id；未绑定为 null） */
+  speedrun_id?: string | null;
   created_at: string;
 }
 
@@ -321,13 +333,15 @@ export interface AccountCreate {
   password: string;
   display_name: string;
   roles: AccountType[];
+  speedrun_id?: string | null;
 }
 
-/** PATCH /admin/accounts/{id} 按字段局部更新，传哪个改哪个 */
+/** PATCH /admin/accounts/{id} 按字段局部更新，传哪个改哪个（speedrun_id 空串=解绑） */
 export interface AccountUpdate {
   display_name?: string;
   password?: string;
   roles?: AccountType[];
+  speedrun_id?: string | null;
 }
 
 /** PATCH /me 修改自己的展示名（任意已登录账号） */
@@ -413,6 +427,9 @@ export interface MatchOut {
   player_b_id: string;
   player_a_username: string;
   player_b_username: string;
+  /** 双方选手的 speedrun.com 账号绑定（categoryinfo 场景高亮用；未绑定为 null） */
+  player_a_speedrun?: string | null;
+  player_b_speedrun?: string | null;
   referee_id: string;
   director_id: string;
   winner: "A" | "B" | null;
