@@ -430,8 +430,8 @@ export const useDirectorStore = defineStore("director", () => {
       soonCmdState.value = { targetMs: soonCmdState.value.targetMs, startedAt: null, pausedAt: null };
     }
 
-    // 发 WS
-    return socket.send(send.directorCommand(action, payload));
+    // 发 WS（可排队：连接未就绪时暂存，open 后按序补发，断线窗口点按钮不丢指令）
+    return socket.sendQueued(send.directorCommand(action, payload));
   }
 
   function nameOf(side: "A" | "B"): string {

@@ -27,6 +27,7 @@ import {
   type SceneKey,
 } from "./useStageScene";
 import CategoryInfoScene from "@/scenes/categoryinfo/CategoryInfoScene.vue";
+import { bi } from "@/utils/bilingual";
 import MatchScene from "@/scenes/match/MatchScene.vue";
 import MappoolScene from "@/scenes/mappool/MappoolScene.vue";
 import BracketScene from "@/scenes/bracket/BracketScene.vue";
@@ -34,6 +35,22 @@ import SoonScene from "@/scenes/soon/SoonScene.vue";
 
 const params = useSceneParams();
 const director = useDirectorStore();
+
+/** 断线角标文案：舞台在 OBS 里，导播看不到它的连接状态，断线须自显 */
+const connText = computed(() => {
+  switch (director.connStatus) {
+    case "connecting":
+      return bi("scenes.conn.connecting");
+    case "reconnecting":
+      return bi("scenes.conn.reconnecting");
+    case "closed":
+      return bi("scenes.conn.closed");
+    case "displaced":
+      return bi("scenes.conn.displaced");
+    default:
+      return "";
+  }
+});
 
 // 内嵌场景：host 管 WS + 提供共享背景与常驻顶栏
 provide<SceneContext>(SCENE_CONTEXT_KEY, {
@@ -102,6 +119,9 @@ watch(currentScene, syncComponent, { immediate: true });
       </Transition>
     </div>
 
+    <!-- 断线角标：跨进程舞台（OBS）连接异常时自显，导播端无从代看 -->
+    <div v-if="connText" class="conn-badge">{{ connText }}</div>
+
     <!-- 常驻顶栏：切场景不重挂（同实例），进出带顶栏的场景组时淡入淡出
          （match↔mappool 间 showTopBar 不变，不触发任何过渡） -->
     <Transition name="topbar-fade">
@@ -128,6 +148,26 @@ watch(currentScene, syncComponent, { immediate: true });
   left: 0;
   right: 0;
   z-index: 30;
+}
+
+/* 断线角标：右上角红底（压过扫描线 z50，导播一眼可见） */
+.conn-badge {
+  position: fixed;
+  top: 12px;
+  right: 14px;
+  z-index: 60;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(255, 46, 136, 0.85);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  animation: conn-pulse 1.6s ease-in-out infinite;
+}
+@keyframes conn-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
 }
 
 /* 场景交叉淡入：切换瞬间新旧场景短暂重叠（absolute 定位） */

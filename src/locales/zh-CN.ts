@@ -1028,6 +1028,10 @@ const messages = {
 
   // ── 导播场景页（scenes.html 多入口）─────────────────────────────────
   "scenes.noToken": "缺少 token：请在 URL 上带 ?token=<导播 JWT>",
+  "scenes.conn.connecting": "连接中",
+  "scenes.conn.reconnecting": "重连中",
+  "scenes.conn.closed": "已断开（检查网络/令牌）",
+  "scenes.conn.displaced": "连接被替换",
   "scenes.mockBadge": "示例数据",
   // 顶部信息栏（TopBar：比赛详情 / 图池场景共用；品牌回退按需求文档定死英文）
   "scenes.topbar.brandFallback": "TWILIGHT CUP",

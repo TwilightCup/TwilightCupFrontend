@@ -1024,6 +1024,10 @@ const messages: MessageSchema = {
 
   // ── director broadcast scenes (scenes.html MPE entries) ─────────────
   "scenes.noToken": "Missing token: add ?token=<director JWT> to the URL",
+  "scenes.conn.connecting": "Connecting",
+  "scenes.conn.reconnecting": "Reconnecting",
+  "scenes.conn.closed": "Disconnected (check network/token)",
+  "scenes.conn.displaced": "Superseded",
   "scenes.mockBadge": "Sample data",
   // TopBar (shared by match scene / mappool scene; brand fallback fixed per spec)
   "scenes.topbar.brandFallback": "TWILIGHT CUP",

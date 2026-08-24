@@ -25,6 +25,9 @@ const HEARTBEAT_MS = 25_000;
 /** 被同身份（exclusive）新连接顶掉时的服务端关闭码，与后端 DISPLACED_CLOSE_CODE 对齐 */
 const DISPLACED_CLOSE_CODE = 4001;
 
+/** sendQueued 待发指令上限（超过丢最旧；导播指令幂等，丢了也会被后续覆盖对齐） */
+const MAX_PENDING = 32;
+
 export class MatchSocket {
   /** 由外部（store）注入的回调 */
   onMessage: (msg: ServerMessage) => void = () => {};
@@ -38,6 +41,8 @@ export class MatchSocket {
   private exclusive = false;
   private hbTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  /** sendQueued 暂存的待发指令（连接建立后 flush） */
+  private pending: ClientMessage[] = [];
   private shouldReconnect = false;
   private attempt = 0;
   /** 已被顶掉（displaced 终态标记：onclose 后状态保持 displaced 而非 closed） */
@@ -70,6 +75,7 @@ export class MatchSocket {
     ws.onopen = () => {
       this.attempt = 0;
       this.setStatus("open");
+      this.flushPending();
       this.startHeartbeat();
     };
 
@@ -129,6 +135,30 @@ export class MatchSocket {
     }
   }
 
+  /**
+   * 可排队的幂等指令发送（导播操控类专用）：连接未就绪时按序暂存，
+   * 连接建立后立即补发（顺序保留，服务端按序折算状态）。断线窗口内点击
+   * 切场景/倒计时/配置不再静默丢失。普通业务消息仍走 send()（不排队，
+   * 避免重放过期的裁判/选手动作）。
+   */
+  sendQueued(msg: ClientMessage): boolean {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      return this.send(msg);
+    }
+    this.pending.push(msg);
+    if (this.pending.length > MAX_PENDING) this.pending.shift();
+    return false;
+  }
+
+  /** 连接建立后按序补发暂存指令（send 失败说明又断开，剩余保序留待下次 open） */
+  private flushPending(): void {
+    while (this.pending.length > 0) {
+      const m = this.pending[0];
+      if (!this.send(m)) return;
+      this.pending.shift();
+    }
+  }
+
   /** 主动断开，不再重连 */
   disconnect(): void {
     this.shouldReconnect = false;
@@ -136,6 +166,7 @@ export class MatchSocket {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    this.pending.length = 0;
     this.stopHeartbeat();
     this.cleanupWs();
     this.setStatus("closed");
