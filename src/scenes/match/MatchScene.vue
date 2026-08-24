@@ -34,8 +34,10 @@ const { config, load, save } = useDirectorConfig();
 
 const panelOpen = ref(params.editMode);
 
-/** 是否已连 WS（独立入口连上即视为 live；hosted 由舞台根维持）；否则用 mock */
-const liveReady = ref(false);
+/** 是否已连 WS（独立入口连上即视为 live；hosted 由舞台根维持）；否则用 mock。
+ *  hosted 初始即 true：舞台切场景重挂载时 store 已有实时数据，若先渲染一帧 mock，
+ *  偏差条游标会以 mock 位置为过渡起点滑到真实位置（初始状态即"左→中"漂移） */
+const liveReady = ref(hosted);
 
 const isMock = computed(() => !liveReady.value);
 
@@ -94,10 +96,9 @@ watch(
 
 onMounted(() => {
   load(params.matchId, params);
-  // hosted（合并舞台）模式下 WS 由舞台根统一连，场景只读 store；否则自己连
-  if (hosted) {
-    liveReady.value = true;
-  } else if (params.token && params.matchId) {
+  // hosted（合并舞台）模式下 WS 由舞台根统一连，场景只读 store（liveReady 初始即
+  // true）；否则自己连
+  if (!hosted && params.token && params.matchId) {
     director.connect(params.token, params.matchId);
     // auth_ok 后 director store 会拉 meta；连上即视为 live，计时随 WS 实时刷新
     liveReady.value = true;
