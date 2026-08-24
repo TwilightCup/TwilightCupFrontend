@@ -5,17 +5,21 @@
  * 规则（与杯赛语义对齐）：
  * - 多关（MULTI）：项目名按「选图名称 → 剥离子项目词后的名称 → 合集终点关卡
  *   推断（Aztec/Halloween/Steam/Intro_Reprise → Aztec%/Dark%/Steam%/Any%）」
- *   匹配全游戏分类；CP 类多关不匹配裸项目名，而走 `Checkpoint {项目}`（如
- *   "Dark% CP" → Checkpoint Dark%），再退 Checkpoint%。
+ *   匹配全游戏分类。**存档点信号**（CP 类、词条 Checkpoint、名称含
+ *   Checkpoint/CP 词）的多关不走裸项目名，而走 `Checkpoint {项目}`（如
+ *   "Dark% CP" / "Aztec%"+Checkpoint 词条 → Checkpoint Dark% / Checkpoint
+ *   Aztec%），再退 Checkpoint%。
  * - 单关（SINGLE）：取合集首关关卡名（**消息级 collection 已展开为关卡名**；
  *   pick.collection 本体仍是关卡库 UUID，别读它）→ 经 officialLevels 的官方
  *   展示名对照（= speedrun.com 的英文本地化关卡名）匹配 IL 关卡；分类固定
- *   per-level 的 PC。CP 类单关（存档点赛）IL 子分类默认 Checkpoint%，其余
- *   默认 Any%。工坊数字 ID 无对应榜单，解析失败回退占位卡。
- * - 子分类：黄昏杯全部项目都是 Solo（全游戏 Checkpoint%/Any% 系子分类默认
- *   Solo）；其余子项目中 Glitchless 从选图标题解析，Checkpoint / Pinch /
- *   No EC 等从 CT 词条解析（词条即 speedrun.com 子分类值名；"No EC" 对应
- *   speedrun.com 的 "No Extended Climb"）。
+ *   per-level 的 PC。存档点信号的单关（CP 类或 Checkpoint 词条）IL 子分类
+ *   取 Checkpoint%，其余默认 Any%。工坊数字 ID 无对应榜单，解析失败回退占位卡。
+ * - 子分类：黄昏杯全部项目都是 Solo（全游戏子分类默认 Solo）；其余子项目中
+ *   Glitchless 从选图标题解析，Checkpoint / Pinch / No EC 等从 CT 词条解析
+ *   （词条即 speedrun.com 子分类值名；"No EC" 对应 "No Extended Climb"）。
+ *   无线索命中时取该变量 API 列出的**首个值**（= 常规板：Water Subcategory
+ *   首值 Glitches allowed、IL subcategory 首值 Any%、全游戏首值 Solo），
+ *   避免不过滤导致 Checkpoint 与 Checkpoint Glitchless 等混合。
  */
 import { CategoryKind, PickType, type CollectionConfig, type Pick } from "@/api/types";
 import {
@@ -116,9 +120,9 @@ const TOKEN_ALIASES: Record<string, string[]> = {
 
 /**
  * 为一个子分类变量选值：先按线索精确匹配（含 Solo 前缀与别名——全杯 Solo），
- * 无命中再按 fallbacks 顺序取默认值（CP 单关优先 Checkpoint%；全游戏子分类
- * 的 Solo；IL 的 Any%），仍无则不过滤（如各关自定义的 No Pinch / Glitchless /
- * Pinch 子类，无词条时混榜）。
+ * 无命中再按 fallbacks 顺序取默认值（存档点单关优先 Checkpoint%；全游戏子
+ * 分类的 Solo；IL 的 Any%），仍无命中取 API 列出的**首个值**（= 常规板，
+ * 避免无过滤时混合 Glitchless 等变体成绩）。
  */
 function chooseValue(
   v: SrVariable,
@@ -142,7 +146,8 @@ function chooseValue(
     const hit = byLabel(f);
     if (hit) return hit;
   }
-  return null;
+  // 常规板 = 该变量列出的首个值（fetchVariables 保留 API 顺序）
+  return v.values[0]?.id ?? null;
 }
 
 /** 拉取作用域内的子分类变量并按线索选值（fallbacks 语义见 chooseValue）。 */
@@ -166,19 +171,28 @@ async function resolveVariables(
   return variables;
 }
 
-/** 多关解析：推断项目核心名并匹配全游戏分类（CP 类走 Checkpoint 变体）。 */
+/**
+ * 多关解析：推断项目核心名并匹配全游戏分类。
+ *
+ * 存档点信号（CP 类 / 词条 Checkpoint / 名称含 Checkpoint 或 CP 词）的多关
+ * 是 Checkpoint 系项目（Checkpoint Aztec% 等），不匹配裸项目名——否则
+ * "Aztec%" + Checkpoint 词条会错落到普通 Aztec% 板。
+ */
 function resolveMultiCategory(
   pick: Pick,
   categories: SrCategory[],
   levels: string[],
+  tokens: string[],
 ): SrCategory | null {
-  const isCp = kindOf(pick) === CategoryKind.CP;
+  const wantsCheckpoint =
+    kindOf(pick) === CategoryKind.CP ||
+    tokens.includes("Checkpoint") ||
+    /\b(checkpoint|cp)\b/i.test(pick.name ?? "");
   // 项目核心名候选：剥离子项目词的名称 + 按合集终点关卡推断（去重保序）
   const stripped = stripSubcategoryWords(pick.name ?? "");
   const endpoint = ENDPOINT_PROJECTS[norm(levels[levels.length - 1] ?? "")] ?? "";
   const cores = [...new Set([stripped, endpoint].filter(Boolean))];
-  if (isCp) {
-    // CP 多关 = speedrun.com 的 Checkpoint 系全游戏分类；不匹配裸项目名
+  if (wantsCheckpoint) {
     for (const core of cores) {
       const hit = matchGameCategory(categories, `Checkpoint ${core}`);
       if (hit) return hit;
@@ -210,7 +224,7 @@ export async function resolveSpeedrunBoard(
   const levels = collectionLevels(pick, collection);
 
   if (pick.type === PickType.MULTI) {
-    const cat = resolveMultiCategory(pick, meta.categories, levels);
+    const cat = resolveMultiCategory(pick, meta.categories, levels, tokens);
     if (!cat) return null;
     return {
       categoryId: cat.id,
@@ -230,8 +244,9 @@ export async function resolveSpeedrunBoard(
     (c) => c.type === "per-level" && norm(c.name) === norm("PC"),
   );
   if (!level || !cat) return null;
-  // CP 单关（存档点赛）IL 子分类默认 Checkpoint%
-  const preferCheckpoint = kindOf(pick) === CategoryKind.CP;
+  // 存档点信号的单关（CP 类或 Checkpoint 词条）IL 子分类取 Checkpoint%
+  const preferCheckpoint =
+    kindOf(pick) === CategoryKind.CP || tokens.includes("Checkpoint");
   return {
     categoryId: cat.id,
     levelId: level.id,

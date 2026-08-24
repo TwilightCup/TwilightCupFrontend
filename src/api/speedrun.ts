@@ -207,13 +207,12 @@ export function fetchVariables(scope: {
       .filter((v): v is Record<string, unknown> => v !== null)
       .map((v) => {
         const rawValues = asRecord(asRecord(v.values)?.values);
+        // 保留 API 列出顺序（首个值 = 该变量的常规/默认板，解析器依赖此约定）
         const values: { id: string; label: string }[] = rawValues
-          ? Object.entries(rawValues)
-              .map(([id, val]) => ({
-                id,
-                label: String(asRecord(val)?.label ?? id),
-              }))
-              .sort((a, b) => a.label.localeCompare(b.label))
+          ? Object.entries(rawValues).map(([id, val]) => ({
+              id,
+              label: String(asRecord(val)?.label ?? id),
+            }))
           : [];
         return {
           id: String(v.id ?? ""),
