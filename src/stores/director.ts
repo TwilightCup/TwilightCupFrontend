@@ -256,8 +256,11 @@ export const useDirectorStore = defineStore("director", () => {
         draft.value = msg.state;
         break;
       case "director_cmd":
-        // 导播控制台通过 WS 广播的指令（场景切换 / 倒计时操控）
-        if (msg.action === "switch_scene") {
+        // 导播控制台通过 WS 广播的指令（场景切换 / 倒计时操控 / 配置下发），
+        // 以及服务端连接回放（state_sync：舞台/控制台晚打开也能对齐状态）
+        if (msg.action === "state_sync") {
+          applyStateSync(msg.payload ?? {});
+        } else if (msg.action === "switch_scene") {
           currentSceneCmd.value = (msg.payload?.scene as string) ?? null;
         } else if (msg.action === "soon_set_target" && msg.payload?.target_ms) {
           soonCmdState.value.targetMs = msg.payload.target_ms as number;
@@ -352,6 +355,37 @@ export const useDirectorStore = defineStore("director", () => {
   });
   /** 最近一次 config_update 广播的配置（已同步落库；ref 供已挂载场景响应） */
   const remoteConfig = ref<Partial<DirectorConfig> | null>(null);
+
+  /**
+   * state_sync 回放（连接建立时服务端补发，后端 c58f0ad）：并入场景/倒计时/配置。
+   * soon 时间戳是服务器毫秒，用 now_ms 折算本地偏移（跨机时钟不一时剩余时间仍准；
+   * started_at 服务端已扣暂停时长，与本地 soonCmdState 语义一致）。
+   * scene/config 为空表示该部分从未发过指令，保持现状不动。
+   */
+  function applyStateSync(p: Record<string, unknown>): void {
+    if (typeof p.scene === "string" && p.scene) currentSceneCmd.value = p.scene;
+
+    const soon = p.soon as
+      | { target_ms?: number | null; started_at?: number | null; paused_at?: number | null; now_ms?: number }
+      | undefined;
+    if (soon && typeof soon.now_ms === "number") {
+      const offset = Date.now() - soon.now_ms;
+      soonCmdState.value = {
+        targetMs:
+          typeof soon.target_ms === "number"
+            ? soon.target_ms
+            : soonCmdState.value.targetMs,
+        startedAt: typeof soon.started_at === "number" ? soon.started_at + offset : null,
+        pausedAt: typeof soon.paused_at === "number" ? soon.paused_at + offset : null,
+      };
+    }
+
+    const cfg = p.config as Partial<DirectorConfig> | undefined;
+    if (cfg && Object.keys(cfg).length > 0) {
+      remoteConfig.value = cfg;
+      if (matchId.value) mergeStoredConfig(matchId.value, cfg);
+    }
+  }
 
   /**
    * 发送导演指令到后端，后端广播给同账号其他导播连接（OBS 舞台）。

@@ -147,6 +147,13 @@ function onSwitchScene(key: SceneKey): void {
   setCurrentScene(key); // localStorage 兜底（同进程）
   director.sendDirectorCommand("switch_scene", { scene: key }); // WS 广播（跨进程 OBS）
 }
+// WS 侧场景指令（state_sync 回放 / 其他控制台切换）→ 本地 radio 跟随
+watch(
+  () => director.currentSceneCmd,
+  (s) => {
+    if (s) activeScene.value = s as SceneKey;
+  },
+);
 
 // ---- Coming Soon 倒计时控制（WS 广播 → 舞台 SoonScene 跨进程同步）----
 

@@ -386,6 +386,13 @@ export interface SrvDraftState {
 /**
  * 服务端广播给同账号其他导播连接的指令（原样转发 ClientDirectorCommand 的 action+payload）。
  * 导播控制台发 director_command → 后端广播 SrvDirectorCmd 给同 match 同 account_id 的其他 DIRECTOR 连接。
+ *
+ * 另含服务端主动下发的 state_sync（连接回放）：DIRECTOR 连接 auth_ok 后若有
+ * 状态暂存，补发最近的场景/倒计时/配置，payload：
+ *   { scene: string | null,
+ *     soon: { target_ms, started_at, paused_at, now_ms }（服务器毫秒时间戳，
+ *            now_ms 供前端做时钟偏移校正；started_at 已扣暂停时长），
+ *     config: { rtmpA...histB } }
  */
 export interface SrvDirectorCmd {
   type: "director_cmd";
