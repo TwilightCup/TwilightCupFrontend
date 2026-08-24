@@ -20,7 +20,7 @@ import { computed, onUnmounted, ref, watch, withDefaults } from "vue";
 
 import type { CategoryKind, Pick } from "@/api/types";
 import { categoryKindInfo } from "@/utils/format";
-import { pickDefaultBg } from "@/utils/mappool";
+import { categoryBgFallback, categoryTagBg, pickDefaultBg } from "@/utils/mappool";
 import type { PickCardStatus } from "./useDraftStatus";
 
 const props = withDefaults(
@@ -47,44 +47,12 @@ const logoSrc = computed(() => props.pick.logo_url ?? pickDefaultBg(props.pick))
 const imgFailed = ref(false);
 const showImage = computed(() => !!logoSrc.value && !imgFailed.value);
 
-/** 类别 → 左侧色块底色（高对比亮色，区别于占位底的暗色系） */
-const tagBg = computed<string>(() => {
-  switch (props.kind) {
-    case "ML":
-      return "#2f6fe0";
-    case "IL":
-      return "#1f9d61";
-    case "CP":
-      return "#d98324";
-    case "CT":
-      return "#d13a55";
-    case "EX":
-      return "#7a4fd6";
-    case "TB":
-      return "#ffd166";
-    default:
-      return "#4a4460";
-  }
-});
+/** 类别 → 左侧色块底色（高对比亮色，区别于占位底的暗色系；映射见 utils/mappool） */
+const tagBg = computed<string>(() => categoryTagBg(props.kind));
 const tagDark = computed(() => props.kind === "TB"); // 金底配深字
 
-/** 类别 → 占位底色（无图回退） */
-const bgColor = computed<string>(() => {
-  switch (props.kind) {
-    case "ML":
-      return "#1b3a6b";
-    case "IL":
-      return "#1d4d36";
-    case "CP":
-      return "#5a3a12";
-    case "CT":
-      return "#5a1620";
-    case "TB":
-      return "#4a0f2a";
-    default:
-      return "#33313f";
-  }
-});
+/** 类别 → 占位底色（无图回退；映射见 utils/mappool） */
+const bgColor = computed<string>(() => categoryBgFallback(props.kind));
 
 const stKind = computed(() => props.status?.kind ?? null);
 const sideClass = computed(() =>

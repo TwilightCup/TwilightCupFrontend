@@ -60,6 +60,44 @@ export function pickDefaultBg(pick: Pick): string | null {
   return null;
 }
 
+/** 类别 → 选图卡左侧类别色块底色（高对比亮色；图池 MapCard 与比赛详情选图角标共用）。 */
+export function categoryTagBg(kind: string | null | undefined): string {
+  switch (kind) {
+    case CategoryKind.ML:
+      return "#2f6fe0";
+    case CategoryKind.IL:
+      return "#1f9d61";
+    case CategoryKind.CP:
+      return "#d98324";
+    case CategoryKind.CT:
+      return "#d13a55";
+    case CategoryKind.EX:
+      return "#7a4fd6";
+    case CategoryKind.TB:
+      return "#ffd166";
+    default:
+      return "#4a4460";
+  }
+}
+
+/** 类别 → 选图卡无背景图时的占位底色（暗色系）。 */
+export function categoryBgFallback(kind: string | null | undefined): string {
+  switch (kind) {
+    case CategoryKind.ML:
+      return "#1b3a6b";
+    case CategoryKind.IL:
+      return "#1d4d36";
+    case CategoryKind.CP:
+      return "#5a3a12";
+    case CategoryKind.CT:
+      return "#5a1620";
+    case CategoryKind.TB:
+      return "#4a0f2a";
+    default:
+      return "#33313f";
+  }
+}
+
 /** 解码 `Pick.tag` 为 CT 词条数组（仅保留已知枚举值；兼容旧自由文本→空数组）。 */
 export function pickTagsOf(pick: Pick): string[] {
   const raw = pick.tag;
