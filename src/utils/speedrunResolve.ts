@@ -23,6 +23,7 @@
  */
 import { CategoryKind, PickType, type CollectionConfig, type Pick } from "@/api/types";
 import {
+  SPEEDRUN_GAMES,
   fetchHffMeta,
   fetchVariables,
   type SrCategory,
@@ -30,11 +31,20 @@ import {
 } from "@/api/speedrun";
 import { officialDisplayName } from "@/utils/officialLevels";
 
-/** 自动解析结果（与 Pick 的显式映射字段同构） */
+/** 榜单的展示信息（项目名面板用：分类/关卡名 + 已选子分类值标签） */
+export interface BoardDisplay {
+  categoryName: string;
+  levelName: string | null;
+  valueLabels: string[];
+}
+
+/** 自动解析结果（与 Pick 的显式映射字段同构 + 展示信息；gameId 默认 HFF） */
 export interface ResolvedSpeedrunBoard {
+  gameId: string;
   categoryId: string;
   levelId: string | null;
   variables: Record<string, string>;
+  display: BoardDisplay;
 }
 
 /** 比较用归一：小写 + 去非字母数字（"Checkpoint%" ≡ "checkpoint"）。 */
@@ -156,7 +166,7 @@ async function resolveVariables(
   levelId: string | null,
   tokens: string[],
   preferCheckpoint: boolean,
-): Promise<Record<string, string>> {
+): Promise<{ variables: Record<string, string>; labels: string[] }> {
   const vars = (await fetchVariables({ categoryId, levelId: levelId ?? undefined })).filter(
     (v) => v.isSubcategory,
   );
@@ -164,11 +174,16 @@ async function resolveVariables(
     ? ["Checkpoint%", "Solo", "Any%"]
     : ["Solo", "Any%"];
   const variables: Record<string, string> = {};
+  const labels: string[] = [];
   for (const v of vars) {
     const val = chooseValue(v, tokens, fallbacks);
-    if (val) variables[v.id] = val;
+    if (val) {
+      variables[v.id] = val;
+      const label = v.values.find((s) => s.id === val)?.label;
+      if (label) labels.push(label);
+    }
   }
-  return variables;
+  return { variables, labels };
 }
 
 /**
@@ -224,21 +239,30 @@ export async function resolveSpeedrunBoard(
   const levels = collectionLevels(pick, collection);
 
   if (pick.type === PickType.MULTI) {
+    // 词条路由：No Checkpoint / Jumpless 多关项目在 Category Extensions 子游戏上
+    const extTag = (pick.tags ?? []).find(
+      (t) => t === "No Checkpoint" || t === "Jumpless",
+    );
+    if (extTag) return resolveExtBoard(pick, extTag, levels, tokens);
+
     const cat = resolveMultiCategory(pick, meta.categories, levels, tokens);
     if (!cat) return null;
+    const { variables, labels } = await resolveVariables(cat.id, null, tokens, false);
     return {
+      gameId: SPEEDRUN_GAMES.hff,
       categoryId: cat.id,
       levelId: null,
-      variables: await resolveVariables(cat.id, null, tokens, false),
+      variables,
+      display: { categoryName: cat.name, levelName: null, valueLabels: labels },
     };
   }
 
   // 单关：关卡名 → 官方展示名（= speedrun.com 英文本地化名）→ IL 关卡 + PC 分类
   const lvName = levels[0] ?? "";
   if (!lvName || /^\d+$/.test(lvName)) return null; // 工坊数字 ID 直通，无官方榜单
-  const display = officialDisplayName(lvName) ?? lvName;
+  const displayName = officialDisplayName(lvName) ?? lvName;
   const level =
-    meta.levels.find((l) => norm(l.name) === norm(display)) ??
+    meta.levels.find((l) => norm(l.name) === norm(displayName)) ??
     meta.levels.find((l) => norm(l.name) === norm(lvName));
   const cat = meta.categories.find(
     (c) => c.type === "per-level" && norm(c.name) === norm("PC"),
@@ -247,9 +271,98 @@ export async function resolveSpeedrunBoard(
   // 存档点信号的单关（CP 类或 Checkpoint 词条）IL 子分类取 Checkpoint%
   const preferCheckpoint =
     kindOf(pick) === CategoryKind.CP || tokens.includes("Checkpoint");
+  const { variables, labels } = await resolveVariables(
+    cat.id,
+    level.id,
+    tokens,
+    preferCheckpoint,
+  );
   return {
+    gameId: SPEEDRUN_GAMES.hff,
     categoryId: cat.id,
     levelId: level.id,
-    variables: await resolveVariables(cat.id, level.id, tokens, preferCheckpoint),
+    variables,
+    display: { categoryName: cat.name, levelName: level.name, valueLabels: labels },
   };
+}
+
+/**
+ * Category Extensions 子游戏解析（No Checkpoint% / Jumpless% 词条项目）。
+ * 这两个分类的结构特殊：**项目本身是子分类值**（No CP% subcategory:
+ * Aztec% / Any% / …），另有 playermode（Solo 默认）。项目值按名称剥离 /
+ * 终点推断的核心名匹配（仅 Any% 兜底），playermode 走常规 Solo 默认。
+ */
+async function resolveExtBoard(
+  pick: Pick,
+  extTag: string,
+  levels: string[],
+  tokens: string[],
+): Promise<ResolvedSpeedrunBoard | null> {
+  const extMeta = await fetchHffMeta(SPEEDRUN_GAMES.ext);
+  const catName = extTag === "No Checkpoint" ? "No Checkpoint%" : "Jumpless%";
+  const cat = matchGameCategory(extMeta.categories, catName);
+  if (!cat) return null;
+  // 项目核心名候选（同多关解析）
+  const stripped = stripSubcategoryWords(pick.name ?? "");
+  const endpoint = ENDPOINT_PROJECTS[norm(levels[levels.length - 1] ?? "")] ?? "";
+  const cores = [...new Set([stripped, endpoint].filter(Boolean))];
+  const vars = (await fetchVariables({ categoryId: cat.id })).filter((v) => v.isSubcategory);
+  const variables: Record<string, string> = {};
+  const labels: string[] = [];
+  for (const v of vars) {
+    // 值以 % 结尾的变量是项目子分类（Aztec%/Any%…），其余（playermode）常规
+    const isProjectVar = v.values.some((s) => s.label.trim().endsWith("%"));
+    let valueId: string | null = null;
+    if (isProjectVar) {
+      const byLabel = (label: string): string | null =>
+        v.values.find((s) => norm(s.label) === norm(label))?.id ?? null;
+      for (const core of cores) {
+        valueId = byLabel(core);
+        if (valueId) break;
+      }
+      valueId ??= byLabel("Any%");
+    } else {
+      valueId = chooseValue(v, tokens, ["Solo", "Any%"]);
+    }
+    if (valueId) {
+      variables[v.id] = valueId;
+      const label = v.values.find((s) => s.id === valueId)?.label;
+      if (label) labels.push(label);
+    }
+  }
+  return {
+    gameId: SPEEDRUN_GAMES.ext,
+    categoryId: cat.id,
+    levelId: null,
+    variables,
+    display: { categoryName: cat.name, levelName: null, valueLabels: labels },
+  };
+}
+
+/**
+ * 由榜单参数反查展示信息（显式映射路径用：ids → 分类/关卡名与子分类值标签；
+ * 元数据与变量均有前端缓存，开销可忽略）。
+ */
+export async function describeBoard(b: {
+  gameId?: string;
+  categoryId: string;
+  levelId: string | null;
+  variables: Record<string, string>;
+}): Promise<BoardDisplay> {
+  const meta = await fetchHffMeta(b.gameId ?? SPEEDRUN_GAMES.hff);
+  const categoryName =
+    meta.categories.find((c) => c.id === b.categoryId)?.name ?? b.categoryId;
+  const levelName = b.levelId
+    ? (meta.levels.find((l) => l.id === b.levelId)?.name ?? null)
+    : null;
+  const vars = (
+    await fetchVariables({ categoryId: b.categoryId, levelId: b.levelId ?? undefined })
+  ).filter((v) => v.isSubcategory);
+  const valueLabels = Object.entries(b.variables)
+    .map(([varId, valueId]) => {
+      const v = vars.find((x) => x.id === varId);
+      return v?.values.find((s) => s.id === valueId)?.label ?? null;
+    })
+    .filter((x): x is string => x !== null);
+  return { categoryName, levelName, valueLabels };
 }

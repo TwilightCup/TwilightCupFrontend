@@ -17,8 +17,20 @@
  */
 import { computed, ref, watch, type Ref } from "vue";
 import type { Pick } from "@/api/types";
-import { LEADERBOARD_TOP, SpeedrunError, fetchLeaderboard, resolveUser } from "@/api/speedrun";
-import { resolveSpeedrunBoard } from "@/utils/speedrunResolve";
+import {
+  LEADERBOARD_TOP,
+  SPEEDRUN_GAMES,
+  SpeedrunError,
+  fetchLeaderboard,
+  fetchUserPb,
+  resolveUser,
+  type SrPersonalBest,
+} from "@/api/speedrun";
+import {
+  describeBoard,
+  resolveSpeedrunBoard,
+  type BoardDisplay,
+} from "@/utils/speedrunResolve";
 
 /** 当前回合的解析输入：pick + 消息级 collection（关卡已展开为名字）。 */
 export interface CategoryInfoRound {
@@ -26,12 +38,33 @@ export interface CategoryInfoRound {
   collection?: { raw: Record<string, unknown> } | null;
 }
 
-/** 榜单行（timeSec 为 speedrun.com primary_t 秒口径） */
+/**
+ * 最近一次榜单快照（模块级，跨组件挂载存活）：舞台切场景会重挂载场景
+ * 组件，同一选图重进时先同步回显快照（零加载直接出榜），再后台静默刷新。
+ */
+interface BoardSnapshot {
+  key: string;
+  status: "ok" | "noMapping";
+  rows: CategoryRow[];
+  display: BoardDisplay | null;
+  refreshedAt: number | null;
+  /** 榜单参数（回显时恢复，PB 拉取即刻可用） */
+  board: {
+    gameId: string;
+    categoryId: string;
+    levelId: string | null;
+    variables: Record<string, string>;
+  } | null;
+}
+let snapshot: BoardSnapshot | null = null;
+
+/** 榜单行（timeSec 为 speedrun.com primary_t 秒口径；date 为 "YYYY-MM-DD"） */
 export interface CategoryRow {
   place: number;
   playerName: string;
   userId: string | null;
   timeSec: number;
+  date: string | null;
   highlight: "A" | "B" | null;
 }
 
@@ -75,11 +108,30 @@ export function useCategoryInfo(
   refreshedAt: Ref<number | null>;
   /** 失败时的诊断信息（错误卡小字展示；成功时为空） */
   errDetail: Ref<string>;
+  /** 榜单展示信息（项目名面板用：分类/关卡名 + 已选子分类值标签） */
+  boardDisplay: Ref<BoardDisplay | null>;
+  /**
+   * 选手当前项目 PB（personal-bests 口径，未进 Top 15 也有）。
+   * 三态：undefined = 待拉取（裁判宣布选图后立即置此态，画面显示空串）；
+   * null = 已拉取但无成绩（N/A）；对象 = PB 数据。
+   */
+  pbA: Ref<SrPersonalBest | null | undefined>;
+  pbB: Ref<SrPersonalBest | null | undefined>;
 } {
   const status = ref<CategoryInfoStatus>("idle");
   const rawRows = ref<CategoryRow[]>([]);
   const refreshedAt = ref<number | null>(null);
   const errDetail = ref("");
+  const boardDisplay = ref<BoardDisplay | null>(null);
+  /** 最近一次成功榜单的参数（PB 按项目过滤用；gameId 默认 HFF） */
+  const boardParams = ref<{
+    gameId: string;
+    categoryId: string;
+    levelId: string | null;
+    variables: Record<string, string>;
+  } | null>(null);
+  const pbA = ref<SrPersonalBest | null | undefined>(undefined);
+  const pbB = ref<SrPersonalBest | null | undefined>(undefined);
 
   // ── 榜单拉取（防抖 300ms；相同 key 不重拉） ────────────────────────
   let lastKey = "";
@@ -96,52 +148,119 @@ export function useCategoryInfo(
       err instanceof SpeedrunError && err.kind === "rate-limit" ? "rateLimit" : "error";
   }
 
-  async function load(round: CategoryInfoRound): Promise<void> {
+  /**
+   * 拉取榜单。silent = 回显快照后的后台刷新：不动 status（不闪加载卡），
+   * 失败也保留旧内容；成功则更新数据与快照。
+   */
+  async function load(round: CategoryInfoRound, key: string, silent: boolean): Promise<void> {
     const pick = round.pick;
-    status.value = "loading";
-    errDetail.value = "";
+    if (!silent) {
+      status.value = "loading";
+      errDetail.value = "";
+      boardDisplay.value = null;
+    }
     // 榜单参数：显式映射优先；未配置则按杯赛规则自动解析（含消息级 collection）
-    let board = pick.speedrun_category_id
+    let board: {
+      gameId: string;
+      categoryId: string;
+      levelId: string | null;
+      variables: Record<string, string>;
+    } | null = pick.speedrun_category_id
       ? {
+          gameId: SPEEDRUN_GAMES.hff,
           categoryId: pick.speedrun_category_id,
           levelId: pick.speedrun_level_id ?? null,
           variables: pick.speedrun_variables ?? {},
         }
       : null;
+    let display: BoardDisplay | null = null;
     if (!board) {
       try {
-        board = await resolveSpeedrunBoard(pick, round.collection ?? null);
+        const resolved = await resolveSpeedrunBoard(pick, round.collection ?? null);
+        if (!resolved) {
+          status.value = "noMapping";
+          rawRows.value = [];
+          refreshedAt.value = null;
+          boardParams.value = null;
+          snapshot = {
+            key,
+            status: "noMapping",
+            rows: [],
+            display: null,
+            refreshedAt: null,
+            board: null,
+          };
+          return;
+        }
+        board = resolved;
+        display = resolved.display;
       } catch (err) {
-        fail(err);
-        return;
-      }
-      if (!board) {
-        status.value = "noMapping";
-        rawRows.value = [];
-        refreshedAt.value = null;
+        if (!silent) fail(err);
         return;
       }
     }
+    if (!board) return; // 类型收窄守卫（上方两条路径均已保证非空）
     try {
       const rows = await fetchLeaderboard({
+        gameId: board.gameId,
         categoryId: board.categoryId,
         levelId: board.levelId,
         variables: board.variables,
         top: LEADERBOARD_TOP,
       });
+      const at = Date.now();
       rawRows.value = rows.map((r) => ({ ...r, highlight: null }));
-      refreshedAt.value = Date.now();
+      refreshedAt.value = at;
       status.value = "ok";
+      boardDisplay.value = display;
+      boardParams.value = {
+        gameId: board.gameId,
+        categoryId: board.categoryId,
+        levelId: board.levelId,
+        variables: board.variables,
+      };
+      // 显式映射路径没有现成展示名：ids 反查（缓存查表，失败不阻塞榜单）
+      if (!boardDisplay.value) {
+        try {
+          boardDisplay.value = await describeBoard(board);
+        } catch {
+          boardDisplay.value = null;
+        }
+      }
+      snapshot = {
+        key,
+        status: "ok",
+        rows: rawRows.value,
+        display: boardDisplay.value,
+        refreshedAt: at,
+        board: boardParams.value,
+      };
     } catch (err) {
-      fail(err);
+      if (!silent) fail(err);
     }
+  }
+
+  // 挂载即回显：同一选图有快照时同步上屏（零加载，含榜单参数 → PB 即刻
+  // 可拉），随后仅做静默刷新。注意：watch 的 immediate 触发会先执行回调，
+  // 回调里 key 相同走提前返回——不能在提前返回前清理 timer，否则回显的
+  // 静默刷新 timer 会被误清（PB 丢失的根因）。
+  const initRound = roundRef.value;
+  const initKey = roundKey(initRound);
+  if (initRound && snapshot && snapshot.key === initKey) {
+    lastKey = initKey;
+    status.value = snapshot.status;
+    rawRows.value = snapshot.rows;
+    boardDisplay.value = snapshot.display;
+    refreshedAt.value = snapshot.refreshedAt;
+    boardParams.value = snapshot.board;
+    timer = setTimeout(() => void load(initRound, initKey, true), 300);
   }
 
   watch(
     roundRef,
     (round) => {
-      if (timer) clearTimeout(timer);
       if (!round) {
+        if (timer) clearTimeout(timer);
         lastKey = "";
         status.value = "idle";
         rawRows.value = [];
@@ -149,9 +268,17 @@ export function useCategoryInfo(
         return;
       }
       const key = roundKey(round);
+      // key 相同（含挂载回显场景）：不清理 timer——保住静默刷新
       if (key === lastKey) return;
+      if (timer) clearTimeout(timer);
       lastKey = key;
-      timer = setTimeout(() => void load(round), 300);
+      // 立即离开 idle（防抖期间也显示加载中）：舞台切场景重挂载组件且无
+      // 快照可回显时，避免先闪一张「等待选图」卡
+      status.value = "loading";
+      // 新选图：PB 立即清空（待拉取态），拉到数据后再显示
+      pbA.value = undefined;
+      pbB.value = undefined;
+      timer = setTimeout(() => void load(round, key, false), 300);
     },
     { immediate: true },
   );
@@ -178,6 +305,37 @@ export function useCategoryInfo(
   watch(bindA, (v) => void resolveBind(v, resolvedA), { immediate: true });
   watch(bindB, (v) => void resolveBind(v, resolvedB), { immediate: true });
 
+  // ── 选手当前项目 PB（personal-bests 口径：未进 Top 15 也有成绩） ────
+  async function refreshPb(
+    userId: string | null,
+    into: Ref<SrPersonalBest | null | undefined>,
+  ): Promise<void> {
+    if (!boardParams.value) {
+      into.value = undefined; // 榜单未就绪：保持待拉取（显示空串）
+      return;
+    }
+    if (!userId) {
+      into.value = null; // 未绑定 speedrun 账号：N/A
+      return;
+    }
+    try {
+      into.value = await fetchUserPb(userId, boardParams.value);
+    } catch {
+      into.value = undefined; // PB 非关键路径，失败保持待拉取（下次榜单再试）
+    }
+  }
+
+  watch(
+    [boardParams, resolvedA],
+    () => void refreshPb(resolvedA.value?.id ?? null, pbA),
+    { immediate: true },
+  );
+  watch(
+    [boardParams, resolvedB],
+    () => void refreshPb(resolvedB.value?.id ?? null, pbB),
+    { immediate: true },
+  );
+
   /** 行 → 选手方：优先解析出的 userId 相等；回退展示名与绑定串全等（不区分大小写）。 */
   const rows = computed<CategoryRow[]>(() =>
     rawRows.value.map((r) => {
@@ -197,5 +355,5 @@ export function useCategoryInfo(
     }),
   );
 
-  return { status, rows, refreshedAt, errDetail };
+  return { status, rows, refreshedAt, errDetail, boardDisplay, pbA, pbB };
 }

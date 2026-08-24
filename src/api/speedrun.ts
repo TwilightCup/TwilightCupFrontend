@@ -14,8 +14,15 @@
 
 import { restBase } from "@/api/config";
 
+/** speedrun.com 上的游戏 id：HFF 主游戏 + Category Extensions 子游戏
+ *  （No Checkpoint% / Jumpless% 词条项目在子游戏上） */
+export const SPEEDRUN_GAMES = {
+  hff: "k6qgnmdg",
+  ext: "o6gl20nd",
+} as const;
+
 /** speedrun.com 上 Human: Fall Flat 的固定 id（后端代理已绑定该游戏） */
-export const SPEEDRUN_HFF = { id: "k6qgnmdg", abbrev: "hff" } as const;
+export const SPEEDRUN_HFF = { id: SPEEDRUN_GAMES.hff, abbrev: "hff" } as const;
 
 /** 默认拉取的名次数（categoryinfo 场景 Top 15） */
 export const LEADERBOARD_TOP = 15;
@@ -80,12 +87,20 @@ export interface SrLeaderRow {
   /** speedrun.com 用户 id（guest 选手为 null） */
   userId: string | null;
   timeSec: number;
+  /** run 提交日期（ISO "YYYY-MM-DD"，可能缺失） */
+  date: string | null;
 }
 
 /** 用户（绑定解析） */
 export interface SrUser {
   id: string;
   name: string;
+}
+
+/** 个人最好成绩（当前项目口径；名次可超出榜单 Top N） */
+export interface SrPersonalBest {
+  place: number;
+  timeSec: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -156,10 +171,12 @@ function dataOf(body: unknown): unknown {
 // 公开接口
 // ---------------------------------------------------------------------------
 
-/** 一次拉全 HFF 的分类与关卡（管理端映射选择器选项源）。 */
-export function fetchHffMeta(): Promise<{ categories: SrCategory[]; levels: SrLevel[] }> {
+/** 一次拉全某游戏的分类与关卡（默认 HFF；管理端映射选择器与自动解析的选项源）。 */
+export function fetchHffMeta(
+  gameId: string = SPEEDRUN_GAMES.hff,
+): Promise<{ categories: SrCategory[]; levels: SrLevel[] }> {
   return cachedGet(
-    "game-meta",
+    `game-meta?game_id=${gameId}`,
     TTL_META_MS,
     (body) => {
       const game = asRecord(dataOf(body));
@@ -225,15 +242,18 @@ export function fetchVariables(scope: {
   });
 }
 
-/** 拉项目排行榜（单关传 levelId 走 IL 端点；variables 为子分类过滤）。 */
+/** 拉项目排行榜（单关传 levelId 走 IL 端点；variables 为子分类过滤；
+ *  gameId 默认 HFF，可为 Category Extensions 子游戏）。 */
 export function fetchLeaderboard(q: {
   categoryId: string;
   levelId?: string | null;
   variables?: Record<string, string>;
   top?: number;
+  gameId?: string;
 }): Promise<SrLeaderRow[]> {
   const params = new URLSearchParams({
     category_id: q.categoryId,
+    game_id: q.gameId ?? SPEEDRUN_GAMES.hff,
     top: String(q.top ?? LEADERBOARD_TOP),
   });
   if (q.levelId) params.set("level_id", q.levelId);
@@ -278,11 +298,15 @@ export function fetchLeaderboard(q: {
         }
       }
       if (names.length === 0) continue;
+      const rawDate = run.date;
       rows.push({
         place,
         playerName: names.join(" & "),
         userId: singleUserId,
         timeSec,
+        date: typeof rawDate === "string" && /^\d{4}-\d{2}-\d{2}/.test(rawDate)
+          ? rawDate.slice(0, 10)
+          : null,
       });
     }
     return rows;
@@ -301,6 +325,55 @@ export function resolveUser(lookup: string): Promise<SrUser | null> {
     const name = asRecord(rec.names)?.international;
     return { id: rec.id, name: typeof name === "string" ? name : key };
   });
+}
+
+/**
+ * 用户在指定项目的个人最好成绩（personal-bests 按分类 + 关卡 + 子分类值
+ * 过滤；名次可超出榜单 Top N——未进 Top 15 也能取到 PB）。无成绩返回 null。
+ */
+export function fetchUserPb(
+  userId: string,
+  board: {
+    categoryId: string;
+    levelId?: string | null;
+    variables?: Record<string, string>;
+    gameId?: string;
+  },
+): Promise<SrPersonalBest | null> {
+  // 缓存 key 必须含项目参数：解析按项目过滤，同一用户不同项目结果不同
+  // （后端 /pb 忽略多余 query，上游响应本身与项目无关）
+  const params = new URLSearchParams({
+    user_id: userId,
+    category_id: board.categoryId,
+    game_id: board.gameId ?? SPEEDRUN_GAMES.hff,
+  });
+  if (board.levelId) params.set("level_id", board.levelId);
+  for (const [varId, valueId] of Object.entries(board.variables ?? {})) {
+    if (varId && valueId) params.set(`var-${varId}`, valueId);
+  }
+  return cachedGet(`pb?${params.toString()}`, TTL_LEADERBOARD_MS, (body) => {
+      const list = dataOf(body);
+      if (!Array.isArray(list)) return null;
+      const wantVars = board.variables ?? {};
+      for (const item of list) {
+        const rec = asRecord(item);
+        const run = asRecord(rec?.run);
+        if (!rec || !run) continue;
+        if (String(run.category ?? "") !== board.categoryId) continue;
+        const level = typeof run.level === "string" ? run.level : null;
+        if (level !== (board.levelId ?? null)) continue;
+        const runValues = asRecord(run.values);
+        const varsMatch = Object.entries(wantVars).every(
+          ([varId, valueId]) => runValues?.[varId] === valueId,
+        );
+        if (!varsMatch) continue;
+        const timeSec = asRecord(run.times)?.primary_t;
+        if (typeof timeSec !== "number") continue;
+        return { place: typeof rec.place === "number" ? rec.place : 0, timeSec };
+      }
+      return null;
+    },
+  );
 }
 
 /** 清空全部缓存（测试/手动刷新用）。 */

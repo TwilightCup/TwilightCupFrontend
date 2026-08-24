@@ -1,17 +1,19 @@
 <script setup lang="ts">
 /**
- * 项目信息场景的 Top 15 榜单表。
+ * 项目信息场景的 Top 15 榜单（单个霓虹 panel，紧凑排布）。
  *
- * 行 = 名次（1-3 奖牌色）/ 选手名 / 成绩（等宽数字）；本场选手行以
- * 选手色（A 蓝 / B 红）左边条 + 半透色底高亮。并列名次（place 跳号）按
- * speedrun.com 原样展示。文案经 bi() 双语（不随 locale 切换）。
+ * 行 = 名次（1-3 奖牌色）/ 选手名 / 成绩（等宽数字）/ 成绩日期（YY-MM-DD，
+ * 成绩右侧、弱化小字）。本场选手高亮为**选手名着选手色 + 轻微辉光**
+ * （A 蓝 / B 红）。并列名次（place 跳号）按 speedrun.com 原样展示。
  */
 import { computed } from "vue";
-import { bi } from "@/utils/bilingual";
 import { formatRunTime } from "@/utils/format";
 import type { CategoryRow } from "./useCategoryInfo";
 
 const props = defineProps<{ rows: CategoryRow[] }>();
+
+/** 榜上是否有本场选手（任一行高亮）：有则其余行的名称/成绩弱化为灰色 */
+const hasHighlight = computed(() => props.rows.some((r) => r.highlight !== null));
 
 const medal = (place: number): string => {
   if (place === 1) return "medal-gold";
@@ -20,20 +22,14 @@ const medal = (place: number): string => {
   return "";
 };
 
-const header = computed(() => ({
-  rank: bi("scenes.categoryinfo.rankHeader"),
-  player: bi("scenes.categoryinfo.playerHeader"),
-  time: bi("scenes.categoryinfo.timeHeader"),
-}));
+/** "YYYY-MM-DD" → "YY-MM-DD"；缺失返回空串。 */
+function shortDate(iso: string | null): string {
+  return iso ? iso.slice(2, 10) : "";
+}
 </script>
 
 <template>
-  <div class="lb">
-    <div class="lb-head">
-      <span class="lb-th rank">{{ header.rank }}</span>
-      <span class="lb-th player">{{ header.player }}</span>
-      <span class="lb-th time">{{ header.time }}</span>
-    </div>
+  <div class="lb neon-panel" :class="{ 'dim-others': hasHighlight }">
     <TransitionGroup name="lb-row" tag="div" class="lb-body">
       <div
         v-for="(r, i) in props.rows"
@@ -44,56 +40,47 @@ const header = computed(() => ({
         <span class="lb-td rank">{{ r.place }}</span>
         <span class="lb-td player">{{ r.playerName }}</span>
         <span class="lb-td time">{{ formatRunTime(r.timeSec) }}</span>
+        <span class="lb-td date">{{ shortDate(r.date) }}</span>
       </div>
     </TransitionGroup>
   </div>
 </template>
 
 <style scoped>
+/* 一整个 panel：半透紫底 + 青描边（neon-panel），行平铺填满。
+   列间距收窄（名次/名称/成绩/日期紧凑排列），宽度由外层 panel-box 限制。 */
 .lb {
-  width: 100%;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  padding: 12px 22px;
+}
+.lb-body {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  justify-content: flex-start;
 }
-.lb-head,
 .lb-row {
+  height: 46px;
+  flex: none;
   display: grid;
-  grid-template-columns: 110px 1fr 240px;
+  /* 名称列与成绩列等宽（过长名称省略号截断），列间 6px 紧凑间距 */
+  grid-template-columns: 78px 210px 210px 120px;
   align-items: center;
-  column-gap: 16px;
-}
-.lb-head {
-  padding: 0 22px 4px;
-}
-.lb-th {
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--syn-text-dim);
-  letter-spacing: 2px;
-}
-.lb-th.time,
-.lb-td.time {
-  text-align: right;
-}
-.lb-row {
-  height: 52px;
-  padding: 0 22px;
-  border-radius: 10px;
-  background: var(--syn-panel);
-  border: 1px solid var(--syn-border);
+  column-gap: 6px;
 }
 .lb-row + .lb-row {
-  margin-top: 2px;
+  border-top: 1px solid rgba(120, 80, 200, 0.22);
 }
 .lb-td.rank {
-  font-size: 26px;
+  font-size: 24px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   color: var(--syn-text-dim);
 }
 .lb-td.player {
-  font-size: 25px;
+  font-size: 24px;
   font-weight: 600;
   color: var(--syn-text);
   overflow: hidden;
@@ -101,10 +88,17 @@ const header = computed(() => ({
   white-space: nowrap;
 }
 .lb-td.time {
-  font-size: 26px;
+  font-size: 25px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   letter-spacing: 1px;
+  text-align: right;
+}
+.lb-td.date {
+  font-size: 17px;
+  color: var(--syn-text-dim);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 /* 奖牌名次色 */
@@ -121,16 +115,20 @@ const header = computed(() => ({
   text-shadow: 0 0 10px rgba(255, 138, 61, 0.4);
 }
 
-/* 本场选手高亮：选手色左边条 + 半透色底 */
-.hl-A {
-  border-color: var(--syn-a);
-  background: linear-gradient(90deg, rgba(61, 139, 255, 0.22), var(--syn-panel) 55%);
-  box-shadow: inset 4px 0 0 var(--syn-a), 0 0 18px rgba(61, 139, 255, 0.25);
+/* 本场选手高亮：名称着选手色 + 轻微辉光 */
+.hl-A .lb-td.player {
+  color: var(--syn-a);
+  text-shadow: 0 0 9px rgba(61, 139, 255, 0.55);
 }
-.hl-B {
-  border-color: var(--syn-b);
-  background: linear-gradient(90deg, rgba(255, 107, 74, 0.22), var(--syn-panel) 55%);
-  box-shadow: inset 4px 0 0 var(--syn-b), 0 0 18px rgba(255, 107, 74, 0.25);
+.hl-B .lb-td.player {
+  color: var(--syn-b);
+  text-shadow: 0 0 9px rgba(255, 107, 74, 0.55);
+}
+
+/* 榜上有本场选手时：非选手行的名称与成绩整体弱化为灰色（名次色不变）；
+   榜上没有本场选手则保持默认白色 */
+.dim-others .lb-row:not(.hl-A):not(.hl-B) :is(.lb-td.player, .lb-td.time) {
+  color: #8b8b9e;
 }
 
 /* 换榜入场：逐行轻微上移淡入 */

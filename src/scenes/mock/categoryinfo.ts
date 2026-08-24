@@ -31,23 +31,29 @@ export const MOCK_UNMAPPED_PICK: Pick = {
   speedrun_variables: {},
 };
 
-/** 示例榜单（place 2 与 4 模拟本场 A/B 选手高亮；含并列名次跳号） */
-export const MOCK_LEADERBOARD: { place: number; playerName: string; userId: string | null; timeSec: number }[] = [
-  { place: 1, playerName: "DouBai", userId: "jpmye20j", timeSec: 1423.56 },
-  { place: 2, playerName: "选手A", userId: "mock0001", timeSec: 1512.4 },
-  { place: 2, playerName: "yuutaku", userId: "xzlkldr8", timeSec: 1512.4 },
-  { place: 4, playerName: "kottu", userId: "8wlw6w4j", timeSec: 1601.87 },
-  { place: 5, playerName: "选手B", userId: "mock0002", timeSec: 1688.02 },
-  { place: 6, playerName: "Zeix", userId: "mock0003", timeSec: 1710.9 },
-  { place: 7, playerName: "Loona", userId: "mock0004", timeSec: 1755.31 },
-  { place: 8, playerName: "GuestRunner", userId: null, timeSec: 1802.74 },
-  { place: 9, playerName: "Mikoto", userId: "mock0005", timeSec: 1859.18 },
-  { place: 10, playerName: "Aster", userId: "mock0006", timeSec: 1904.6 },
-  { place: 11, playerName: "Nori", userId: "mock0007", timeSec: 1977.23 },
-  { place: 12, playerName: "Fay", userId: "mock0008", timeSec: 2031.49 },
-  { place: 13, playerName: "Revv", userId: "mock0009", timeSec: 2110.05 },
-  { place: 14, playerName: "Sora", userId: "mock0010", timeSec: 2188.66 },
-  { place: 15, playerName: "Kite", userId: "mock0011", timeSec: 2264.12 },
+/** 示例榜单（place 2 与 5 模拟本场 A/B 选手高亮；含并列名次跳号） */
+export const MOCK_LEADERBOARD: {
+  place: number;
+  playerName: string;
+  userId: string | null;
+  timeSec: number;
+  date: string | null;
+}[] = [
+  { place: 1, playerName: "DouBai", userId: "jpmye20j", timeSec: 1423.56, date: "2026-03-14" },
+  { place: 2, playerName: "选手A", userId: "mock0001", timeSec: 1512.4, date: "2026-04-02" },
+  { place: 2, playerName: "yuutaku", userId: "xzlkldr8", timeSec: 1512.4, date: "2026-02-27" },
+  { place: 4, playerName: "kottu", userId: "8wlw6w4j", timeSec: 1601.87, date: "2026-01-19" },
+  { place: 5, playerName: "选手B", userId: "mock0002", timeSec: 1688.02, date: "2026-05-06" },
+  { place: 6, playerName: "Zeix", userId: "mock0003", timeSec: 1710.9, date: "2025-12-30" },
+  { place: 7, playerName: "Loona", userId: "mock0004", timeSec: 1755.31, date: "2026-03-08" },
+  { place: 8, playerName: "GuestRunner", userId: null, timeSec: 1802.74, date: "2025-11-11" },
+  { place: 9, playerName: "Mikoto", userId: "mock0005", timeSec: 1859.18, date: "2026-04-21" },
+  { place: 10, playerName: "Aster", userId: "mock0006", timeSec: 1904.6, date: "2026-02-05" },
+  { place: 11, playerName: "Nori", userId: "mock0007", timeSec: 1977.23, date: "2025-10-17" },
+  { place: 12, playerName: "Fay", userId: "mock0008", timeSec: 2031.49, date: "2026-05-23" },
+  { place: 13, playerName: "Revv", userId: "mock0009", timeSec: 2110.05, date: "2026-01-30" },
+  { place: 14, playerName: "Sora", userId: "mock0010", timeSec: 2188.66, date: "2026-03-27" },
+  { place: 15, playerName: "Kite", userId: "mock0011", timeSec: 2264.12, date: "2025-12-08" },
 ];
 
 /** mock 绑定（高亮演示：用户名口径） */
