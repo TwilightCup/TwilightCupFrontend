@@ -22,8 +22,7 @@ import {
   type SceneContext,
 } from "@/scenes/composables/useSceneContext";
 import {
-  bindStageScene,
-  SCENE_KEYS,
+  isSceneKey,
   type SceneKey,
 } from "./useStageScene";
 import CategoryInfoScene from "@/scenes/categoryinfo/CategoryInfoScene.vue";
@@ -68,26 +67,22 @@ const showTopBar = computed(
     currentScene.value === "mappool" ||
     currentScene.value === "categoryinfo",
 );
-let unbind: (() => void) | null = null;
+let unwatchCmd: (() => void) | null = null;
 
 onMounted(() => {
   if (params.token) director.connect(params.token, params.matchId || undefined);
-  unbind = bindStageScene(currentScene);
 
   // WS 广播：控制台发 director_cmd → store 更新 currentSceneCmd → 舞台切场景
-  // （含 state_sync 回放；指令值可能来自后端暂存的历史，按 SCENE_KEYS 校验防脏值）
-  const unwatch = watch(
+  // （含 state_sync 回放对齐初始场景；回放值按 SCENE_KEYS 校验防脏）
+  unwatchCmd = watch(
     () => director.currentSceneCmd,
     (scene) => {
-      if (scene && (SCENE_KEYS as string[]).includes(scene)) {
-        currentScene.value = scene as SceneKey;
-      }
+      if (isSceneKey(scene)) currentScene.value = scene;
     },
   );
-  onUnmounted(() => unwatch());
 });
 onUnmounted(() => {
-  unbind?.();
+  unwatchCmd?.();
   director.disconnect();
 });
 

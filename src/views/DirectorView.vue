@@ -10,11 +10,7 @@ import AccountMenu from "@/components/AccountMenu.vue";
 import AuthFailMask from "@/components/AuthFailMask.vue";
 import { AttemptStatus, PlayerStatus } from "@/api/types";
 import { formatMs, phaseInfo } from "@/utils/format";
-import {
-  getCurrentScene,
-  setCurrentScene,
-  type SceneKey,
-} from "@/scenes/stage/useStageScene";
+import { DEFAULT_SCENE, type SceneKey } from "@/scenes/stage/useStageScene";
 import {
   useDirectorConfig,
   type DirectorConfig,
@@ -141,11 +137,10 @@ const sceneBtnLabels: Record<SceneKey, string> = {
   bracket: "directorView.sceneBtnBracket",
   soon: "directorView.sceneBtnSoon",
 };
-const activeScene = ref<SceneKey>(getCurrentScene());
+const activeScene = ref<SceneKey>(DEFAULT_SCENE);
 function onSwitchScene(key: SceneKey): void {
   activeScene.value = key;
-  setCurrentScene(key); // localStorage 兜底（同进程）
-  director.sendDirectorCommand("switch_scene", { scene: key }); // WS 广播（跨进程 OBS）
+  director.sendDirectorCommand("switch_scene", { scene: key }); // WS 广播（唯一通道，按账号隔离）
 }
 // WS 侧场景指令（state_sync 回放 / 其他控制台切换）→ 本地 radio 跟随
 watch(
@@ -165,10 +160,6 @@ const soonTargetSec = computed({
     // 同步本地 + WS 发送
     director.soonCmdState.targetMs = newMs;
     director.sendDirectorCommand("soon_set_target", { target_ms: newMs });
-    // localStorage 兜底（同进程 Chrome 标签页）
-    try {
-      localStorage.setItem("twc-soon-countdown", JSON.stringify(director.soonCmdState));
-    } catch { /* ignore */ }
   },
 });
 
@@ -201,16 +192,6 @@ function soonPause(): void {
 function soonReset(): void {
   director.sendDirectorCommand("soon_reset");
 }
-
-// localStorage 兜底：同进程 Chrome 标签页仍可同步（OBS-CEF 跨进程靠 WS）
-window.addEventListener("storage", (e: StorageEvent) => {
-  if (e.key === "twc-soon-countdown" && e.newValue) {
-    try {
-      const parsed = JSON.parse(e.newValue);
-      Object.assign(director.soonCmdState, parsed);
-    } catch { /* ignore */ }
-  }
-});
 
 function logout(): void {
   director.disconnect();
