@@ -7,6 +7,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useDirectorStore } from "@/stores/director";
 import RoleSwitcher from "@/components/RoleSwitcher.vue";
 import AccountMenu from "@/components/AccountMenu.vue";
+import StreamFrame from "@/scenes/match/StreamFrame.vue";
 import AuthFailMask from "@/components/AuthFailMask.vue";
 import { AttemptStatus, PlayerStatus } from "@/api/types";
 import { formatMs, phaseInfo, shortTime } from "@/utils/format";
@@ -411,6 +412,33 @@ onUnmounted(() => {
           </div>
         </div>
 
+        <!-- 选手画面监控：与舞台同源同配置实时预览（不受隐藏开关影响——先验证
+             画面加载正常，再开下方显示开关放上台；刷新按钮同时重拉预览与舞台） -->
+        <div class="card">
+          <div class="card-title">{{ $t("directorView.previewTitle") }}</div>
+          <p class="hint">{{ $t("directorView.previewHint") }}</p>
+          <div class="stream-preview">
+            <div class="sp-col">
+              <span class="sp-label tc-a">A · {{ director.nameOf("A") }}</span>
+              <StreamFrame
+                side="A"
+                :hls-url="cfgConfig.hlsA"
+                :embed-url="cfgConfig.embedA"
+                :refresh-nonce="cfgConfig.refreshA"
+              />
+            </div>
+            <div class="sp-col">
+              <span class="sp-label tc-b">B · {{ director.nameOf("B") }}</span>
+              <StreamFrame
+                side="B"
+                :hls-url="cfgConfig.hlsB"
+                :embed-url="cfgConfig.embedB"
+                :refresh-nonce="cfgConfig.refreshB"
+              />
+            </div>
+          </div>
+        </div>
+
         <!-- 导播配置：HLS/嵌入，保存后写入舞台链接（跨浏览器随链接下发） -->
         <div class="card">
           <div class="card-title">{{ $t("directorView.cfgTitle") }}</div>
@@ -731,6 +759,30 @@ onUnmounted(() => {
   display: flex;
   justify-content: flex-end;
   margin-top: 8px;
+}
+/* 选手画面监控：复用舞台 StreamFrame——场景主题变量在此局部定义
+   （主应用不加载 scene-theme.css，占位描边/警示色需要这几个令牌） */
+.stream-preview {
+  --syn-a: #3d8bff;
+  --syn-b: #ff6b4a;
+  --syn-magenta: #ff2e88;
+  --syn-text-dim: #a99bd6;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.sp-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.sp-label {
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .warn {
   margin: 8px 0 0;

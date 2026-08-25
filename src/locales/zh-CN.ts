@@ -512,6 +512,8 @@ const messages = {
   "directorView.cfgHint": "保存后经 WS 实时推送到已打开的舞台（跨浏览器/机器），并写入下方「合并舞台」链接供新开的源使用。",
   "directorView.cfgSaved": "已保存，已写入舞台链接",
   "directorView.cfgRefresh": "重拉流",
+  "directorView.previewTitle": "选手画面监控",
+  "directorView.previewHint": "与舞台同源同配置实时预览，不受显示开关影响——确认画面加载正常后，再开下方开关放上台；「重拉流」同时刷新预览与舞台。",
   "directorView.soonLabel": "倒计时(秒)",
   "directorView.soonStart": "开始",
   "directorView.soonResume": "继续",

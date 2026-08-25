@@ -508,6 +508,8 @@ const messages: MessageSchema = {
   "directorView.cfgHint": "Saving pushes the values live to any open stage over WS (across browsers/machines) and embeds them into the merged-stage link below for newly opened sources.",
   "directorView.cfgSaved": "Saved — embedded into the stage link",
   "directorView.cfgRefresh": "Reload",
+  "directorView.previewTitle": "Stream monitor",
+  "directorView.previewHint": "Live preview sharing the stage's exact config, unaffected by the show/hide switches — verify the feed loads, then flip the switch below to put it on the stage; \"Reload\" refreshes both the preview and the stage.",
   "directorView.soonLabel": "Countdown (sec)",
   "directorView.soonStart": "Start",
   "directorView.soonResume": "Resume",
