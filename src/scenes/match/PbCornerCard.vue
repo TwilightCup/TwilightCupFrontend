@@ -102,8 +102,10 @@ const pbRows = computed<PbRow[]>(() => {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.5px;
   font-family: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
-  /* 满量程 MM:SS.mmm（9 字符）占位：N/A 等短文本行名称起点不左移 */
-  min-width: 9ch;
+  /* 满量程 H:MM:SS.mmm（11 字符）定宽：列宽与时间文本长短无关，各行名称
+     起点一致（N/A / 小时位不外挤；letter-spacing 溢出的 ~5px 落入间隔内） */
+  flex: none;
+  width: 11ch;
 }
 /* 标签（WR / PB）等宽字体 */
 .tag {
