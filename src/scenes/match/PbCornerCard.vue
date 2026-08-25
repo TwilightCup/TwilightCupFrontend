@@ -4,8 +4,8 @@
  * 项目信息场景（categoryinfo）同源——世界纪录（榜首成绩）+ 双方选手该项目 PB。
  *
  * 样式对齐该场景的霓虹 panel（neon-panel）但改直角边；三行各为
- * 「标签（左，等宽）→ 时间（紧随标签）→ 名称（占余宽、左对齐、过长省略
- * 号）」，元素间隔与卡片水平内边距一致：标签保留行色（WR 金 = 榜单榜首
+ * 「标签（左，等宽）→ 时间（紧随标签，列宽 = 可见行最长文本）→ 名称（占
+ * 余宽、左对齐、过长省略号）」，元素间隔与卡片水平内边距一致：标签保留行色（WR 金 = 榜单榜首
  * 名次色，PB = 选手色），时间与名称统一榜单 4 名外名次色（弱化、无辉光）。
  * WR 名称 = speedrun 榜首玩家名；PB 名称 = 选手展示名，按用时升序（短者在
  * 上，无成绩沉底）。
@@ -53,10 +53,22 @@ const pbRows = computed<PbRow[]>(() => {
     .filter((r): r is PbRow => r !== null)
     .sort((x, y) => (x.sec ?? Infinity) - (y.sec ?? Infinity));
 });
+
+/** 时间列定宽（注入 CSS 变量）：取可见行时间文本最长者——常规 MM:SS.mmm
+ *  时列宽贴合文本，时间→名称间隔与标签→时间一致；出现小时位时整列同步
+ *  加宽、名称仍对齐。每字符 +0.5px 补偿 letter-spacing 尾随宽度，使最长
+ *  行不被撑出列外（否则其名称比其余行偏右）。 */
+const timeCol = computed(() => {
+  const texts = [wrText.value, ...pbRows.value.map((r) => r.text)].filter(
+    (s): s is string => s !== null,
+  );
+  const n = Math.max(...texts.map((s) => s.length));
+  return `calc(${n}ch + ${n * 0.5}px)`;
+});
 </script>
 
 <template>
-  <div class="pbcard neon-panel">
+  <div class="pbcard neon-panel" :style="{ '--time-col': timeCol }">
     <div v-if="wrText" class="row wr">
       <span class="tag">WR</span>
       <span class="time">{{ wrText }}</span>
@@ -102,10 +114,11 @@ const pbRows = computed<PbRow[]>(() => {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.5px;
   font-family: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
-  /* 满量程 H:MM:SS.mmm（11 字符）定宽：列宽与时间文本长短无关，各行名称
-     起点一致（N/A / 小时位不外挤；letter-spacing 溢出的 ~5px 落入间隔内） */
+  /* 定宽列：宽 = 可见行最长时间文本（脚本注入，含小时位自适应）+ 每 字符
+     0.5px 的 letter-spacing 补偿——名称起点各行一致，最长行与名称的间隔
+     恰为行 gap */
   flex: none;
-  width: 11ch;
+  width: var(--time-col);
 }
 /* 标签（WR / PB）等宽字体 */
 .tag {
