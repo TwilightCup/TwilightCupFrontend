@@ -14,8 +14,12 @@ import type { SceneParams } from "./useSceneParams";
 export interface DirectorConfig {
   rtmpA: string;
   rtmpB: string;
+  /** 转码 HLS（m3u8）——自有流媒体服务器输出；hls.js/Safari 可播 */
   hlsA: string;
   hlsB: string;
+  /** 外部直播嵌入地址（B站嵌入播放器 / YouTube embed）——iframe 渲染 */
+  embedA: string;
+  embedB: string;
 }
 
 const EMPTY: DirectorConfig = {
@@ -23,6 +27,8 @@ const EMPTY: DirectorConfig = {
   rtmpB: "",
   hlsA: "",
   hlsB: "",
+  embedA: "",
+  embedB: "",
 };
 
 const PREFIX = "twc-director-cfg";
@@ -79,6 +85,8 @@ export function useDirectorConfig() {
       rtmpB: url.rtmpB || stored.rtmpB,
       hlsA: url.hlsA || stored.hlsA,
       hlsB: url.hlsB || stored.hlsB,
+      embedA: url.embedA || stored.embedA,
+      embedB: url.embedB || stored.embedB,
     };
     Object.assign(config, merged);
     write(matchId, merged);

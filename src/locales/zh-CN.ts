@@ -1043,6 +1043,8 @@ const messages = {
   "scenes.edit.rtmpB": "选手B RTMP（红）",
   "scenes.edit.hlsA": "选手A HLS（可播）",
   "scenes.edit.hlsB": "选手B HLS（可播）",
+  "scenes.edit.embedA": "选手A 直播嵌入（B站/YouTube）",
+  "scenes.edit.embedB": "选手B 直播嵌入（B站/YouTube）",
   "scenes.edit.save": "保存",
   "scenes.edit.close": "关闭",
   "scenes.bracket.title": "赛程图",

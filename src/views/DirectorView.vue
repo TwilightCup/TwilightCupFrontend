@@ -74,12 +74,16 @@ const cfgForm = reactive<DirectorConfig>({
   rtmpB: "",
   hlsA: "",
   hlsB: "",
+  embedA: "",
+  embedB: "",
 });
 const cfgFields: { key: keyof DirectorConfig; label: string }[] = [
   { key: "rtmpA", label: "scenes.edit.rtmpA" },
   { key: "rtmpB", label: "scenes.edit.rtmpB" },
   { key: "hlsA", label: "scenes.edit.hlsA" },
   { key: "hlsB", label: "scenes.edit.hlsB" },
+  { key: "embedA", label: "scenes.edit.embedA" },
+  { key: "embedB", label: "scenes.edit.embedB" },
 ];
 // matchId 在 auth_ok 后才有；连接建立即载入该场已存配置
 watch(
@@ -118,6 +122,8 @@ const CFG_URL_KEYS: Record<keyof DirectorConfig, string> = {
   rtmpB: "rtmp_b",
   hlsA: "hls_a",
   hlsB: "hls_b",
+  embedA: "embed_a",
+  embedB: "embed_b",
 };
 const stageUrl = computed(() => {
   const base = director.stageUrl;

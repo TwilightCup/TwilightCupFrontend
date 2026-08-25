@@ -15,10 +15,14 @@ export interface SceneParams {
   rtmpA: string;
   /** 选手 B（红）RTMP ingest 地址 */
   rtmpB: string;
-  /** 选手 A 浏览器可播流（HLS），有则 <video> 直放 */
+  /** 选手 A 浏览器可播流（HLS），有则 hls.js / 原生 <video> 播放 */
   hlsA: string;
   /** 选手 B 浏览器可播流（HLS） */
   hlsB: string;
+  /** 选手 A 外部直播嵌入地址（B站/YouTube），有则 iframe 渲染 */
+  embedA: string;
+  /** 选手 B 外部直播嵌入地址 */
+  embedB: string;
   /** 编辑态（=1 唤出导播配置面板） */
   editMode: boolean;
   /** 偏差条满偏对应的计时差（毫秒），默认 60000 */
@@ -40,6 +44,8 @@ export function useSceneParams(): SceneParams {
     rtmpB: get("rtmp_b"),
     hlsA: get("hls_a"),
     hlsB: get("hls_b"),
+    embedA: get("embed_a"),
+    embedB: get("embed_b"),
     editMode: p.get("edit") === "1",
     gapMs: parseGap(get("gap")),
   };

@@ -44,6 +44,8 @@ const fields: Field[] = [
   { key: "rtmpB", label: t("scenes.edit.rtmpB"), placeholder: "rtmp://..." },
   { key: "hlsA", label: t("scenes.edit.hlsA"), placeholder: "https://.../a.m3u8" },
   { key: "hlsB", label: t("scenes.edit.hlsB"), placeholder: "https://.../b.m3u8" },
+  { key: "embedA", label: t("scenes.edit.embedA"), placeholder: "https://player.bilibili.com/... 或 youtube.com/embed/..." },
+  { key: "embedB", label: t("scenes.edit.embedB"), placeholder: "https://player.bilibili.com/... 或 youtube.com/embed/..." },
 ];
 
 function close(): void {

@@ -1039,6 +1039,8 @@ const messages: MessageSchema = {
   "scenes.edit.rtmpB": "Player B RTMP (red)",
   "scenes.edit.hlsA": "Player A HLS (playable)",
   "scenes.edit.hlsB": "Player B HLS (playable)",
+  "scenes.edit.embedA": "Player A live embed (Bilibili/YouTube)",
+  "scenes.edit.embedB": "Player B live embed (Bilibili/YouTube)",
   "scenes.edit.save": "Save",
   "scenes.edit.close": "Close",
   "scenes.bracket.title": "Bracket",
