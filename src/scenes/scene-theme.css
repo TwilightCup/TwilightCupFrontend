@@ -5,9 +5,10 @@
  * 配色全在此固定（不随主题深浅切换）。每个场景的 main.ts import 一次即可复用
  * 令牌与工具类。
  *
- * 字体自托管（fonts.css）：Inter + Noto Sans SC + JetBrains Mono 内嵌分发，
- * 保证 OBS 浏览器源（CEF）与任何系统渲染一致——此前 "Inter" 只有名字没加载、
- * 苹方仅 macOS 有，OBS 机器回落到系统默认导致直播画面字体不一致。
+ * 字体自托管（fonts.css）：Noto Sans SC（中英统一，含拉丁字形）+
+ * JetBrains Mono（计时器等宽数字）内嵌分发，保证 OBS 浏览器源（CEF）与任何
+ * 系统渲染一致——苹方为 Apple 专有不可分发且非等宽，Windows/Linux 采集机
+ * 也没有，故用 Noto 系自托管替代。
  *
  * 配色约定（与全局 A/B 一致）：
  *   A（蓝）= #3d8bff   B（红）= #ff6b4a   胜方金 = #ffd166
@@ -39,7 +40,7 @@
 
   --syn-bg: #0a0118;
 
-  font-family: "Inter", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
 }
 
 /* 场景根：占满视口、固定深紫底、内容层在上 */
