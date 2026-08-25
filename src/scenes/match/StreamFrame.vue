@@ -5,7 +5,9 @@
  * 播放优先级：HLS（自有流媒体服务器输出）> 外部嵌入（B站/YouTube）> 占位。
  * - HLS：Safari/原生支持则 <video src> 直放；其余（Chrome/Edge/OBS CEF）
  *   动态 import hls.js 走 MSE 解码——OBS 浏览器源实为 Chromium，靠这条播放。
- * - 嵌入：配置 embedUrl（可 iframe 的嵌入播放器地址）时整卡 <iframe> 渲染。
+ * - 嵌入：配置 embedUrl（可 iframe 的嵌入播放器地址）时整卡 <iframe> 渲染；
+ *   object-fit 不适用于 iframe，改为 16:9 定宽外溢 + overflow:hidden 裁左右
+ *   （与 <video> 的 cover 裁切同口径）。
  *
  * side='A' 蓝（左）、'B' 红（右）。
  */
@@ -145,12 +147,25 @@ onBeforeUnmount(() => {
   background: #050010;
 }
 .video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover; /* 16:9 → 4:3：裁去左右 */
   background: #000;
   border: 0;
   display: block;
+}
+/* <video>：object-fit cover 裁左右（16:9 → 4:3） */
+video.video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* <iframe>：object-fit 不生效——高度撑满卡片、宽度按 16:9 外溢（= 卡宽 ×4/3），
+   居中后由 .frame 的 overflow:hidden 裁去左右，口径与 <video> 的 cover 一致 */
+iframe.video {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  height: 100%;
+  aspect-ratio: 16 / 9;
+  transform: translateX(-50%);
 }
 /* 占位：动画渐变 + 扫描线 + 主题色内边框（推流后不渲染，画面完整覆盖） */
 .placeholder {
