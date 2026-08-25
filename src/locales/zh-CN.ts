@@ -1075,8 +1075,6 @@ const messages = {
   "scenes.categoryinfo.highlightLegend": "高亮 = 本场选手",
   "scenes.categoryinfo.offlineBadge": "连接已断开",
   "scenes.match.waitingSignal": "等待信号",
-  "scenes.match.showStream": "显示画面",
-  "scenes.match.hideStream": "隐藏画面",
   "scenes.tug.faster": "领先",
 
   // ── format fallback ──────────────────────────────────────────────────

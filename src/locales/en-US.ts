@@ -1071,8 +1071,6 @@ const messages: MessageSchema = {
   "scenes.categoryinfo.highlightLegend": "Highlighted = match players",
   "scenes.categoryinfo.offlineBadge": "Disconnected",
   "scenes.match.waitingSignal": "Awaiting signal",
-  "scenes.match.showStream": "Show video",
-  "scenes.match.hideStream": "Hide video",
   "scenes.tug.faster": "Leading",
 
   // ── format fallback ──────────────────────────────────────────────────

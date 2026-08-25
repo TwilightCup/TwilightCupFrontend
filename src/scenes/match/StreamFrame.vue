@@ -17,14 +17,11 @@ const props = defineProps<{
   side: "A" | "B";
   hlsUrl: string;
   embedUrl?: string;
-  /** 隐藏该侧画面（等待信号占位；应急开关，经 config_update 广播同步） */
+  /** 隐藏该侧画面（等待信号占位；应急开关，控制台经 config_update 广播） */
   hidden?: boolean;
   /** 重新拉流计数（变化即重挂播放器：卡顿应急刷新） */
   refreshNonce?: number;
-  /** 显示编辑态控制角标（仅 ?edit=1；正式直播不渲染，避免上画面） */
-  showCtl?: boolean;
 }>();
-const emit = defineEmits<{ (e: "toggle"): void }>();
 
 /** HLS 播放失败（MSE 不可用 / 致命解码错误）→ 降级：嵌入 → 占位（可见，不黑屏） */
 const videoBroken = ref(false);
@@ -110,16 +107,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="frame" :class="side">
-    <!-- 编辑态开关角标（仅 ?edit=1 渲染，不上直播画面） -->
-    <button
-      v-if="showCtl"
-      class="ctl-chip"
-      :class="{ off: hidden }"
-      @click="emit('toggle')"
-    >
-      {{ hidden ? "👁 " + bi("scenes.match.showStream") : "🚫 " + bi("scenes.match.hideStream") }}
-    </button>
-
     <!-- 方案②：外部直播嵌入（B站/YouTube 播放器 iframe；key 随刷新计数重建即重载） -->
     <iframe
       v-if="mode === 'embed'"
@@ -149,29 +136,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* 编辑态开关角标：右上角悬浮（仅 ?edit=1 出现，不上直播画面） */
-.ctl-chip {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 5;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--syn-border-bright);
-  background: var(--syn-panel);
-  color: var(--syn-text);
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-}
-.ctl-chip:hover {
-  background: var(--syn-panel-solid);
-}
-.ctl-chip.off {
-  color: var(--syn-magenta);
-  border-color: var(--syn-magenta);
-}
-
 /* 双卡各占半宽无缝拼成 8:3，满铺 1920px（外层 .streams 控制） */
 .frame {
   position: relative;

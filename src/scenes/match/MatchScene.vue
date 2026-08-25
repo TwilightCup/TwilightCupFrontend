@@ -26,7 +26,7 @@ import { useCategoryInfo } from "@/scenes/categoryinfo/useCategoryInfo";
 import SynthwaveBg from "@/scenes/components/SynthwaveBg.vue";
 import DirectorConfigPanel from "@/scenes/components/DirectorConfigPanel.vue";
 import { useSceneContext } from "@/scenes/composables/useSceneContext";
-import { useDirectorConfig, type DirectorConfig } from "@/scenes/composables/useDirectorConfig";
+import { useDirectorConfig } from "@/scenes/composables/useDirectorConfig";
 import { MOCK_MATCH, MOCK_TOPBAR } from "@/scenes/mock/matchDetail";
 import { MOCK_MAPPOOL } from "@/scenes/mock/mappool";
 import { MOCK_LEADERBOARD, MOCK_SPEEDRUN_A, MOCK_SPEEDRUN_B } from "@/scenes/mock/categoryinfo";
@@ -180,15 +180,6 @@ function onSaved(patch: Parameters<typeof save>[1]): void {
   save(params.matchId, patch);
 }
 
-/** 舞台编辑态（?edit=1）点流画面开关角标：翻转该侧隐藏并广播（控制台同步） */
-function onToggleStream(side: "A" | "B"): void {
-  const key = side === "A" ? "hideA" : "hideB";
-  const patch = { [key]: !config[key] } as Partial<DirectorConfig>;
-  save(params.matchId, patch);
-  if (!hosted) return;
-  director.sendDirectorCommand("config_update", { config: patch });
-}
-
 // ---- 角标卡几何（左选图 / 右 PB）：分别锚定 A / B 计时器 ----
 // 选图卡右缘锚 A 计时器左侧留 12px、PB 卡左缘锚 B 计时器右侧留 12px，两卡
 // 顶缘锚各自计时器顶部、底缘贴画面底（高度由锚定推导）。计时器靠画面中轴
@@ -297,8 +288,6 @@ onUnmounted(() => {
             :embed-url="config.embedA"
             :hidden="config.hideA"
             :refresh-nonce="config.refreshA"
-            :show-ctl="params.editMode"
-            @toggle="onToggleStream('A')"
           />
           <StreamFrame
             side="B"
@@ -306,8 +295,6 @@ onUnmounted(() => {
             :embed-url="config.embedB"
             :hidden="config.hideB"
             :refresh-nonce="config.refreshB"
-            :show-ctl="params.editMode"
-            @toggle="onToggleStream('B')"
           />
         </section>
 
