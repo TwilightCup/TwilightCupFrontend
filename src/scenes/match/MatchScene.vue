@@ -10,13 +10,15 @@
  *   右下角：PB 角标卡（当前项目 WR + 双方 PB，PbCornerCard，speedrun 同源）
  *
  * 数据：onMounted 连 WS（director.connect），WS 断 / 无 match → mock 兜底（绝不黑屏）。
- * 计时 / 偏差口径见 useMatchTiming。导播配置（RTMP/HLS）走 useDirectorConfig
- * （localStorage），?edit=1 唤出面板。
+ * 计时口径见 useMatchTiming；偏差条由 subsegment 实时时间差驱动（subsegment_gap
+ * 广播 → director.subsegmentGap，最近一条覆盖、回合级生命周期，见
+ * ignored/需求-subsegment实时时间差追踪与前端接入.md）。导播配置（RTMP/HLS）走
+ * useDirectorConfig（localStorage），?edit=1 唤出面板。
  */
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useDirectorStore } from "@/stores/director";
-import { CategoryKind, MatchPhase, PickType } from "@/api/types";
+import { CategoryKind, PickType } from "@/api/types";
 import { formatMs } from "@/utils/format";
 import { categoryKindOf } from "@/utils/mappool";
 import { setSpeedrunToken } from "@/api/speedrun";
@@ -57,7 +59,7 @@ const isMulti = computed(() => {
   return director.currentRound ? director.currentRound.type === PickType.MULTI : true;
 });
 
-const { sideA, sideB, diffMs } = useMatchTiming({
+const { sideA, sideB } = useMatchTiming({
   isMulti: () => isMulti.value,
   levelsOf: (side) =>
     liveReady.value
@@ -76,11 +78,13 @@ const { sideA, sideB, diffMs } = useMatchTiming({
     if (!liveReady.value || !director.lastResult) return null;
     return side === "A" ? director.lastResult.scoreA : director.lastResult.scoreB;
   },
-  roundKey: () => (liveReady.value ? director.currentRound?.roundId ?? null : null),
-  running: () =>
-    liveReady.value && director.phase === MatchPhase.IN_ROUND && !director.lastResult,
-  liveClock: () => liveReady.value,
 });
+
+// ---- 多关偏差条：subsegment 实时时间差（最近一条 gap 直接覆盖，双向交错同理；
+//      回合结束 / 新回合由 store 清空归 0；mock 用静态演示值） ----
+const diffMs = computed(() =>
+  liveReady.value ? director.subsegmentGap ?? 0 : MOCK_MATCH.gapDiffMs,
+);
 
 const mainA = computed(() => formatMs(sideA.value.mainMs));
 const mainB = computed(() => formatMs(sideB.value.mainMs));

@@ -144,6 +144,15 @@ export const useDirectorStore = defineStore("director", () => {
   /** ban/pick 草稿状态（裁判端权威上报、后端转发；供叠加层渲染 ban/pick 动画） */
   const draft = ref<Record<string, unknown> | null>(null);
 
+  /**
+   * 最近一条 subsegment 实时时间差（仅 MULTI 回合进行中产生，需求见
+   * ignored/需求-subsegment实时时间差追踪与前端接入.md），已归一为有符号
+   * 偏差（毫秒）：正 = B 落后（偏差条游标向 B 侧），负 = A 落后。
+   * 回合级内存态：服务端回合结束即清空且断线不补发，前端在离开 IN_ROUND /
+   * 新回合时同步清空；长直道可能长时间无新 gap（≠ 掉线），最近一条照常显示。
+   */
+  const subsegmentGap = ref<number | null>(null);
+
   socket.onStatusChange = (s) => {
     connStatus.value = s;
   };
@@ -177,6 +186,10 @@ export const useDirectorStore = defineStore("director", () => {
         authError.value = msg.msg;
         break;
       case "phase_change":
+        // 离开 IN_ROUND：服务端已清空回合级 subsegment 数据，前端同步清掉差距显示
+        if (phase.value === MatchPhase.IN_ROUND && msg.phase !== MatchPhase.IN_ROUND) {
+          subsegmentGap.value = null;
+        }
         phase.value = msg.phase;
         break;
       case "ready_state":
@@ -205,6 +218,7 @@ export const useDirectorStore = defineStore("director", () => {
         playerB.value = freshPlayer();
         matchWinner.value = null;
         lastResult.value = null;
+        subsegmentGap.value = null;
         break;
       }
       case "round_start":
@@ -218,6 +232,7 @@ export const useDirectorStore = defineStore("director", () => {
         playerB.value = freshPlayer();
         matchWinner.value = null;
         lastResult.value = null;
+        subsegmentGap.value = null;
         break;
       case "player_status":
         applyPlayer(msg.seat, {
@@ -227,6 +242,17 @@ export const useDirectorStore = defineStore("director", () => {
           attempts: msg.attempts,
         });
         break;
+      case "subsegment_gap": {
+        // 实时时间差：最近一条直接覆盖（双向 gap 交错时最新比较点即当前差距）。
+        // 服务端只广播当前回合，此处再按 round_id 防御过期回合串扰（回合 id 未知
+        // 时放行——中途接入尚未收到 round_start 也能立即显示）。
+        const cur = currentRound.value?.roundId;
+        if (cur && msg.round_id !== cur) break;
+        subsegmentGap.value =
+          // gap_ms >0 = 穿越方（hit_seat）落后 → 归一为偏差条口径「正 = B 落后」
+          msg.hit_seat === "PLAYER_B" ? msg.gap_ms : -msg.gap_ms;
+        break;
+      }
       case "round_result":
         lastResult.value = {
           verdict: msg.verdict,
@@ -495,6 +521,8 @@ export const useDirectorStore = defineStore("director", () => {
     messages,
     chatLines,
     draft,
+    // subsegment 实时时间差（偏差条数据源）
+    subsegmentGap,
     // 派生 / 动作
     isMulti,
     stageUrl,

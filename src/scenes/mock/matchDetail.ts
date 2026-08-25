@@ -2,9 +2,9 @@
  * 比赛详情场景 mock 数据。
  *
  * 无 matchId 或 WS 断线时兜底，绝不让 OBS 黑屏。字段对齐 useMatchTiming 的数据源
- * 形态：多关给 completedLevels（含累计耗时，供偏差条 / 计时器计算），单关给
- * attempts（重试明细，按计分制取最快 / 平均）。isMulti 控制演示模式显隐
- * （偏差条 + 副计时器）。后端连上后由 WS 实时覆盖。
+ * 形态：多关给 completedLevels（含累计耗时，供计时器计算），单关给 attempts
+ * （重试明细，按计分制取最快 / 平均）。isMulti 控制演示模式显隐（偏差条 +
+ * 副计时器）。后端连上后由 WS 实时覆盖。
  */
 import { AttemptStatus, type Attempt, type LevelTime } from "@/api/types";
 import type { TopBarMock } from "@/scenes/components/TopBar.vue";
@@ -14,6 +14,9 @@ export const MOCK_MATCH = {
   isMulti: true,
   /** 单关计分制（对齐 match_log initial_info.scoring_method） */
   scoringMethod: "FASTEST" as const,
+  /** 演示偏差（毫秒，有符号：正 = B 落后）：mock 关卡累计 B 快 3.68s → A 落后。
+   *  真实数据来自 subsegment_gap 广播（director.subsegmentGap），mock 为静态值 */
+  gapDiffMs: -3680,
   /** 双方已完成关卡（含累计用时 total_ms），供偏差条 / 计时器计算 */
   levelsA: [
     { level_index: 0, time_ms: 42180, total_ms: 42180 },
