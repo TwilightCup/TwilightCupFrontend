@@ -83,7 +83,10 @@ function shortDate(iso: string | null): string {
   font-size: 24px;
   font-weight: 600;
   color: var(--syn-text);
-  overflow: hidden;
+  /* overflow: hidden 会把 text-shadow 一并裁掉，高亮名左侧辉光在单元格边
+     被切；clip + 12px 外溢裕量允许辉光越出单元格绘制，长名仍省略号截断 */
+  overflow: clip;
+  overflow-clip-margin: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
