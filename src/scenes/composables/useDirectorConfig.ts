@@ -4,7 +4,7 @@
  * 仿 src/stores/draft.ts 的 localStorage 模式：按 matchId 键控（无 matchId 用 "_global_"），
  * JSON 序列化，try/catch 容错。导播在编辑面板填一次，刷新 / OBS 重开即恢复。
  *
- * 优先级：URL 参数（rtmp_a 等）若提供 → 作为初值并落库；否则读 localStorage；都没有则空串。
+ * 优先级：URL 参数（hls_a 等）若提供 → 作为初值并落库；否则读 localStorage；都没有则空串。
  * 用法：组件 setup 调 const { config, save } = useDirectorConfig(); load(matchId, urlFallbacks)。
  */
 import { reactive } from "vue";
@@ -12,8 +12,6 @@ import type { SceneParams } from "./useSceneParams";
 
 /** 单场导播配置（每场一份，按 matchId 隔离） */
 export interface DirectorConfig {
-  rtmpA: string;
-  rtmpB: string;
   /** 转码 HLS（m3u8）——自有流媒体服务器输出；hls.js/Safari 可播 */
   hlsA: string;
   hlsB: string;
@@ -23,8 +21,6 @@ export interface DirectorConfig {
 }
 
 const EMPTY: DirectorConfig = {
-  rtmpA: "",
-  rtmpB: "",
   hlsA: "",
   hlsB: "",
   embedA: "",
@@ -81,8 +77,6 @@ export function useDirectorConfig() {
     const stored = read(matchId);
     // URL 覆盖：URL 给了非空就用 URL 值，并存库（下次刷新延续）
     const merged: DirectorConfig = {
-      rtmpA: url.rtmpA || stored.rtmpA,
-      rtmpB: url.rtmpB || stored.rtmpB,
       hlsA: url.hlsA || stored.hlsA,
       hlsB: url.hlsB || stored.hlsB,
       embedA: url.embedA || stored.embedA,

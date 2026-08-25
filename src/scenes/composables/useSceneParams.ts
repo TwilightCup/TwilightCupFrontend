@@ -12,9 +12,6 @@ export interface SceneParams {
   /** 赛事 id（赛程图 / 图池按赛事） */
   tournamentId: string;
   /** 选手 A（蓝）RTMP ingest 地址 */
-  rtmpA: string;
-  /** 选手 B（红）RTMP ingest 地址 */
-  rtmpB: string;
   /** 选手 A 浏览器可播流（HLS），有则 hls.js / 原生 <video> 播放 */
   hlsA: string;
   /** 选手 B 浏览器可播流（HLS） */
@@ -40,8 +37,6 @@ export function useSceneParams(): SceneParams {
     token: get("token"),
     matchId: get("match"),
     tournamentId: get("tournament"),
-    rtmpA: get("rtmp_a"),
-    rtmpB: get("rtmp_b"),
     hlsA: get("hls_a"),
     hlsB: get("hls_b"),
     embedA: get("embed_a"),

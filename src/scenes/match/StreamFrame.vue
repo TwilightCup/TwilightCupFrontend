@@ -6,7 +6,6 @@
  * - HLS：Safari/原生支持则 <video src> 直放；其余（Chrome/Edge/OBS CEF）
  *   动态 import hls.js 走 MSE 解码——OBS 浏览器源实为 Chromium，靠这条播放。
  * - 嵌入：配置 embedUrl（可 iframe 的嵌入播放器地址）时整卡 <iframe> 渲染。
- * - RTMP 浏览器放不了（仅 ingest 地址），占位态小字显示供推流侧参考。
  *
  * side='A' 蓝（左）、'B' 红（右）。
  */
@@ -17,7 +16,6 @@ import { bi } from "@/utils/bilingual";
 const props = defineProps<{
   side: "A" | "B";
   hlsUrl: string;
-  rtmpUrl: string;
   embedUrl?: string;
 }>();
 
@@ -117,8 +115,7 @@ onBeforeUnmount(() => {
     <!-- 未推流 / HLS 播放失败：占位（可见降级，不黑屏） -->
     <div v-else class="placeholder">
       <div class="live">● {{ bi("scenes.match.waitingSignal") }}</div>
-      <div v-if="rtmpUrl" class="rtmp">{{ rtmpUrl }}</div>
-      <div v-if="videoBroken && hlsUrl" class="rtmp">{{ hlsUrl }}</div>
+      <div v-if="videoBroken && hlsUrl" class="url">{{ hlsUrl }}</div>
     </div>
   </div>
 </template>
@@ -178,7 +175,7 @@ onBeforeUnmount(() => {
   animation: blink 1.4s steps(2) infinite;
   z-index: 1;
 }
-.rtmp {
+.url {
   z-index: 1;
   font-family: monospace;
   font-size: clamp(9px, 0.9vw, 13px);

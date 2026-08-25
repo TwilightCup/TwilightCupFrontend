@@ -66,20 +66,16 @@ async function copyUrl(url: string): Promise<void> {
   }
 }
 
-// ---- 导播配置（RTMP/HLS）：控制台集中编辑，保存后写入舞台链接 ----
+// ---- 导播配置（HLS/嵌入）：控制台集中编辑，保存后写入舞台链接 ----
 const { config: cfgConfig, load: loadCfg, save: saveCfg } = useDirectorConfig();
 /** 表单本地副本：编辑中不落库，点保存才写 localStorage + 更新舞台链接 */
 const cfgForm = reactive<DirectorConfig>({
-  rtmpA: "",
-  rtmpB: "",
   hlsA: "",
   hlsB: "",
   embedA: "",
   embedB: "",
 });
 const cfgFields: { key: keyof DirectorConfig; label: string }[] = [
-  { key: "rtmpA", label: "scenes.edit.rtmpA" },
-  { key: "rtmpB", label: "scenes.edit.rtmpB" },
   { key: "hlsA", label: "scenes.edit.hlsA" },
   { key: "hlsB", label: "scenes.edit.hlsB" },
   { key: "embedA", label: "scenes.edit.embedA" },
@@ -115,11 +111,9 @@ watch(
 );
 
 /** 合并舞台：单 OBS 源承载全部场景（叠加信息 / 比赛详情 / 图池 / 赛程图）。
- *  链接附带已保存的导播配置（rtmp/hls 参数）——舞台可能在另一浏览器/
+ *  链接附带已保存的导播配置（hls/embed 参数）——舞台可能在另一浏览器/
  *  机器（localStorage 不通），配置只能经 URL 下发；舞台加载时会采用并落本地。 */
 const CFG_URL_KEYS: Record<keyof DirectorConfig, string> = {
-  rtmpA: "rtmp_a",
-  rtmpB: "rtmp_b",
   hlsA: "hls_a",
   hlsB: "hls_b",
   embedA: "embed_a",
@@ -376,7 +370,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- 导播配置：RTMP/HLS，保存后写入舞台链接（跨浏览器随链接下发） -->
+        <!-- 导播配置：HLS/嵌入，保存后写入舞台链接（跨浏览器随链接下发） -->
         <div class="card">
           <div class="card-title">{{ $t("directorView.cfgTitle") }}</div>
           <p class="hint">{{ $t("directorView.cfgHint") }}</p>
@@ -386,7 +380,7 @@ onUnmounted(() => {
               <el-input
                 v-model="cfgForm[f.key]"
                 size="small"
-                :placeholder="f.key.startsWith('rtmp') ? 'rtmp://...' : 'https://.../a.m3u8'"
+                :placeholder="f.key.startsWith('hls') ? 'https://.../a.m3u8' : 'https://player.bilibili.com/... 或 youtube.com/embed/...'"
               />
             </label>
           </div>

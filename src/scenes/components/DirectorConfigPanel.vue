@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 导播配置弹层：编辑选手 A/B 的 RTMP / HLS 流地址。
+ * 导播配置弹层：编辑选手 A/B 的 HLS 流地址 + 外部直播嵌入地址。
  *
  * 由 ?edit=1 自动唤起，或齿轮按钮手动唤起。保存即写 localStorage 并 emit('saved')，
  * 场景页据此实时反映。OBS 抓图前应关闭此面板（点遮罩或保存均可）。
@@ -40,8 +40,6 @@ interface Field {
 }
 
 const fields: Field[] = [
-  { key: "rtmpA", label: t("scenes.edit.rtmpA"), placeholder: "rtmp://..." },
-  { key: "rtmpB", label: t("scenes.edit.rtmpB"), placeholder: "rtmp://..." },
   { key: "hlsA", label: t("scenes.edit.hlsA"), placeholder: "https://.../a.m3u8" },
   { key: "hlsB", label: t("scenes.edit.hlsB"), placeholder: "https://.../b.m3u8" },
   { key: "embedA", label: t("scenes.edit.embedA"), placeholder: "https://player.bilibili.com/... 或 youtube.com/embed/..." },

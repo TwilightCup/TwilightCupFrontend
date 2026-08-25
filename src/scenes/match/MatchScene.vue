@@ -278,8 +278,8 @@ onUnmounted(() => {
 
         <!-- 双 4:3 选手画面：水平居中、无缝衔接、满屏宽 -->
         <section class="streams">
-          <StreamFrame side="A" :hls-url="config.hlsA" :rtmp-url="config.rtmpA" :embed-url="config.embedA" />
-          <StreamFrame side="B" :hls-url="config.hlsB" :rtmp-url="config.rtmpB" :embed-url="config.embedB" />
+          <StreamFrame side="A" :hls-url="config.hlsA" :embed-url="config.embedA" />
+          <StreamFrame side="B" :hls-url="config.hlsB" :embed-url="config.embedB" />
         </section>
 
         <!-- 多关偏差条（单关模式降为透明占位，不参与布局收缩） -->
