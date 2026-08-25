@@ -83,7 +83,10 @@ function destroyHls(): void {
 }
 
 onMounted(() => void attach());
-watch(() => [props.hlsUrl, mode.value], () => void attach());
+// flush:"post"：hlsUrl 在挂载后才到达（配置异步加载/config_update 广播）时，
+// mode 先翻转渲染出 <video>、DOM 就绪后再挂流——默认 pre-flush 此刻 videoEl
+// 尚未插入，attach 会空手而归且不再重试，视频永久黑屏
+watch(() => props.hlsUrl, () => void attach(), { flush: "post" });
 onBeforeUnmount(() => {
   destroyHls();
   const v = videoEl.value;
