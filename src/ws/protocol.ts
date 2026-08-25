@@ -345,6 +345,33 @@ export interface SrvLevelTimeUpdate {
   /** 完成时刻活跃的无效原因（缺省/空 = 有效；"!" 前缀 = 不可原谅）。 */
   invalid_reasons?: string[] | null;
 }
+/**
+ * subsegment 实时时间差广播（双方选手 + 裁判 + 所有导播连接；仅 MULTI 回合进行中）。
+ * 机制：选手端每秒采样（TwilightTimer 时间线，与计分同源）建虚拟检测平面，
+ * 对方穿越时上报命中，服务端广播 gap_ms = hit_ms − sample_ms：
+ * >0 = 穿越方（hit_seat）落后，可为负。数据为回合级内存态——回合结束服务端
+ * 即清空，断线期间不补发；消息无时间戳，前端用本地接收时间做陈旧度判断。
+ * 原始采样流（subsegment_sample）仅中转给对方选手，不下发前端。
+ * 详见 ignored/需求-subsegment实时时间差追踪与前端接入.md。
+ */
+export interface SrvSubsegmentGap {
+  type: "subsegment_gap";
+  round_id: string;
+  /** 合集内关卡序号（0 起，双方一致；与 seq 一起定位唯一平面） */
+  level_index: number;
+  /** 采样方在该关内的采样序号（0 起，约每秒 +1） */
+  seq: number;
+  /** 采样归属方（平面是谁放的） */
+  seat: SeatName;
+  /** 采样方计时器时间线上到达该点的时刻（毫秒） */
+  sample_ms: number;
+  /** 穿越方（谁碰到了这个平面） */
+  hit_seat: SeatName;
+  /** 穿越方计时器时间线上到达该点的时刻（毫秒） */
+  hit_ms: number;
+  /** hit_ms − sample_ms：>0 = 穿越方落后 */
+  gap_ms: number;
+}
 export interface SrvRoundResult {
   type: "round_result";
   round_id: string;
@@ -422,6 +449,7 @@ export type ServerMessage =
   | SrvRoundStartedBroadcast
   | SrvPlayerStatus
   | SrvLevelTimeUpdate
+  | SrvSubsegmentGap
   | SrvRoundResult
   | SrvCumulativeScore
   | SrvMatchEnd
