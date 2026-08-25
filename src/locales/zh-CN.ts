@@ -578,6 +578,9 @@ const messages = {
   "admin.accounts.colRoles": "角色",
   "admin.accounts.colSpeedrun": "speedrun",
   "admin.accounts.cannotDeleteSelf": "不能删除当前登录的账号",
+  "admin.accounts.cannotDeleteSelfTooltip": "不能删除当前登录的账号",
+  "admin.accounts.cannotDeleteAdmin": "不能删除管理员账号",
+  "admin.accounts.cannotDeleteAdminTooltip": "管理员账号不可删除（防止误删锁死系统）",
   "admin.accounts.deleteConfirmMsg": "确认删除账号「{username}（{displayName}）」？该操作不可恢复。",
   "admin.accounts.deleteConfirmTitle": "删除账号",
 

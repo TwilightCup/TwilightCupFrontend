@@ -574,6 +574,9 @@ const messages: MessageSchema = {
   "admin.accounts.colRoles": "Roles",
   "admin.accounts.colSpeedrun": "speedrun",
   "admin.accounts.cannotDeleteSelf": "Cannot delete the currently logged-in account",
+  "admin.accounts.cannotDeleteSelfTooltip": "Cannot delete the currently logged-in account",
+  "admin.accounts.cannotDeleteAdmin": "Cannot delete admin accounts",
+  "admin.accounts.cannotDeleteAdminTooltip": "Admin accounts cannot be deleted (prevents locking out the system)",
   "admin.accounts.deleteConfirmMsg": "Delete account \"{username} ({displayName})\"? This cannot be undone.",
   "admin.accounts.deleteConfirmTitle": "Delete account",
 

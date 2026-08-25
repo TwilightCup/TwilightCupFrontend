@@ -4,13 +4,18 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { useI18n } from "vue-i18n";
 import { useAdminStore } from "@/stores/admin";
 import { useAuthStore } from "@/stores/auth";
-import type { AccountOut } from "@/api/types";
+import { AccountType, type AccountOut } from "@/api/types";
 import { accountTypeInfo, dateTime } from "@/utils/format";
 import AccountFormDialog from "@/components/admin/AccountFormDialog.vue";
 
 const admin = useAdminStore();
 const auth = useAuthStore();
 const { t } = useI18n();
+
+/** 管理员角色的账号不可删除（系统管理入口，防误删锁死系统） */
+function isAdminRow(row: AccountOut): boolean {
+  return (row.roles ?? []).includes(AccountType.ADMIN);
+}
 
 const keyword = ref("");
 const dialogOpen = ref(false);
@@ -39,6 +44,10 @@ function openEdit(row: AccountOut): void {
 async function onRemove(row: AccountOut): Promise<void> {
   if (row.id === auth.accountId) {
     ElMessage.warning(t("admin.accounts.cannotDeleteSelf"));
+    return;
+  }
+  if (isAdminRow(row)) {
+    ElMessage.warning(t("admin.accounts.cannotDeleteAdmin"));
     return;
   }
   try {
@@ -117,6 +126,13 @@ onMounted(() => {
           <el-tooltip
             v-if="row.id === auth.accountId"
             :content="$t('admin.accounts.cannotDeleteSelfTooltip')"
+            placement="top"
+          >
+            <el-button link type="info" disabled>{{ $t('common.delete') }}</el-button>
+          </el-tooltip>
+          <el-tooltip
+            v-else-if="isAdminRow(row)"
+            :content="$t('admin.accounts.cannotDeleteAdminTooltip')"
             placement="top"
           >
             <el-button link type="info" disabled>{{ $t('common.delete') }}</el-button>
