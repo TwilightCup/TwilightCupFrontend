@@ -770,6 +770,8 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
+  /* 预览缩小 50%：限宽半幅，两帧等比随之减半（4:3 比例不变） */
+  max-width: 50%;
 }
 .sp-col {
   display: flex;
