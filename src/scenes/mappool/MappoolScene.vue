@@ -564,7 +564,7 @@ onUnmounted(() => {
   flex-shrink: 0;
   font-size: 16px;
   color: var(--syn-text-dim);
-  font-family: "SFMono-Regular", "Menlo", "Consolas", "Liberation Mono", monospace;
+  font-family: "JetBrains Mono", ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
 }
 .cl-name {
   width: 150px;
@@ -631,7 +631,7 @@ onUnmounted(() => {
   background: #ffef3d;
   padding: 6px 12px;
   border-radius: 6px;
-  font-family: "SFMono-Regular", "Menlo", "Consolas", "Liberation Mono", monospace;
+  font-family: "JetBrains Mono", ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
   pointer-events: none;
 }
 </style>

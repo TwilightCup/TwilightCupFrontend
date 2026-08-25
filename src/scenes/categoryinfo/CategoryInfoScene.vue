@@ -451,7 +451,7 @@ onUnmounted(() => {
   font-size: 18px;
   color: var(--syn-text-dim);
   opacity: 0.75;
-  font-family: var(--el-font-family-mono, monospace);
+  font-family: "JetBrains Mono", ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
   word-break: break-all;
 }
 
