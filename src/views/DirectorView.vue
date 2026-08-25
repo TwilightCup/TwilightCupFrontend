@@ -79,6 +79,10 @@ const cfgForm = reactive<DirectorConfig>({
   hlsB: "",
   embedA: "",
   embedB: "",
+  hideA: false,
+  hideB: false,
+  refreshA: 0,
+  refreshB: 0,
 });
 const cfgFields: { key: keyof DirectorConfig; label: string }[] = [
   { key: "hlsA", label: "scenes.edit.hlsA" },
@@ -105,6 +109,37 @@ function saveConfig(): void {
   ElMessage.success(t("directorView.cfgSaved"));
 }
 
+/** 直播画面实时控制：改动即时保存并广播（不等「保存」按钮） */
+function pushConfig(patch: Partial<DirectorConfig>): void {
+  if (!director.matchId) return;
+  saveCfg(director.matchId, patch);
+  director.sendDirectorCommand("config_update", { config: patch });
+}
+
+/** 显示开关（on = 显示画面，off = 隐藏成等待信号占位） */
+const showA = computed({
+  get: () => !cfgForm.hideA,
+  set: (v: boolean) => {
+    cfgForm.hideA = !v;
+    pushConfig({ hideA: !v });
+  },
+});
+const showB = computed({
+  get: () => !cfgForm.hideB,
+  set: (v: boolean) => {
+    cfgForm.hideB = !v;
+    pushConfig({ hideB: !v });
+  },
+});
+
+/** 应急重拉流：计数自增 → 舞台该侧播放器重挂（重新取 manifest） */
+function refreshStream(side: "A" | "B"): void {
+  const key = side === "A" ? "refreshA" : "refreshB";
+  const next = cfgForm[key] + 1;
+  cfgForm[key] = next;
+  pushConfig({ [key]: next } as Partial<DirectorConfig>);
+}
+
 // 其他控制台（同账号另一浏览器）保存的配置广播过来：并入本地面板与舞台链接
 watch(
   () => director.remoteConfig,
@@ -118,7 +153,7 @@ watch(
 /** 合并舞台：单 OBS 源承载全部场景（叠加信息 / 比赛详情 / 图池 / 赛程图）。
  *  链接附带已保存的导播配置（hls/embed 参数）——舞台可能在另一浏览器/
  *  机器（localStorage 不通），配置只能经 URL 下发；舞台加载时会采用并落本地。 */
-const CFG_URL_KEYS: Record<keyof DirectorConfig, string> = {
+const CFG_URL_KEYS: Partial<Record<keyof DirectorConfig, string>> = {
   hlsA: "hls_a",
   hlsB: "hls_b",
   embedA: "embed_a",
@@ -127,9 +162,10 @@ const CFG_URL_KEYS: Record<keyof DirectorConfig, string> = {
 const stageUrl = computed(() => {
   const base = director.stageUrl;
   if (!base) return "";
-  const qs = (Object.keys(CFG_URL_KEYS) as (keyof DirectorConfig)[])
-    .filter((k) => cfgConfig[k])
-    .map((k) => `${CFG_URL_KEYS[k]}=${encodeURIComponent(cfgConfig[k])}`)
+  const entries = Object.entries(CFG_URL_KEYS) as [keyof DirectorConfig, string][];
+  const qs = entries
+    .filter(([k]) => cfgConfig[k])
+    .map(([k, p]) => `${p}=${encodeURIComponent(String(cfgConfig[k]))}`)
     .join("&");
   return qs ? `${base}&${qs}` : base;
 });
@@ -388,6 +424,23 @@ onUnmounted(() => {
                 :placeholder="f.key.startsWith('hls') ? 'https://.../a.m3u8' : 'https://player.bilibili.com/... 或 youtube.com/embed/...'"
               />
             </label>
+          </div>
+          <!-- 直播画面实时控制：显示开关 + 应急重拉流（独立管 A/B，即时广播到舞台） -->
+          <div class="cfg-ctl">
+            <div class="ctl-side">
+              <span class="lbl tc-a">A · {{ director.nameOf("A") }}</span>
+              <el-switch v-model="showA" size="small" />
+              <el-button size="small" :disabled="!director.matchId" @click="refreshStream('A')">
+                {{ $t("directorView.cfgRefresh") }}
+              </el-button>
+            </div>
+            <div class="ctl-side">
+              <span class="lbl tc-b">B · {{ director.nameOf("B") }}</span>
+              <el-switch v-model="showB" size="small" />
+              <el-button size="small" :disabled="!director.matchId" @click="refreshStream('B')">
+                {{ $t("directorView.cfgRefresh") }}
+              </el-button>
+            </div>
           </div>
           <div class="cfg-foot">
             <el-button
@@ -651,6 +704,28 @@ onUnmounted(() => {
 .cfg-field .lbl {
   font-size: 11px;
   color: var(--tc-text-dim);
+}
+.cfg-ctl {
+  display: flex;
+  gap: 12px;
+  margin-top: 10px;
+}
+.ctl-side {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.ctl-side .lbl {
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ctl-side .el-button {
+  margin-left: auto;
 }
 .cfg-foot {
   display: flex;

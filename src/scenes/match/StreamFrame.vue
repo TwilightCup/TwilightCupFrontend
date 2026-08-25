@@ -17,13 +17,21 @@ const props = defineProps<{
   side: "A" | "B";
   hlsUrl: string;
   embedUrl?: string;
+  /** 隐藏该侧画面（等待信号占位；应急开关，经 config_update 广播同步） */
+  hidden?: boolean;
+  /** 重新拉流计数（变化即重挂播放器：卡顿应急刷新） */
+  refreshNonce?: number;
+  /** 显示编辑态控制角标（仅 ?edit=1；正式直播不渲染，避免上画面） */
+  showCtl?: boolean;
 }>();
+const emit = defineEmits<{ (e: "toggle"): void }>();
 
 /** HLS 播放失败（MSE 不可用 / 致命解码错误）→ 降级：嵌入 → 占位（可见，不黑屏） */
 const videoBroken = ref(false);
 
-/** 展示模式：HLS 视频优先，其次外部嵌入，都无（或 HLS 已坏）则占位 */
+/** 展示模式：被隐藏直接占位；HLS 视频优先，其次外部嵌入，都无（或 HLS 已坏）则占位 */
 const mode = computed<"video" | "embed" | "none">(() => {
+  if (props.hidden) return "none";
   if (props.hlsUrl && !videoBroken.value) return "video";
   if (props.embedUrl) return "embed";
   return "none";
@@ -42,6 +50,7 @@ async function attach(): Promise<void> {
   const v = videoEl.value;
   destroyHls();
   videoBroken.value = false;
+  if (props.hidden) return;
   if (!v || !props.hlsUrl) return;
   if (nativeHls(v)) {
     v.src = props.hlsUrl;
@@ -85,8 +94,13 @@ function destroyHls(): void {
 onMounted(() => void attach());
 // flush:"post"：hlsUrl 在挂载后才到达（配置异步加载/config_update 广播）时，
 // mode 先翻转渲染出 <video>、DOM 就绪后再挂流——默认 pre-flush 此刻 videoEl
-// 尚未插入，attach 会空手而归且不再重试，视频永久黑屏
-watch(() => props.hlsUrl, () => void attach(), { flush: "post" });
+// 尚未插入，attach 会空手而归且不再重试，视频永久黑屏。
+// refreshNonce 变化 = 应急重拉流（重挂播放器）；hidden 翻转回来同理需重挂。
+watch(
+  () => [props.hlsUrl, props.refreshNonce, props.hidden],
+  () => void attach(),
+  { flush: "post" },
+);
 onBeforeUnmount(() => {
   destroyHls();
   const v = videoEl.value;
@@ -96,9 +110,20 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="frame" :class="side">
-    <!-- 方案②：外部直播嵌入（B站/YouTube 播放器 iframe） -->
+    <!-- 编辑态开关角标（仅 ?edit=1 渲染，不上直播画面） -->
+    <button
+      v-if="showCtl"
+      class="ctl-chip"
+      :class="{ off: hidden }"
+      @click="emit('toggle')"
+    >
+      {{ hidden ? "👁 " + bi("scenes.match.showStream") : "🚫 " + bi("scenes.match.hideStream") }}
+    </button>
+
+    <!-- 方案②：外部直播嵌入（B站/YouTube 播放器 iframe；key 随刷新计数重建即重载） -->
     <iframe
       v-if="mode === 'embed'"
+      :key="refreshNonce ?? 0"
       :src="embedUrl"
       class="video"
       allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
@@ -124,6 +149,29 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* 编辑态开关角标：右上角悬浮（仅 ?edit=1 出现，不上直播画面） */
+.ctl-chip {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 5;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--syn-border-bright);
+  background: var(--syn-panel);
+  color: var(--syn-text);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.ctl-chip:hover {
+  background: var(--syn-panel-solid);
+}
+.ctl-chip.off {
+  color: var(--syn-magenta);
+  border-color: var(--syn-magenta);
+}
+
 /* 双卡各占半宽无缝拼成 8:3，满铺 1920px（外层 .streams 控制） */
 .frame {
   position: relative;

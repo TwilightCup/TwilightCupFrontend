@@ -18,6 +18,12 @@ export interface DirectorConfig {
   /** 外部直播嵌入地址（B站嵌入播放器 / YouTube embed）——iframe 渲染 */
   embedA: string;
   embedB: string;
+  /** 隐藏该侧直播画面（显示等待信号占位；直播中应急，经 config_update 广播） */
+  hideA: boolean;
+  hideB: boolean;
+  /** 重新拉流计数（自增即触发该侧播放器重挂：卡顿时应急刷新） */
+  refreshA: number;
+  refreshB: number;
 }
 
 const EMPTY: DirectorConfig = {
@@ -25,6 +31,10 @@ const EMPTY: DirectorConfig = {
   hlsB: "",
   embedA: "",
   embedB: "",
+  hideA: false,
+  hideB: false,
+  refreshA: 0,
+  refreshB: 0,
 };
 
 const PREFIX = "twc-director-cfg";
@@ -81,6 +91,10 @@ export function useDirectorConfig() {
       hlsB: url.hlsB || stored.hlsB,
       embedA: url.embedA || stored.embedA,
       embedB: url.embedB || stored.embedB,
+      hideA: stored.hideA,
+      hideB: stored.hideB,
+      refreshA: stored.refreshA,
+      refreshB: stored.refreshB,
     };
     Object.assign(config, merged);
     write(matchId, merged);

@@ -511,6 +511,7 @@ const messages = {
   "directorView.cfgTitle": "导播配置（直播画面）",
   "directorView.cfgHint": "保存后经 WS 实时推送到已打开的舞台（跨浏览器/机器），并写入下方「合并舞台」链接供新开的源使用。",
   "directorView.cfgSaved": "已保存，已写入舞台链接",
+  "directorView.cfgRefresh": "重拉流",
   "directorView.soonLabel": "倒计时(秒)",
   "directorView.soonStart": "开始",
   "directorView.soonResume": "继续",
@@ -1074,6 +1075,8 @@ const messages = {
   "scenes.categoryinfo.highlightLegend": "高亮 = 本场选手",
   "scenes.categoryinfo.offlineBadge": "连接已断开",
   "scenes.match.waitingSignal": "等待信号",
+  "scenes.match.showStream": "显示画面",
+  "scenes.match.hideStream": "隐藏画面",
   "scenes.tug.faster": "领先",
 
   // ── format fallback ──────────────────────────────────────────────────
