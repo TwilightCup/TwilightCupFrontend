@@ -16,7 +16,7 @@
  *   时角标保留并与 pick 边框叠加，配色用 protect 方选手色）；
  * - pick：选手色边框；新被选中瞬间高亮闪烁数次后回落常亮微辉。
  */
-import { computed, onUnmounted, ref, watch, withDefaults } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
 
 import type { CategoryKind, Pick } from "@/api/types";
 import { categoryKindInfo } from "@/utils/format";
