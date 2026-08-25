@@ -9,7 +9,7 @@ import RoleSwitcher from "@/components/RoleSwitcher.vue";
 import AccountMenu from "@/components/AccountMenu.vue";
 import AuthFailMask from "@/components/AuthFailMask.vue";
 import { AttemptStatus, PlayerStatus } from "@/api/types";
-import { formatMs, phaseInfo } from "@/utils/format";
+import { formatMs, phaseInfo, shortTime } from "@/utils/format";
 import { DEFAULT_SCENE, type SceneKey } from "@/scenes/stage/useStageScene";
 import {
   useDirectorConfig,
@@ -51,6 +51,11 @@ function bestMs(side: "A" | "B"): number | null {
     .map((a) => a.time_ms)
     .filter((v): v is number => v != null);
   return arr.length ? Math.min(...arr) : null;
+}
+
+/** 日志时间戳：后端 ISO → 本地 HH:MM:SS；本地已格式化的原样显示 */
+function fmtTs(ts: string): string {
+  return shortTime(ts) || ts;
 }
 
 async function copyUrl(url: string): Promise<void> {
@@ -427,7 +432,7 @@ onUnmounted(() => {
               class="log-line"
               :class="m.kind"
             >
-              <span class="t">{{ m.ts }}</span>
+              <span class="t">{{ fmtTs(m.ts) }}</span>
               <span>{{ m.text }}</span>
             </div>
           </div>
@@ -487,16 +492,17 @@ onUnmounted(() => {
   gap: 12px;
   padding: 12px;
 }
+/* 左栏细（比分/回合/进度），右栏粗（操控/配置/日志占主视觉） */
 .col-left {
-  flex: 1;
-  min-width: 0;
+  width: 380px;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 .col-right {
-  width: 420px;
-  flex-shrink: 0;
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
