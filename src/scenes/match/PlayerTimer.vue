@@ -53,6 +53,13 @@ defineProps<{
   line-height: 1.1;
   color: #fff;
   text-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
+  /* 满量程等宽占位（MM:SS.mmm = 9 字符，等宽字体 9ch 即满宽）：单关未出
+     成绩显示 N/A 等短文本时盒宽不缩——下划线与选图卡锚点不跳 */
+  min-width: 9ch;
+}
+/* 短文本在占位盒内仍收右缘（数字自右缘向左生长，与满量程时的位序一致） */
+.timer.A .main {
+  text-align: right;
 }
 /* 与主计时器文本等宽的选手色线条 */
 .rule {
