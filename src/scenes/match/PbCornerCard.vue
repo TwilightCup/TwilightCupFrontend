@@ -113,7 +113,7 @@ const timeCol = computed(() => {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.5px;
-  font-family: "JetBrains Mono", ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+  font-family: "JetBrains Mono Variable", ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
   /* 定宽列：宽 = 可见行最长时间文本（脚本注入，含小时位自适应）+ 每 字符
      0.5px 的 letter-spacing 补偿——名称起点各行一致，最长行与名称的间隔
      恰为行 gap */
@@ -125,7 +125,7 @@ const timeCol = computed(() => {
   font-size: 14cqh;
   font-weight: 800;
   letter-spacing: 1px;
-  font-family: "JetBrains Mono", ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+  font-family: "JetBrains Mono Variable", ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
 }
 /* 名称：随标签同比放大，占行内余宽 */
 .name {

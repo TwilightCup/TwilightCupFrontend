@@ -207,7 +207,7 @@ iframe.video {
 }
 .url {
   z-index: 1;
-  font-family: "JetBrains Mono", ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+  font-family: "JetBrains Mono Variable", ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
   font-size: clamp(9px, 0.9vw, 13px);
   color: var(--syn-text-dim);
   max-width: 90%;

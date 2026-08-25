@@ -32,7 +32,7 @@ defineProps<{
   display: flex;
   flex-direction: column;
   gap: 0.6vh;
-  font-family: "JetBrains Mono", ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+  font-family: "JetBrains Mono Variable", ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
 }
 /* A 靠右、B 靠左，对齐画面水平中心 */
 .timer.A {
