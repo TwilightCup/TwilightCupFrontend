@@ -496,7 +496,6 @@ const messages = {
   "directorView.overlayCopied": "舞台链接已复制，粘贴到 OBS 浏览器源",
   "directorView.overlayCopyFail": "复制失败，请手动选中复制",
   "directorView.sceneTitle": "直播画面链接",
-  "directorView.sceneHint": "合并舞台为单 OBS「浏览器源」（建议 1920×1080），全部场景在其中渲染；链接附带当前导播配置（新开的源即带），配置修改会经 WS 实时推送到已打开的舞台。",
   "directorView.sceneUnavailable": "暂不可用（需所属赛事 / 已连接）",
   "directorView.sceneBtnCategoryinfo": "项目信息",
   "directorView.sceneBtnMatch": "比赛详情",

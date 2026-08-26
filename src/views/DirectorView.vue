@@ -318,6 +318,20 @@ onUnmounted(() => {
                     {{ $t("common.save") }}
                   </el-button>
                 </div>
+                <!-- 直播画面链接：合并舞台单源（全部场景在其中渲染 + 控制台切场景），链接随保存的配置下发 -->
+                <div class="card-title stage-title">{{ $t("directorView.sceneTitle") }}</div>
+                <el-input
+                  :model-value="stageUrl || $t('directorView.sceneUnavailable')"
+                  readonly
+                  size="small"
+                  :disabled="!stageUrl"
+                >
+                  <template #append>
+                    <el-button size="small" :disabled="!stageUrl" @click="copyUrl(stageUrl)">
+                      {{ $t("directorView.copyOverlayBtn") }}
+                    </el-button>
+                  </template>
+                </el-input>
               </div>
             </el-dropdown-menu>
           </template>
@@ -504,28 +518,6 @@ onUnmounted(() => {
             </div>
           </div>
         </div>
-
-        <!-- 直播画面链接：合并舞台单源（全部场景在其中渲染 + 控制台切场景） -->
-        <div class="card">
-          <div class="card-title">{{ $t("directorView.sceneTitle") }}</div>
-          <p class="hint">{{ $t("directorView.sceneHint") }}</p>
-          <div class="scene-row">
-            <div class="scene-label">{{ $t("directorView.sceneStage") }}</div>
-            <el-input
-              :model-value="stageUrl || $t('directorView.sceneUnavailable')"
-              readonly
-              size="small"
-              :disabled="!stageUrl"
-            >
-              <template #append>
-                <el-button size="small" :disabled="!stageUrl" @click="copyUrl(stageUrl)">
-                  {{ $t("directorView.copyOverlayBtn") }}
-                </el-button>
-              </template>
-            </el-input>
-          </div>
-        </div>
-
       </aside>
     </main>
 
@@ -698,15 +690,9 @@ onUnmounted(() => {
   color: var(--tc-text-dim);
   line-height: 1.6;
 }
-.scene-row {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.scene-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--tc-primary);
+/* 下拉内的「直播画面链接」小节标题：与上方保存按钮拉开间距 */
+.stage-title {
+  margin-top: 12px;
 }
 .soon-row {
   display: flex;

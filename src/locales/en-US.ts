@@ -492,7 +492,6 @@ const messages: MessageSchema = {
   "directorView.overlayCopied": "Stage link copied — paste it into the OBS browser source",
   "directorView.overlayCopyFail": "Copy failed — please select and copy manually",
   "directorView.sceneTitle": "Broadcast view link",
-  "directorView.sceneHint": "The merged stage is a single OBS \"Browser Source\" (1920×1080 recommended) rendering every scene. The link carries the current director config (fresh sources get it instantly); config changes are pushed live to an open stage over WS.",
   "directorView.sceneUnavailable": "Unavailable (needs a tournament / connection)",
   "directorView.sceneBtnCategoryinfo": "Category Info",
   "directorView.sceneBtnMatch": "Match detail",
