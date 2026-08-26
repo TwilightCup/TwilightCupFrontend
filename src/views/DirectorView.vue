@@ -499,21 +499,36 @@ onUnmounted(() => {
           </div>
           <div class="stream-preview">
             <div class="sp-col">
-              <StreamFrame
-                side="A"
-                :hls-url="cfgConfig.hlsA"
-                :embed-url="cfgConfig.embedA"
-                :refresh-nonce="cfgConfig.refreshA"
-              />
+              <!-- 隐藏态仅作视觉提示（画面本身仍实时播放供监控），舞台已切等待占位 -->
+              <div class="sp-frame">
+                <StreamFrame
+                  side="A"
+                  :hls-url="cfgConfig.hlsA"
+                  :embed-url="cfgConfig.embedA"
+                  :refresh-nonce="cfgConfig.refreshA"
+                />
+                <Transition name="fade">
+                  <div v-if="!showA" class="hide-mask">
+                    <el-icon :size="56"><Hide /></el-icon>
+                  </div>
+                </Transition>
+              </div>
               <span class="sp-label tc-a">A · {{ director.nameOf("A") }}</span>
             </div>
             <div class="sp-col">
-              <StreamFrame
-                side="B"
-                :hls-url="cfgConfig.hlsB"
-                :embed-url="cfgConfig.embedB"
-                :refresh-nonce="cfgConfig.refreshB"
-              />
+              <div class="sp-frame">
+                <StreamFrame
+                  side="B"
+                  :hls-url="cfgConfig.hlsB"
+                  :embed-url="cfgConfig.embedB"
+                  :refresh-nonce="cfgConfig.refreshB"
+                />
+                <Transition name="fade">
+                  <div v-if="!showB" class="hide-mask">
+                    <el-icon :size="56"><Hide /></el-icon>
+                  </div>
+                </Transition>
+              </div>
               <span class="sp-label tc-b">B · {{ director.nameOf("B") }}</span>
             </div>
           </div>
@@ -790,6 +805,20 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+}
+/* 预览画面容器：承载隐藏态遮罩（画面继续播放，仅提示舞台侧已隐藏） */
+.sp-frame {
+  position: relative;
+}
+.hide-mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.55);
+  pointer-events: none;
 }
 .sp-label {
   font-size: 12px;
