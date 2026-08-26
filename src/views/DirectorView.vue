@@ -291,8 +291,8 @@ onUnmounted(() => {
           </el-tag>
           <span class="conn">{{ director.connStatus }}</span>
         </div>
-        <RoleSwitcher />
         <el-button size="small" @click="router.push('/director')">{{ $t("directorView.myMatchesBtn") }}</el-button>
+        <RoleSwitcher />
         <AccountMenu @logout="logout" />
       </div>
     </header>
