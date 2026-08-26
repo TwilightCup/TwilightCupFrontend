@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { ElMessage, ElMessageBox } from "element-plus";
+import { ElMessageBox } from "element-plus";
 import { useI18n } from "vue-i18n";
 import { useMatchStore } from "@/stores/match";
-import { requestSpeedrunRefresh } from "@/api/speedrun";
 import { useDraftStore } from "@/stores/draft";
 import { MatchPhase } from "@/api/types";
 import { phaseInfo, type TagType } from "@/utils/format";
@@ -85,12 +84,6 @@ async function onPause(): Promise<void> {
 async function onResume(): Promise<void> {
   await draft.resumeMatch();
 }
-
-/** 手动重新拉取 speedrun.com：清前后端缓存并通知已挂载的榜单/PB 消费方刷新。 */
-function refreshSpeedrun(): void {
-  requestSpeedrunRefresh();
-  ElMessage.success(t("matchHeader.speedrunRefreshDone"));
-}
 </script>
 
 <template>
@@ -113,9 +106,6 @@ function refreshSpeedrun(): void {
             >
           </div>
         </div>
-        <el-button size="small" @click="refreshSpeedrun">
-          {{ $t("matchHeader.refreshSpeedrun") }}
-        </el-button>
       </div>
     </div>
 

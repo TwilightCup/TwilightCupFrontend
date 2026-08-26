@@ -259,8 +259,6 @@ const messages: MessageSchema = {
   "matchHeader.resumeMatchBtn": "Resume match",
   "matchHeader.myMatchesBtn": "My matches",
   "matchHeader.dataViewBtn": "Data view",
-  "matchHeader.refreshSpeedrun": "Refresh speedrun",
-  "matchHeader.speedrunRefreshDone": "Speedrun.com refresh requested",
 
   // ── countdown ────────────────────────────────────────────────────────
   "countdown.manualLabel": "Referee-initiated · countdown started",
@@ -507,6 +505,8 @@ const messages: MessageSchema = {
   "directorView.cfgTitle": "Director config",
   "directorView.cfgSaved": "Saved — embedded into the stage link",
   "directorView.cfgRefresh": "Reload",
+  "directorView.refreshSpeedrun": "Refresh speedrun",
+  "directorView.speedrunRefreshDone": "Speedrun.com refresh requested",
   "directorView.previewTitle": "Stream monitor",
   "directorView.previewHint": "Live preview sharing the stage's exact config, unaffected by the show/hide switches — verify the feed loads, then flip the switch below to put it on the stage; \"Reload\" refreshes both the preview and the stage.",
   "directorView.soonLabel": "Countdown (sec)",

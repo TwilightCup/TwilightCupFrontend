@@ -9,6 +9,7 @@ import RoleSwitcher from "@/components/RoleSwitcher.vue";
 import AccountMenu from "@/components/AccountMenu.vue";
 import StreamFrame from "@/scenes/match/StreamFrame.vue";
 import AuthFailMask from "@/components/AuthFailMask.vue";
+import { requestSpeedrunRefresh } from "@/api/speedrun";
 import { AttemptStatus, MatchPhase } from "@/api/types";
 import { formatMs, phaseInfo, playerStatusInfo, preloadTagInfo, shortTime } from "@/utils/format";
 import { DEFAULT_SCENE, isSceneKey, type SceneKey } from "@/scenes/stage/useStageScene";
@@ -74,6 +75,12 @@ async function copyUrl(url: string): Promise<void> {
   } catch {
     ElMessage.warning(t("directorView.overlayCopyFail"));
   }
+}
+
+/** 手动重新拉取 speedrun.com：清前后端缓存并通知已挂载的榜单/PB 消费方刷新。 */
+function refreshSpeedrun(): void {
+  requestSpeedrunRefresh();
+  ElMessage.success(t("directorView.speedrunRefreshDone"));
 }
 
 // ---- 导播配置（HLS/嵌入）：控制台集中编辑，保存后写入舞台链接 ----
@@ -334,6 +341,9 @@ onUnmounted(() => {
           🎬 {{ $t("directorView.brand") }}
           <el-tag size="small" type="warning" effect="dark">{{ $t("directorView.readOnlyTag") }}</el-tag>
         </div>
+        <el-button size="small" @click="refreshSpeedrun">
+          {{ $t("directorView.refreshSpeedrun") }}
+        </el-button>
       </div>
 
       <!-- 场景切换（合并舞台）：居中，写 localStorage，舞台页跨标签监听 -->

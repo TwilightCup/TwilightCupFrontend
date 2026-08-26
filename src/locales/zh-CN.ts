@@ -263,8 +263,6 @@ const messages = {
   "matchHeader.resumeMatchBtn": "恢复比赛",
   "matchHeader.myMatchesBtn": "我的比赛",
   "matchHeader.dataViewBtn": "数据查看",
-  "matchHeader.refreshSpeedrun": "重拉Speedrun",
-  "matchHeader.speedrunRefreshDone": "已请求重新拉取 speedrun.com 数据",
 
   // ── CountdownBanner ──────────────────────────────────────────────────
   "countdown.manualLabel": "裁判发起 · 开始倒计时",
@@ -511,6 +509,8 @@ const messages = {
   "directorView.cfgTitle": "导播配置",
   "directorView.cfgSaved": "已保存，已写入舞台链接",
   "directorView.cfgRefresh": "重拉流",
+  "directorView.refreshSpeedrun": "重拉Speedrun",
+  "directorView.speedrunRefreshDone": "已请求重新拉取 speedrun.com 数据",
   "directorView.previewTitle": "选手画面监控",
   "directorView.previewHint": "与舞台同源同配置实时预览，不受显示开关影响——确认画面加载正常后，再开下方开关放上台；「重拉流」同时刷新预览与舞台。",
   "directorView.soonLabel": "倒计时(秒)",
