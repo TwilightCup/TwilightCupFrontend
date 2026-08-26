@@ -802,10 +802,12 @@ onUnmounted(() => {
 .sp-col {
   min-width: 0;
 }
-/* 监控下方比分行：名字按侧着色（带在线指示点），数字居中 */
+/* 监控下方比分行：名字按侧着色（带在线指示点），数字居中。
+   居中而非 baseline：名字是含圆点的 inline-flex，基线会取圆点底缘，
+   baseline 对齐会把名字整体顶高、与下方状态标签行拉开大缝 */
 .preview-score {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: center;
   gap: 14px;
   margin-top: 10px;
@@ -841,12 +843,12 @@ onUnmounted(() => {
   font-weight: 700;
   color: var(--tc-text-dim);
 }
-/* 状态标签行：两组分别对齐下方左右预览列 */
+/* 状态标签行：两组分别对齐下方左右预览列，紧贴上方选手名 */
 .status-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
-  margin-top: 8px;
+  margin-top: 2px;
 }
 .status-row .tags {
   display: flex;
