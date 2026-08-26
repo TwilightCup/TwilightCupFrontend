@@ -516,17 +516,9 @@ onUnmounted(() => {
               </div>
             </div>
           </div>
-          <!-- 比分：监控下方一行居中（原左栏比分卡已并入此处）；选手名旁
-               内联状态标签（在线点 + 状态/就绪/预载，紧贴名字同一行） -->
+          <!-- 比分：监控下方一行居中（原左栏比分卡已并入此处）；状态标签
+               （状态/就绪/预载）置于选手名与在线圆点的外侧 -->
           <div class="preview-score">
-            <span class="name tc-a">
-              <span
-                class="presence"
-                :class="{ off: !sideOnline('A') }"
-                :title="sideOnline('A') ? '' : $t('playerStatus.offline')"
-              ></span>
-              {{ director.nameOf("A") }}
-            </span>
             <span class="tags">
               <el-tag :type="sideStatusInfo('A').type" size="small" effect="dark">
                 {{ sideStatusInfo("A").label }}
@@ -543,9 +535,25 @@ onUnmounted(() => {
                 {{ $t(preloadTagInfo(director.aPreload).key) }}
               </el-tag>
             </span>
+            <span class="name tc-a">
+              <span
+                class="presence"
+                :class="{ off: !sideOnline('A') }"
+                :title="sideOnline('A') ? '' : $t('playerStatus.offline')"
+              ></span>
+              {{ director.nameOf("A") }}
+            </span>
             <span class="num">{{ director.winsA }}</span>
             <span class="sep">:</span>
             <span class="num">{{ director.winsB }}</span>
+            <span class="name tc-b">
+              {{ director.nameOf("B") }}
+              <span
+                class="presence"
+                :class="{ off: !sideOnline('B') }"
+                :title="sideOnline('B') ? '' : $t('playerStatus.offline')"
+              ></span>
+            </span>
             <span class="tags">
               <el-tag :type="sideStatusInfo('B').type" size="small" effect="dark">
                 {{ sideStatusInfo("B").label }}
@@ -561,14 +569,6 @@ onUnmounted(() => {
               <el-tag :type="preloadTagInfo(director.bPreload).type" size="small" effect="plain">
                 {{ $t(preloadTagInfo(director.bPreload).key) }}
               </el-tag>
-            </span>
-            <span class="name tc-b">
-              {{ director.nameOf("B") }}
-              <span
-                class="presence"
-                :class="{ off: !sideOnline('B') }"
-                :title="sideOnline('B') ? '' : $t('playerStatus.offline')"
-              ></span>
             </span>
           </div>
         </div>
