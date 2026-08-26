@@ -6,8 +6,9 @@
  * - HLS：Safari/原生支持则 <video src> 直放；其余（Chrome/Edge/OBS CEF）
  *   动态 import hls.js 走 MSE 解码——OBS 浏览器源实为 Chromium，靠这条播放。
  * - 嵌入：配置 embedUrl（可 iframe 的嵌入播放器地址）时整卡 <iframe> 渲染；
- *   B站直播链接会自动转成 live.bilibili.com/blanc/{roomId}（主站房间页带
- *   X-Frame-Options: SAMEORIGIN，直接 iframe 在 OBS 会黑屏；blanc 页可嵌入）。
+ *   B站直播链接会自动转成 live.bilibili.com/blanc/{roomId}?liteVersion=true
+ *   的轻量嵌入页（主站房间页带 X-Frame-Options: SAMEORIGIN，直接 iframe 在
+ *   OBS 会黑屏；blanc 轻量页可嵌入且不触发本地网络拦截）。
  *   object-fit 不适用于 iframe，改为 16:9 定宽外溢 + overflow:hidden 裁左右
  *   （与 <video> 的 cover 裁切同口径）。
  *
@@ -39,7 +40,7 @@ const mode = computed<"video" | "embed" | "none">(() => {
   return "none";
 });
 
-/** B站直播链接统一走 blanc 空白播放页（主站房间页禁止 iframe，OBS 会黑屏） */
+/** B站直播链接统一走 blanc 轻量嵌入页（主站房间页禁止 iframe，OBS 会黑屏） */
 const embedSrc = computed(() => toBilibiliLiveEmbedUrl(props.embedUrl ?? ""));
 
 const videoEl = ref<HTMLVideoElement | null>(null);

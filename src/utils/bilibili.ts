@@ -28,11 +28,15 @@ export function isBilibiliLiveInput(input: string): boolean {
 }
 
 /**
- * 将 B站直播间地址统一转换为 OBS 可嵌入的 blanc 页。
+ * 将 B站直播间地址统一转换为 OBS 可嵌入的 blanc 轻量播放页。
  * 非 B站输入原样返回（保持 YouTube embed 等既有 iframe 行为）。
+ *
+ * `liteVersion=true` 是 B站 blanc 页为 iframe 场景准备的轻量模式，会关闭
+ * 完整房间页中的本地网络/客户端探测等逻辑，避免 OBS CEF 触发“公共页面连接
+ * 本地网络被阻止”的拦截；同时隐藏页头与右侧排行榜，保证画面干净。
  */
 export function toBilibiliLiveEmbedUrl(input: string): string {
   const roomId = parseBilibiliLiveRoomId(input);
   if (!roomId) return input;
-  return `https://live.bilibili.com/blanc/${roomId}`;
+  return `https://live.bilibili.com/blanc/${roomId}?liteVersion=true&hideHeadInfo=true&hideRankList=true`;
 }
