@@ -6,6 +6,8 @@
  * - HLS：Safari/原生支持则 <video src> 直放；其余（Chrome/Edge/OBS CEF）
  *   动态 import hls.js 走 MSE 解码——OBS 浏览器源实为 Chromium，靠这条播放。
  * - 嵌入：配置 embedUrl（可 iframe 的嵌入播放器地址）时整卡 <iframe> 渲染；
+ *   B站直播链接会自动转成 live.bilibili.com/blanc/{roomId}（主站房间页带
+ *   X-Frame-Options: SAMEORIGIN，直接 iframe 在 OBS 会黑屏；blanc 页可嵌入）。
  *   object-fit 不适用于 iframe，改为 16:9 定宽外溢 + overflow:hidden 裁左右
  *   （与 <video> 的 cover 裁切同口径）。
  *
@@ -14,6 +16,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type HlsClass from "hls.js";
 import { bi } from "@/utils/bilingual";
+import { toBilibiliLiveEmbedUrl } from "@/utils/bilibili";
 
 const props = defineProps<{
   side: "A" | "B";
@@ -35,6 +38,9 @@ const mode = computed<"video" | "embed" | "none">(() => {
   if (props.embedUrl) return "embed";
   return "none";
 });
+
+/** B站直播链接统一走 blanc 空白播放页（主站房间页禁止 iframe，OBS 会黑屏） */
+const embedSrc = computed(() => toBilibiliLiveEmbedUrl(props.embedUrl ?? ""));
 
 const videoEl = ref<HTMLVideoElement | null>(null);
 let hls: HlsClass | null = null;
@@ -109,11 +115,12 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="frame" :class="side">
-    <!-- 方案②：外部直播嵌入（B站/YouTube 播放器 iframe；key 随刷新计数重建即重载） -->
+    <!-- 方案②：外部直播嵌入（B站自动转 blanc 空白播放页 / YouTube iframe；
+         key 随刷新计数重建即重载） -->
     <iframe
       v-if="mode === 'embed'"
       :key="refreshNonce ?? 0"
-      :src="embedUrl"
+      :src="embedSrc"
       class="video"
       allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
       allowfullscreen

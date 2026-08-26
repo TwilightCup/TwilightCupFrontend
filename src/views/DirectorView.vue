@@ -372,7 +372,7 @@ onUnmounted(() => {
                     <el-input
                       v-model="cfgForm[f.key]"
                       size="small"
-                      :placeholder="f.key.startsWith('hls') ? 'https://.../a.m3u8' : 'https://player.bilibili.com/... 或 youtube.com/embed/...'"
+                      :placeholder="f.key.startsWith('hls') ? 'https://.../a.m3u8' : 'https://live.bilibili.com/blanc/房号 或 youtube.com/embed/...'"
                     />
                   </label>
                 </div>

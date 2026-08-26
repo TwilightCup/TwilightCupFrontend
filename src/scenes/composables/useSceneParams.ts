@@ -16,7 +16,7 @@ export interface SceneParams {
   hlsA: string;
   /** 选手 B 浏览器可播流（HLS） */
   hlsB: string;
-  /** 选手 A 外部直播嵌入地址（B站/YouTube），有则 iframe 渲染 */
+  /** 选手 A 外部直播嵌入地址（B站直播链接/YouTube），有则 iframe 渲染 */
   embedA: string;
   /** 选手 B 外部直播嵌入地址 */
   embedB: string;
