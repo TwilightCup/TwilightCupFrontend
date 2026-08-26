@@ -494,8 +494,6 @@ const messages: MessageSchema = {
   "directorView.sceneTitle": "Broadcast view link",
   "directorView.sceneHint": "The merged stage is a single OBS \"Browser Source\" (1920×1080 recommended) rendering every scene. The link carries the current director config (fresh sources get it instantly); config changes are pushed live to an open stage over WS.",
   "directorView.sceneUnavailable": "Unavailable (needs a tournament / connection)",
-  "directorView.sceneSwitchTitle": "Scene switch (merged stage)",
-  "directorView.sceneSwitchHint": "Switches instantly on the \"merged stage\" source below via WS broadcast (works across browsers/machines). The stage must already be open — a stage opened later syncs on the next switch.",
   "directorView.sceneBtnCategoryinfo": "Category Info",
   "directorView.sceneBtnMatch": "Match detail",
   "directorView.sceneBtnMappool": "Mappool",

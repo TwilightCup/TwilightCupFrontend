@@ -261,19 +261,40 @@ onUnmounted(() => {
 <template>
   <div class="director-view">
     <header class="top">
-      <div class="brand">
-        🎬 {{ $t("directorView.brand") }}
-        <el-tag size="small" type="warning" effect="dark">{{ $t("directorView.readOnlyTag") }}</el-tag>
+      <div class="top-side left">
+        <div class="brand">
+          🎬 {{ $t("directorView.brand") }}
+          <el-tag size="small" type="warning" effect="dark">{{ $t("directorView.readOnlyTag") }}</el-tag>
+        </div>
       </div>
-      <div class="info">
-        <el-tag :type="phaseLabel ? 'primary' : 'info'" effect="dark" size="small">
-          {{ phaseLabel }}
-        </el-tag>
-        <span class="conn">{{ director.connStatus }}</span>
+
+      <!-- 场景切换（合并舞台）：居中，写 localStorage，舞台页跨标签监听 -->
+      <el-radio-group
+        :model-value="activeScene"
+        size="small"
+        class="scene-switch"
+        @update:model-value="(v: string | number | boolean) => onSwitchScene(v as SceneKey)"
+      >
+        <el-radio-button
+          v-for="key in (['soon','mappool','categoryinfo','match','bracket'] as SceneKey[])"
+          :key="key"
+          :value="key"
+        >
+          {{ $t(sceneBtnLabels[key]) }}
+        </el-radio-button>
+      </el-radio-group>
+
+      <div class="top-side right">
+        <div class="info">
+          <el-tag :type="phaseLabel ? 'primary' : 'info'" effect="dark" size="small">
+            {{ phaseLabel }}
+          </el-tag>
+          <span class="conn">{{ director.connStatus }}</span>
+        </div>
+        <RoleSwitcher />
+        <el-button size="small" @click="router.push('/director')">{{ $t("directorView.myMatchesBtn") }}</el-button>
+        <AccountMenu @logout="logout" />
       </div>
-      <RoleSwitcher />
-      <el-button size="small" @click="router.push('/director')">{{ $t("directorView.myMatchesBtn") }}</el-button>
-      <AccountMenu @logout="logout" />
     </header>
 
     <div
@@ -361,26 +382,6 @@ onUnmounted(() => {
       </section>
 
       <aside class="col-right">
-        <!-- 场景切换（合并舞台）：写 localStorage，舞台页跨标签监听 -->
-        <div class="card">
-          <div class="card-title">{{ $t("directorView.sceneSwitchTitle") }}</div>
-          <p class="hint">{{ $t("directorView.sceneSwitchHint") }}</p>
-          <el-radio-group
-            :model-value="activeScene"
-            size="small"
-            style="width: 100%; display: flex; flex-wrap: wrap; gap: 6px"
-            @update:model-value="(v: string | number | boolean) => onSwitchScene(v as SceneKey)"
-          >
-            <el-radio-button
-              v-for="key in (['soon','categoryinfo','match','mappool','bracket'] as SceneKey[])"
-              :key="key"
-              :value="key"
-            >
-              {{ $t(sceneBtnLabels[key]) }}
-            </el-radio-button>
-          </el-radio-group>
-        </div>
-
         <!-- Coming Soon 倒计时控制（仅待开始场景可用） -->
         <div v-if="activeScene === 'soon'" class="card">
           <div class="card-title">{{ $t("directorView.soonTitle") }}</div>
@@ -537,11 +538,25 @@ onUnmounted(() => {
 .top {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
   padding: 10px 18px;
   background: var(--tc-bg-soft);
   border-bottom: 1px solid var(--tc-border);
+}
+/* 左右两侧等分（flex:1）夹住居中的场景切换，实现真居中 */
+.top-side {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.top-side.right {
+  justify-content: flex-end;
+}
+.scene-switch {
+  display: flex;
+  gap: 6px;
 }
 .brand {
   display: flex;
