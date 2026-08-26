@@ -291,6 +291,38 @@ onUnmounted(() => {
           </el-tag>
           <span class="conn">{{ director.connStatus }}</span>
         </div>
+
+        <!-- 导播配置下拉：HLS/嵌入链接填写 + 保存（WS 实时推送到已打开的舞台，并写入舞台链接） -->
+        <el-dropdown trigger="click" placement="bottom-end">
+          <el-button size="small">{{ $t("directorView.cfgTitle") }}</el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <div class="cfg-dd">
+                <div class="cfg-grid">
+                  <label v-for="f in cfgFields" :key="f.key" class="cfg-field">
+                    <span class="lbl">{{ $t(f.label) }}</span>
+                    <el-input
+                      v-model="cfgForm[f.key]"
+                      size="small"
+                      :placeholder="f.key.startsWith('hls') ? 'https://.../a.m3u8' : 'https://player.bilibili.com/... 或 youtube.com/embed/...'"
+                    />
+                  </label>
+                </div>
+                <div class="cfg-foot">
+                  <el-button
+                    size="small"
+                    type="primary"
+                    :disabled="!director.matchId"
+                    @click="saveConfig()"
+                  >
+                    {{ $t("common.save") }}
+                  </el-button>
+                </div>
+              </div>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+
         <el-button size="small" @click="router.push('/director')">{{ $t("directorView.myMatchesBtn") }}</el-button>
         <RoleSwitcher />
         <AccountMenu @logout="logout" />
@@ -454,23 +486,7 @@ onUnmounted(() => {
               />
             </div>
           </div>
-        </div>
-
-        <!-- 导播配置：HLS/嵌入，保存后写入舞台链接（跨浏览器随链接下发） -->
-        <div class="card">
-          <div class="card-title">{{ $t("directorView.cfgTitle") }}</div>
-          <p class="hint">{{ $t("directorView.cfgHint") }}</p>
-          <div class="cfg-grid">
-            <label v-for="f in cfgFields" :key="f.key" class="cfg-field">
-              <span class="lbl">{{ $t(f.label) }}</span>
-              <el-input
-                v-model="cfgForm[f.key]"
-                size="small"
-                :placeholder="f.key.startsWith('hls') ? 'https://.../a.m3u8' : 'https://player.bilibili.com/... 或 youtube.com/embed/...'"
-              />
-            </label>
-          </div>
-          <!-- 直播画面实时控制：显示开关 + 应急重拉流（独立管 A/B，即时广播到舞台） -->
+          <!-- 直播画面实时控制：显示开关 + 应急重拉流（独立管 A/B，即时广播到舞台，与上方预览列对齐） -->
           <div class="cfg-ctl">
             <div class="ctl-side">
               <span class="lbl tc-a">A · {{ director.nameOf("A") }}</span>
@@ -486,16 +502,6 @@ onUnmounted(() => {
                 {{ $t("directorView.cfgRefresh") }}
               </el-button>
             </div>
-          </div>
-          <div class="cfg-foot">
-            <el-button
-              size="small"
-              type="primary"
-              :disabled="!director.matchId"
-              @click="saveConfig()"
-            >
-              {{ $t("common.save") }}
-            </el-button>
           </div>
         </div>
 
@@ -749,10 +755,18 @@ onUnmounted(() => {
   font-size: 11px;
   color: var(--tc-text-dim);
 }
+.cfg-dd {
+  /* 下拉面板（teleport 到 body，slot 内容仍带 scoped 属性可命中样式） */
+  width: 480px;
+  padding: 10px 12px;
+  box-sizing: border-box;
+}
 .cfg-ctl {
   display: flex;
   gap: 12px;
   margin-top: 10px;
+  /* 与上方预览网格同宽（预览限宽半幅），A/B 控件对齐各自预览列 */
+  max-width: 50%;
 }
 .ctl-side {
   flex: 1;
