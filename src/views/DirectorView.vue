@@ -516,7 +516,8 @@ onUnmounted(() => {
               </div>
             </div>
           </div>
-          <!-- 比分：监控下方一行居中（原左栏比分卡已并入此处） -->
+          <!-- 比分：监控下方一行居中（原左栏比分卡已并入此处）；选手名旁
+               内联状态标签（在线点 + 状态/就绪/预载，紧贴名字同一行） -->
           <div class="preview-score">
             <span class="name tc-a">
               <span
@@ -526,21 +527,7 @@ onUnmounted(() => {
               ></span>
               {{ director.nameOf("A") }}
             </span>
-            <span class="num">{{ director.winsA }}</span>
-            <span class="sep">:</span>
-            <span class="num">{{ director.winsB }}</span>
-            <span class="name tc-b">
-              <span
-                class="presence"
-                :class="{ off: !sideOnline('B') }"
-                :title="sideOnline('B') ? '' : $t('playerStatus.offline')"
-              ></span>
-              {{ director.nameOf("B") }}
-            </span>
-          </div>
-          <!-- 选手状态标签（口径同裁判端）：状态（游戏中/已完成/已弃权）+ 就绪（PREP）+ 预载 -->
-          <div class="status-row">
-            <div class="tags">
+            <span class="tags">
               <el-tag :type="sideStatusInfo('A').type" size="small" effect="dark">
                 {{ sideStatusInfo("A").label }}
               </el-tag>
@@ -555,8 +542,11 @@ onUnmounted(() => {
               <el-tag :type="preloadTagInfo(director.aPreload).type" size="small" effect="plain">
                 {{ $t(preloadTagInfo(director.aPreload).key) }}
               </el-tag>
-            </div>
-            <div class="tags">
+            </span>
+            <span class="num">{{ director.winsA }}</span>
+            <span class="sep">:</span>
+            <span class="num">{{ director.winsB }}</span>
+            <span class="tags">
               <el-tag :type="sideStatusInfo('B').type" size="small" effect="dark">
                 {{ sideStatusInfo("B").label }}
               </el-tag>
@@ -571,7 +561,15 @@ onUnmounted(() => {
               <el-tag :type="preloadTagInfo(director.bPreload).type" size="small" effect="plain">
                 {{ $t(preloadTagInfo(director.bPreload).key) }}
               </el-tag>
-            </div>
+            </span>
+            <span class="name tc-b">
+              {{ director.nameOf("B") }}
+              <span
+                class="presence"
+                :class="{ off: !sideOnline('B') }"
+                :title="sideOnline('B') ? '' : $t('playerStatus.offline')"
+              ></span>
+            </span>
           </div>
         </div>
       </aside>
@@ -802,14 +800,14 @@ onUnmounted(() => {
 .sp-col {
   min-width: 0;
 }
-/* 监控下方比分行：名字按侧着色（带在线指示点），数字居中。
-   居中而非 baseline：名字是含圆点的 inline-flex，基线会取圆点底缘，
-   baseline 对齐会把名字整体顶高、与下方状态标签行拉开大缝 */
+/* 监控下方比分行：名字按侧着色（带在线指示点），数字居中；
+   状态标签内联紧贴名字同一行，过窄时整行换行兜底 */
 .preview-score {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 14px;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-top: 10px;
 }
 .preview-score .name {
@@ -843,18 +841,11 @@ onUnmounted(() => {
   font-weight: 700;
   color: var(--tc-text-dim);
 }
-/* 状态标签行：两组分别对齐下方左右预览列，紧贴上方选手名 */
-.status-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  margin-top: 2px;
-}
-.status-row .tags {
-  display: flex;
-  justify-content: center;
-  gap: 6px;
-  flex-wrap: wrap;
+/* 状态标签组：紧随选手名之后内联排布 */
+.preview-score .tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 /* 预览画面容器：承载隐藏态遮罩（画面继续播放，仅提示舞台侧已隐藏） */
 .sp-frame {
