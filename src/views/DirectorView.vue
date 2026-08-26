@@ -223,9 +223,19 @@ const autoPreviewScene = computed<SceneKey>(
 /** 手动指定预览场景；null = 跟随自动（默认） */
 const previewManual = ref<SceneKey | null>(null);
 const previewScene = computed<SceneKey>(() => previewManual.value ?? autoPreviewScene.value);
-const previewUrl = computed(() =>
-  withCfgParams(director.scenePageUrl(PREVIEW_PAGES[previewScene.value] ?? "mappool.html")),
-);
+/**
+ * 各可预览场景的独立入口页链接：每个场景一个常驻 iframe，全部加载后仅切显隐（v-show），
+ * 场景保持连接与数据，切场景不重载（与 OBS 舞台观感一致）。配置经同源 localStorage +
+ * WS config_update 实时并入场景，不经 URL 重载，故此处不放配置参数，URL 只随
+ * token / 比赛 / 赛事变化（换场才重载）。
+ */
+const previewUrlMap = computed<Partial<Record<SceneKey, string>>>(() => {
+  const map: Partial<Record<SceneKey, string>> = {};
+  for (const k of MANUAL_PREVIEW_SCENES) {
+    map[k] = director.scenePageUrl(PREVIEW_PAGES[k] ?? "mappool.html");
+  }
+  return map;
+});
 // 自动切换随时开启：一旦切换广播场景（顶部 radio / WS 远端）即重置手动预览，回到自动跟随
 watch(activeScene, () => {
   previewManual.value = null;
@@ -417,7 +427,8 @@ onUnmounted(() => {
         <!-- 场景预览：自动切换随时开启，默认跟随播报流程预览下一个场景（图池→项目信息→
              比赛详情→图池循环，其它场景兜底图池）；右上角下拉可临时手动指定预览某场景
              （仅影响预览 iframe，不改舞台广播；切换广播场景即回到自动跟随）。
-             iframe 按舞台同源同参加载独立场景页，1920×1080 缩放显示 -->
+             每个可预览场景一个常驻 iframe（同源同参加载，1920×1080 缩放），
+             切换仅显隐不等重载 —— 与 OBS 舞台多源无缝切台观感一致 -->
         <div class="card">
           <div class="card-title preview-head">
             <span>{{ $t("directorView.scenePreviewTitle") }}</span>
@@ -436,14 +447,20 @@ onUnmounted(() => {
             </el-select>
           </div>
           <div ref="previewWrapEl" class="scene-preview">
-            <iframe
-              v-if="previewUrl"
-              :src="previewUrl"
-              class="preview-frame"
-              :style="{ transform: `scale(${previewScale})` }"
-              allow="autoplay; fullscreen"
-            ></iframe>
-            <div v-else class="preview-empty">{{ $t("directorView.sceneUnavailable") }}</div>
+            <!-- 每个可预览场景一个常驻 iframe：全部加载后仅 v-show 切换显隐，
+                 场景保持连接与数据，切换预览场景不重载（与 OBS 舞台观感一致） -->
+            <template v-for="key in MANUAL_PREVIEW_SCENES" :key="key">
+              <iframe
+                :src="previewUrlMap[key] || undefined"
+                v-show="previewScene === key"
+                class="preview-frame"
+                :style="{ transform: `scale(${previewScale})` }"
+                allow="autoplay; fullscreen"
+              ></iframe>
+            </template>
+            <div v-if="!previewUrlMap[previewScene]" class="preview-empty">
+              {{ $t("directorView.sceneUnavailable") }}
+            </div>
           </div>
         </div>
 
