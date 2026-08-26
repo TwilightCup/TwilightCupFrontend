@@ -520,8 +520,9 @@ onUnmounted(() => {
                （状态/就绪/预载）置于选手名与在线圆点的外侧 -->
           <div class="preview-score">
             <span class="tags">
-              <el-tag :type="sideStatusInfo('A').type" size="small" effect="dark">
-                {{ sideStatusInfo("A").label }}
+              <!-- 与 B 侧镜像：状态标签最靠近名字/比分，整行左右对称 -->
+              <el-tag :type="preloadTagInfo(director.aPreload).type" size="small" effect="plain">
+                {{ $t(preloadTagInfo(director.aPreload).key) }}
               </el-tag>
               <el-tag
                 v-if="director.phase === MatchPhase.PREP"
@@ -531,8 +532,8 @@ onUnmounted(() => {
               >
                 {{ director.aReady ? $t("playerStatus.ready") : $t("playerStatus.notReady") }}
               </el-tag>
-              <el-tag :type="preloadTagInfo(director.aPreload).type" size="small" effect="plain">
-                {{ $t(preloadTagInfo(director.aPreload).key) }}
+              <el-tag :type="sideStatusInfo('A').type" size="small" effect="dark">
+                {{ sideStatusInfo("A").label }}
               </el-tag>
             </span>
             <span class="name tc-a">
