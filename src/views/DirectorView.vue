@@ -164,8 +164,10 @@ const CFG_URL_KEYS: Partial<Record<keyof DirectorConfig, string>> = {
   embedA: "embed_a",
   embedB: "embed_b",
 };
-const stageUrl = computed(() => {
-  const base = director.stageUrl;
+const stageUrl = computed(() => withCfgParams(director.stageUrl));
+
+/** 场景页链接通用后缀：附当前导播配置（hls/embed），跨浏览器随链接下发 */
+function withCfgParams(base: string): string {
   if (!base) return "";
   const entries = Object.entries(CFG_URL_KEYS) as [keyof DirectorConfig, string][];
   const qs = entries
@@ -173,7 +175,7 @@ const stageUrl = computed(() => {
     .map(([k, p]) => `${p}=${encodeURIComponent(String(cfgConfig[k]))}`)
     .join("&");
   return qs ? `${base}&${qs}` : base;
-});
+}
 
 // ---- 场景切换（写 localStorage → 合并舞台跨标签监听切换）----
 const sceneBtnLabels: Record<SceneKey, string> = {
@@ -195,6 +197,40 @@ watch(
     if (s) activeScene.value = s as SceneKey;
   },
 );
+
+// ---- 场景预览（左栏日志上方）：预览播报流程的下一个场景 ----
+// 舞台(OBS)当前场景 → 预览场景：图池→项目信息→比赛详情→图池 循环；
+// 其它场景（待开始/赛程图）预览兜底为图池。
+const PREVIEW_NEXT: Partial<Record<SceneKey, SceneKey>> = {
+  mappool: "categoryinfo",
+  categoryinfo: "match",
+};
+/** 各预览场景对应的独立入口页（页面名，不带斜杠；standalone 模式自连 WS） */
+const PREVIEW_PAGES: Partial<Record<SceneKey, string>> = {
+  mappool: "mappool.html",
+  categoryinfo: "categoryinfo.html",
+  match: "match-scene.html",
+};
+const previewScene = computed<SceneKey>(
+  () => PREVIEW_NEXT[activeScene.value] ?? "mappool",
+);
+const previewUrl = computed(() =>
+  withCfgParams(director.scenePageUrl(PREVIEW_PAGES[previewScene.value] ?? "mappool.html")),
+);
+
+// iframe 固定按 1920×1080 渲染再整体缩放到面板宽（与 OBS 浏览器源同口径，
+// 场景内 vw/clamp 版式不随面板尺寸变形）
+const previewWrapEl = ref<HTMLDivElement | null>(null);
+const previewScale = ref(0.18);
+let previewRo: ResizeObserver | null = null;
+onMounted(() => {
+  previewRo = new ResizeObserver((entries) => {
+    const w = entries[0]?.contentRect.width ?? 0;
+    if (w > 0) previewScale.value = w / 1920;
+  });
+  if (previewWrapEl.value) previewRo.observe(previewWrapEl.value);
+});
+onUnmounted(() => previewRo?.disconnect());
 
 // ---- Coming Soon 倒计时控制（WS 广播 → 舞台 SoonScene 跨进程同步）----
 
@@ -360,6 +396,24 @@ onUnmounted(() => {
 
     <main class="main">
       <section class="col-left">
+        <!-- 场景预览：预览下一个场景（图池→项目信息→比赛详情→图池循环，其它场景
+             兜底图池）。iframe 按舞台同源同参加载独立场景页，1920×1080 缩放显示 -->
+        <div class="card">
+          <div class="card-title">
+            {{ $t("directorView.scenePreviewTitle") }} · {{ $t(sceneBtnLabels[previewScene]) }}
+          </div>
+          <div ref="previewWrapEl" class="scene-preview">
+            <iframe
+              v-if="previewUrl"
+              :src="previewUrl"
+              class="preview-frame"
+              :style="{ transform: `scale(${previewScale})` }"
+              allow="autoplay; fullscreen"
+            ></iframe>
+            <div v-else class="preview-empty">{{ $t("directorView.sceneUnavailable") }}</div>
+          </div>
+        </div>
+
         <!-- 日志 -->
         <div class="card log-card">
           <div class="card-title">{{ $t("common.messageLog") }}</div>
@@ -645,7 +699,7 @@ onUnmounted(() => {
   gap: 12px;
   padding: 12px;
 }
-/* 左栏细（日志占满），右栏粗（画面监控/回合/进度占主视觉） */
+/* 左栏细（场景预览 + 日志占满），右栏粗（画面监控/回合/进度占主视觉） */
 .col-left {
   width: 380px;
   flex-shrink: 0;
@@ -879,6 +933,35 @@ onUnmounted(() => {
   font-size: 12px;
   color: #ffc67a;
   line-height: 1.6;
+}
+/* 场景预览：16:9 容器裁切 1920×1080 缩放帧（与 OBS 浏览器源同口径） */
+.scene-preview {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #050010;
+}
+.preview-frame {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1920px;
+  height: 1080px;
+  border: 0;
+  transform-origin: 0 0;
+  /* 预览只读：不响应鼠标，防误触场景内交互 */
+  pointer-events: none;
+}
+.preview-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--tc-text-dim);
+  font-size: 12px;
 }
 .log-card {
   flex: 1;

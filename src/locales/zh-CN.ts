@@ -496,6 +496,7 @@ const messages = {
   "directorView.overlayCopied": "舞台链接已复制，粘贴到 OBS 浏览器源",
   "directorView.overlayCopyFail": "复制失败，请手动选中复制",
   "directorView.sceneTitle": "直播画面链接",
+  "directorView.scenePreviewTitle": "下一场景预览",
   "directorView.sceneUnavailable": "暂不可用（需所属赛事 / 已连接）",
   "directorView.sceneBtnCategoryinfo": "项目信息",
   "directorView.sceneBtnMatch": "比赛详情",

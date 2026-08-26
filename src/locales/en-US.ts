@@ -492,6 +492,7 @@ const messages: MessageSchema = {
   "directorView.overlayCopied": "Stage link copied — paste it into the OBS browser source",
   "directorView.overlayCopyFail": "Copy failed — please select and copy manually",
   "directorView.sceneTitle": "Broadcast view link",
+  "directorView.scenePreviewTitle": "Next scene preview",
   "directorView.sceneUnavailable": "Unavailable (needs a tournament / connection)",
   "directorView.sceneBtnCategoryinfo": "Category Info",
   "directorView.sceneBtnMatch": "Match detail",

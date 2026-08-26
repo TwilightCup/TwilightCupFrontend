@@ -482,10 +482,10 @@ export const useDirectorStore = defineStore("director", () => {
   }
 
   /**
-   * 合并舞台链接：单 OBS 浏览器源承载全部场景（叠加信息 / 比赛详情 / 图池 / 赛程图），
-   * 导播控制台切场景。带当前 token + 本场 match + 所属 tournament（赛程图场景需）。
+   * 场景独立入口页链接（stage.html / mappool.html 等，页面名不带斜杠）：
+   * 带当前 token + 本场 match + 所属 tournament（赛程图 / 图池场景需）。
    */
-  const stageUrl = computed(() => {
+  function scenePageUrl(page: string): string {
     if (!tokenRef.value) return "";
     const qs = [
       `token=${encodeURIComponent(tokenRef.value)}`,
@@ -494,8 +494,11 @@ export const useDirectorStore = defineStore("director", () => {
     ]
       .filter(Boolean)
       .join("&");
-    return `${globalThis.location.origin}/stage.html?${qs}`;
-  });
+    return `${globalThis.location.origin}/${page}?${qs}`;
+  }
+
+  /** 合并舞台链接：单 OBS 浏览器源承载全部场景，导播控制台切场景 */
+  const stageUrl = computed(() => scenePageUrl("stage.html"));
 
   return {
     // 连接
@@ -544,6 +547,7 @@ export const useDirectorStore = defineStore("director", () => {
     // 派生 / 动作
     isMulti,
     stageUrl,
+    scenePageUrl,
     // 导演指令（WS 广播 → 舞台）
     currentSceneCmd,
     soonCmdState,
