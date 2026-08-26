@@ -117,6 +117,8 @@ export function useCategoryInfo(
    */
   pbA: Ref<SrPersonalBest | null | undefined>;
   pbB: Ref<SrPersonalBest | null | undefined>;
+  /** 手动/事件触发：绕过同 key 去重重新拉当前选图的 speedrun 数据 */
+  refresh: () => void;
 } {
   const status = ref<CategoryInfoStatus>("idle");
   const rawRows = ref<CategoryRow[]>([]);

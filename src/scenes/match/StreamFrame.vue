@@ -185,7 +185,8 @@ async function attach(): Promise<void> {
     });
     mpegtsPlayer.attachMediaElement(v);
     mpegtsPlayer.load();
-    if (mpegtsPlayer.play) void mpegtsPlayer.play().catch(() => {});
+    // play 返回 void | Promise<void>（mpegts 类型定义），统一包 Promise 再吞异常
+    if (mpegtsPlayer.play) void Promise.resolve(mpegtsPlayer.play()).catch(() => {});
   } catch {
     videoBroken.value = true;
   }
