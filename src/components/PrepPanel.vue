@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { useI18n } from "vue-i18n";
 import { useMatchStore } from "@/stores/match";
 import { MatchPhase } from "@/api/types";
+import { preloadTagInfo } from "@/utils/format";
 import { useCtTagSelect } from "@/composables/useCtTagSelect";
 
 const { t } = useI18n();
@@ -44,19 +45,7 @@ function applyPick(): void {
   match.selectPick(code, ctTags.prepareSubmit(code), ctTags.needsRetry.value ? (retryInput.value ?? 1) : undefined);
 }
 
-/** 预载徽标（preload_state）：done/na/absent/failed/in_progress → 标签样式与文案键 */
-function preloadTag(st: string): { type: "success" | "warning" | "danger" | "info"; key: string } {
-  switch (st) {
-    case "done":
-      return { type: "success", key: "preload.done" };
-    case "in_progress":
-      return { type: "warning", key: "preload.inProgress" };
-    case "failed":
-      return { type: "danger", key: "preload.failed" };
-    default:
-      return { type: "info", key: "preload.none" };
-  }
-}
+/** 预载徽标映射已提取至 format.ts（preloadTagInfo），导播端共用 */
 
 async function confirmManualStart(): Promise<void> {
   if (!match.pendingPickCode) {
@@ -184,8 +173,8 @@ const isPrep = () => match.phase === MatchPhase.PREP;
               <el-tag :type="match.aReady ? ('success' as const) : ('info' as const)" effect="dark">
                 {{ match.aReady ? $t('playerStatus.ready') : $t('playerStatus.notReady') }}
               </el-tag>
-              <el-tag :type="preloadTag(match.aPreload).type" effect="plain">
-                {{ $t(preloadTag(match.aPreload).key) }}
+              <el-tag :type="preloadTagInfo(match.aPreload).type" effect="plain">
+                {{ $t(preloadTagInfo(match.aPreload).key) }}
               </el-tag>
             </span>
           </div>
@@ -195,8 +184,8 @@ const isPrep = () => match.phase === MatchPhase.PREP;
               <el-tag :type="match.bReady ? ('success' as const) : ('info' as const)" effect="dark">
                 {{ match.bReady ? $t('playerStatus.ready') : $t('playerStatus.notReady') }}
               </el-tag>
-              <el-tag :type="preloadTag(match.bPreload).type" effect="plain">
-                {{ $t(preloadTag(match.bPreload).key) }}
+              <el-tag :type="preloadTagInfo(match.bPreload).type" effect="plain">
+                {{ $t(preloadTagInfo(match.bPreload).key) }}
               </el-tag>
             </span>
           </div>

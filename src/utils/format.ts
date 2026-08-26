@@ -107,6 +107,23 @@ export function playerStatusInfo(status: number): { label: string; type: TagType
   }
 }
 
+/** 预载徽标（preload_state）：done/na/absent/failed/in_progress → 标签样式与文案键 */
+export function preloadTagInfo(st: string): {
+  type: Exclude<TagType, "primary">;
+  key: string;
+} {
+  switch (st) {
+    case "done":
+      return { type: "success", key: "preload.done" };
+    case "in_progress":
+      return { type: "warning", key: "preload.inProgress" };
+    case "failed":
+      return { type: "danger", key: "preload.failed" };
+    default:
+      return { type: "info", key: "preload.none" };
+  }
+}
+
 /** 回合判定 → i18n 键 */
 export function verdictLabelKey(v: RoundVerdict): string {
   switch (v) {

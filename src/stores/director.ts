@@ -95,6 +95,12 @@ export const useDirectorStore = defineStore("director", () => {
   const phase = ref<MP>(MatchPhase.IDLE);
   const aReady = ref(false);
   const bReady = ref(false);
+  /** 双方选手 WS 在线（seat_state 广播维护，连接时后端补发全量快照；默认 true 兜底） */
+  const aOnline = ref(true);
+  const bOnline = ref(true);
+  /** 双方预载状态（preload_state 广播；absent = 从未上报/无预载） */
+  const aPreload = ref<"absent" | "in_progress" | "done" | "failed" | "na">("absent");
+  const bPreload = ref<"absent" | "in_progress" | "done" | "failed" | "na">("absent");
   const countdownRemaining = ref<number | null>(null);
   const countdownSource = ref<"auto" | "manual" | null>(null);
 
@@ -195,6 +201,14 @@ export const useDirectorStore = defineStore("director", () => {
       case "ready_state":
         aReady.value = msg.a_ready;
         bReady.value = msg.b_ready;
+        break;
+      case "preload_state":
+        aPreload.value = msg.a_status;
+        bPreload.value = msg.b_status;
+        break;
+      case "seat_state":
+        if (msg.seat === "PLAYER_A") aOnline.value = msg.online;
+        else if (msg.seat === "PLAYER_B") bOnline.value = msg.online;
         break;
       case "countdown_tick":
         countdownRemaining.value = msg.remaining_secs;
@@ -494,6 +508,10 @@ export const useDirectorStore = defineStore("director", () => {
     phase,
     aReady,
     bReady,
+    aOnline,
+    bOnline,
+    aPreload,
+    bPreload,
     countdownRemaining,
     countdownSource,
     currentRound,

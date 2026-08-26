@@ -9,8 +9,8 @@ import RoleSwitcher from "@/components/RoleSwitcher.vue";
 import AccountMenu from "@/components/AccountMenu.vue";
 import StreamFrame from "@/scenes/match/StreamFrame.vue";
 import AuthFailMask from "@/components/AuthFailMask.vue";
-import { AttemptStatus } from "@/api/types";
-import { formatMs, phaseInfo, shortTime } from "@/utils/format";
+import { AttemptStatus, MatchPhase } from "@/api/types";
+import { formatMs, phaseInfo, playerStatusInfo, preloadTagInfo, shortTime } from "@/utils/format";
 import { DEFAULT_SCENE, type SceneKey } from "@/scenes/stage/useStageScene";
 import {
   useDirectorConfig,
@@ -24,6 +24,17 @@ const route = useRoute();
 const router = useRouter();
 
 const phaseLabel = computed(() => phaseInfo(director.phase).label);
+
+/** 选手状态标签（离线优先，口径同裁判端 PlayerStatusCard）：离线时状态标签让位为「未连接」 */
+function sideStatusInfo(side: "A" | "B"): ReturnType<typeof playerStatusInfo> {
+  const online = side === "A" ? director.aOnline : director.bOnline;
+  if (!online) return { label: t("playerStatus.offline"), type: "info" };
+  return playerStatusInfo(director.playerOf(side).status);
+}
+
+function sideOnline(side: "A" | "B"): boolean {
+  return side === "A" ? director.aOnline : director.bOnline;
+}
 
 function progText(side: "A" | "B"): string {
   if (!director.currentRound) return "—";
@@ -507,11 +518,60 @@ onUnmounted(() => {
           </div>
           <!-- 比分：监控下方一行居中（原左栏比分卡已并入此处） -->
           <div class="preview-score">
-            <span class="name tc-a">{{ director.nameOf("A") }}</span>
+            <span class="name tc-a">
+              <span
+                class="presence"
+                :class="{ off: !sideOnline('A') }"
+                :title="sideOnline('A') ? '' : $t('playerStatus.offline')"
+              ></span>
+              {{ director.nameOf("A") }}
+            </span>
             <span class="num">{{ director.winsA }}</span>
             <span class="sep">:</span>
             <span class="num">{{ director.winsB }}</span>
-            <span class="name tc-b">{{ director.nameOf("B") }}</span>
+            <span class="name tc-b">
+              <span
+                class="presence"
+                :class="{ off: !sideOnline('B') }"
+                :title="sideOnline('B') ? '' : $t('playerStatus.offline')"
+              ></span>
+              {{ director.nameOf("B") }}
+            </span>
+          </div>
+          <!-- 选手状态标签（口径同裁判端）：状态（游戏中/已完成/已弃权）+ 就绪（PREP）+ 预载 -->
+          <div class="status-row">
+            <div class="tags">
+              <el-tag :type="sideStatusInfo('A').type" size="small" effect="dark">
+                {{ sideStatusInfo("A").label }}
+              </el-tag>
+              <el-tag
+                v-if="director.phase === MatchPhase.PREP"
+                :type="director.aReady ? ('success' as const) : ('info' as const)"
+                size="small"
+                effect="dark"
+              >
+                {{ director.aReady ? $t("playerStatus.ready") : $t("playerStatus.notReady") }}
+              </el-tag>
+              <el-tag :type="preloadTagInfo(director.aPreload).type" size="small" effect="plain">
+                {{ $t(preloadTagInfo(director.aPreload).key) }}
+              </el-tag>
+            </div>
+            <div class="tags">
+              <el-tag :type="sideStatusInfo('B').type" size="small" effect="dark">
+                {{ sideStatusInfo("B").label }}
+              </el-tag>
+              <el-tag
+                v-if="director.phase === MatchPhase.PREP"
+                :type="director.bReady ? ('success' as const) : ('info' as const)"
+                size="small"
+                effect="dark"
+              >
+                {{ director.bReady ? $t("playerStatus.ready") : $t("playerStatus.notReady") }}
+              </el-tag>
+              <el-tag :type="preloadTagInfo(director.bPreload).type" size="small" effect="plain">
+                {{ $t(preloadTagInfo(director.bPreload).key) }}
+              </el-tag>
+            </div>
           </div>
         </div>
       </aside>
@@ -742,7 +802,7 @@ onUnmounted(() => {
 .sp-col {
   min-width: 0;
 }
-/* 监控下方比分行：名字按侧着色，大号数字居中 */
+/* 监控下方比分行：名字按侧着色（带在线指示点），数字居中 */
 .preview-score {
   display: flex;
   align-items: baseline;
@@ -751,22 +811,48 @@ onUnmounted(() => {
   margin-top: 10px;
 }
 .preview-score .name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 15px;
   font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
+}
+/* 在线状态指示点（口径同裁判端 PlayerStatusCard） */
+.presence {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #37d27a;
+  flex-shrink: 0;
+}
+.presence.off {
+  background: #7a7f8a;
 }
 .preview-score .num {
-  font-size: 28px;
+  font-size: 20px;
   font-weight: 900;
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 .preview-score .sep {
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--tc-text-dim);
+}
+/* 状态标签行：两组分别对齐下方左右预览列 */
+.status-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 8px;
+}
+.status-row .tags {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 /* 预览画面容器：承载隐藏态遮罩（画面继续播放，仅提示舞台侧已隐藏） */
 .sp-frame {
