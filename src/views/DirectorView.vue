@@ -360,42 +360,6 @@ onUnmounted(() => {
 
     <main class="main">
       <section class="col-left">
-        <!-- 当前回合 -->
-        <div class="card">
-          <div class="card-title">{{ $t("directorView.currentRoundTitle") }}</div>
-          <template v-if="director.currentRound">
-            <div class="round-line">
-              <b>{{ director.currentRound.pick.code }}</b>
-              <span class="dim">{{ director.currentRound.pick.name }}</span>
-              <el-tag size="small" effect="plain">
-                {{ director.isMulti ? $t("pickType.multi") : $t("pickType.single") }}
-              </el-tag>
-            </div>
-            <div class="dim">
-              {{ phaseLabel }}
-              <span v-if="director.countdownRemaining != null" class="cd">
-                · {{ $t("directorView.countdownLabel", { n: director.countdownRemaining }) }}
-              </span>
-            </div>
-          </template>
-          <div v-else class="dim">{{ $t("directorView.noRoundYet") }}</div>
-        </div>
-
-        <!-- 进度 -->
-        <div class="card">
-          <div class="card-title">{{ $t("directorView.bothProgressTitle") }}</div>
-          <div class="prog-row">
-            <span class="who tc-a">A · {{ director.nameOf("A") }}</span>
-            <span>{{ progText("A") }}</span>
-            <span class="dim">{{ $t("directorView.bestTimeLabel", { time: formatMs(bestMs("A")) }) }}</span>
-          </div>
-          <div class="prog-row">
-            <span class="who tc-b">B · {{ director.nameOf("B") }}</span>
-            <span>{{ progText("B") }}</span>
-            <span class="dim">{{ $t("directorView.bestTimeLabel", { time: formatMs(bestMs("B")) }) }}</span>
-          </div>
-        </div>
-
         <!-- 日志 -->
         <div class="card log-card">
           <div class="card-title">{{ $t("common.messageLog") }}</div>
@@ -573,6 +537,42 @@ onUnmounted(() => {
             </span>
           </div>
         </div>
+
+        <!-- 当前回合 -->
+        <div class="card">
+          <div class="card-title">{{ $t("directorView.currentRoundTitle") }}</div>
+          <template v-if="director.currentRound">
+            <div class="round-line">
+              <b>{{ director.currentRound.pick.code }}</b>
+              <span class="dim">{{ director.currentRound.pick.name }}</span>
+              <el-tag size="small" effect="plain">
+                {{ director.isMulti ? $t("pickType.multi") : $t("pickType.single") }}
+              </el-tag>
+            </div>
+            <div class="dim">
+              {{ phaseLabel }}
+              <span v-if="director.countdownRemaining != null" class="cd">
+                · {{ $t("directorView.countdownLabel", { n: director.countdownRemaining }) }}
+              </span>
+            </div>
+          </template>
+          <div v-else class="dim">{{ $t("directorView.noRoundYet") }}</div>
+        </div>
+
+        <!-- 进度 -->
+        <div class="card">
+          <div class="card-title">{{ $t("directorView.bothProgressTitle") }}</div>
+          <div class="prog-row">
+            <span class="who tc-a">A · {{ director.nameOf("A") }}</span>
+            <span>{{ progText("A") }}</span>
+            <span class="dim">{{ $t("directorView.bestTimeLabel", { time: formatMs(bestMs("A")) }) }}</span>
+          </div>
+          <div class="prog-row">
+            <span class="who tc-b">B · {{ director.nameOf("B") }}</span>
+            <span>{{ progText("B") }}</span>
+            <span class="dim">{{ $t("directorView.bestTimeLabel", { time: formatMs(bestMs("B")) }) }}</span>
+          </div>
+        </div>
       </aside>
     </main>
 
@@ -642,7 +642,7 @@ onUnmounted(() => {
   gap: 12px;
   padding: 12px;
 }
-/* 左栏细（比分/回合/进度/日志），右栏粗（操控/配置占主视觉） */
+/* 左栏细（日志占满），右栏粗（画面监控/回合/进度占主视觉） */
 .col-left {
   width: 380px;
   flex-shrink: 0;
