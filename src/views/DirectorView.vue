@@ -342,6 +342,22 @@ onUnmounted(() => {
             <span class="dim">{{ $t("directorView.bestTimeLabel", { time: formatMs(bestMs("B")) }) }}</span>
           </div>
         </div>
+
+        <!-- 日志 -->
+        <div class="card log-card">
+          <div class="card-title">{{ $t("common.messageLog") }}</div>
+          <div class="log-list">
+            <div
+              v-for="(m, i) in director.messages"
+              :key="i"
+              class="log-line"
+              :class="m.kind"
+            >
+              <span class="t">{{ fmtTs(m.ts) }}</span>
+              <span>{{ m.text }}</span>
+            </div>
+          </div>
+        </div>
       </section>
 
       <aside class="col-right">
@@ -503,21 +519,6 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- 日志 -->
-        <div class="card log-card">
-          <div class="card-title">{{ $t("common.messageLog") }}</div>
-          <div class="log-list">
-            <div
-              v-for="(m, i) in director.messages"
-              :key="i"
-              class="log-line"
-              :class="m.kind"
-            >
-              <span class="t">{{ fmtTs(m.ts) }}</span>
-              <span>{{ m.text }}</span>
-            </div>
-          </div>
-        </div>
       </aside>
     </main>
 
@@ -573,7 +574,7 @@ onUnmounted(() => {
   gap: 12px;
   padding: 12px;
 }
-/* 左栏细（比分/回合/进度），右栏粗（操控/配置/日志占主视觉） */
+/* 左栏细（比分/回合/进度/日志），右栏粗（操控/配置占主视觉） */
 .col-left {
   width: 380px;
   flex-shrink: 0;
