@@ -38,6 +38,32 @@ export function setSpeedrunToken(token: string | null): void {
   authToken = token;
 }
 
+/** 清空前端 speedrun 缓存并切换新的请求命名空间（同时绕过后端代理 TTL 缓存）。 */
+export function invalidateSpeedrunCache(): void {
+  speedrunRefreshSeq += 1;
+  cache.clear();
+}
+
+/**
+ * 通知所有已挂载的 speedrun 数据消费方重新拉取。
+ * 通过 window 事件、BroadcastChannel 和 localStorage storage 事件三种通道广播，
+ * 覆盖同一页面、同源标签页以及 OBS CEF 等场景。
+ */
+export function requestSpeedrunRefresh(): void {
+  invalidateSpeedrunCache();
+  globalThis.dispatchEvent(new CustomEvent("twc-speedrun-refresh"));
+  try {
+    if (typeof BroadcastChannel !== "undefined") {
+      const ch = new BroadcastChannel("twc-speedrun-refresh");
+      ch.postMessage({ type: "refresh" });
+      ch.close();
+    }
+    localStorage.setItem("twc-speedrun-refresh", String(Date.now()));
+  } catch {
+    // 隐私模式/配额不足时忽略，window 事件已足够同页刷新
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 错误
 // ---------------------------------------------------------------------------
@@ -113,6 +139,8 @@ interface CacheEntry {
 }
 
 const cache = new Map<string, CacheEntry>();
+/** 每次手动刷新给请求路径加一个新命名空间，绕过前端 TTL 缓存和后端代理缓存 */
+let speedrunRefreshSeq = 0;
 
 const TTL_META_MS = 10 * 60_000; // 游戏/变量/用户解析：变更极少
 const TTL_LEADERBOARD_MS = 90_000; // 榜单：随 run 提交变动
@@ -145,17 +173,21 @@ async function rawGet(path: string): Promise<unknown> {
 
 /** 带 TTL 缓存 + 在途去重的 GET；fetcher 从响应体取 data 并解析。 */
 function cachedGet<T>(path: string, ttlMs: number, parse: (body: unknown) => T): Promise<T> {
-  const hit = cache.get(path);
+  const actualPath =
+    speedrunRefreshSeq > 0
+      ? `${path}${path.includes("?") ? "&" : "?"}_=${speedrunRefreshSeq}`
+      : path;
+  const hit = cache.get(actualPath);
   const now = Date.now();
   if (hit && hit.expiresAt > now) return hit.promise as Promise<T>;
   // 失败结果不缓存：promise 落空时移除条目，下次重试
-  const promise = rawGet(path)
+  const promise = rawGet(actualPath)
     .then(parse)
     .catch((err: unknown) => {
-      cache.delete(path);
+      cache.delete(actualPath);
       throw err;
     });
-  cache.set(path, { expiresAt: now + ttlMs, promise });
+  cache.set(actualPath, { expiresAt: now + ttlMs, promise });
   return promise;
 }
 

@@ -263,6 +263,8 @@ const messages = {
   "matchHeader.resumeMatchBtn": "恢复比赛",
   "matchHeader.myMatchesBtn": "我的比赛",
   "matchHeader.dataViewBtn": "数据查看",
+  "matchHeader.refreshSpeedrun": "重拉Speedrun",
+  "matchHeader.speedrunRefreshDone": "已请求重新拉取 speedrun.com 数据",
 
   // ── CountdownBanner ──────────────────────────────────────────────────
   "countdown.manualLabel": "裁判发起 · 开始倒计时",

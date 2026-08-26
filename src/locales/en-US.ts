@@ -259,6 +259,8 @@ const messages: MessageSchema = {
   "matchHeader.resumeMatchBtn": "Resume match",
   "matchHeader.myMatchesBtn": "My matches",
   "matchHeader.dataViewBtn": "Data view",
+  "matchHeader.refreshSpeedrun": "Refresh speedrun",
+  "matchHeader.speedrunRefreshDone": "Speedrun.com refresh requested",
 
   // ── countdown ────────────────────────────────────────────────────────
   "countdown.manualLabel": "Referee-initiated · countdown started",

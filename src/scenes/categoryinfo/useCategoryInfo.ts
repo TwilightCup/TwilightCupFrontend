@@ -15,7 +15,7 @@
  * - 后续扩展位：选手当前项目 PB（fetchUserPb）——榜单行高亮之外为未上榜
  *   选手展示 PB，数据层在此 hook 内加一路 resolveUser + personal-bests 即可。
  */
-import { computed, ref, watch, type Ref } from "vue";
+import { computed, onUnmounted, ref, watch, type Ref } from "vue";
 import type { Pick } from "@/api/types";
 import {
   LEADERBOARD_TOP,
@@ -355,5 +355,39 @@ export function useCategoryInfo(
     }),
   );
 
-  return { status, rows, refreshedAt, errDetail, boardDisplay, pbA, pbB };
+  /** 手动/事件触发：绕过同 key 去重，重新拉当前选图的 speedrun 数据。 */
+  function refresh(): void {
+    const round = roundRef.value;
+    if (!round) return;
+    const key = roundKey(round);
+    lastKey = key;
+    if (timer) clearTimeout(timer);
+    void load(round, key, false);
+  }
+
+  // 接收“重新拉取 speedrun”通知：同一页面 window 事件、同源标签页
+  // BroadcastChannel、以及兼容 OBS CEF 的 localStorage storage 事件。
+  const onRefresh = () => refresh();
+  const storageKey = "twc-speedrun-refresh";
+  const onStorage = (e: StorageEvent) => {
+    if (e.key === storageKey) refresh();
+  };
+  let channel: BroadcastChannel | null = null;
+  if (typeof BroadcastChannel !== "undefined") {
+    try {
+      channel = new BroadcastChannel("twc-speedrun-refresh");
+      channel.onmessage = onRefresh;
+    } catch {
+      channel = null;
+    }
+  }
+  globalThis.addEventListener("twc-speedrun-refresh", onRefresh);
+  globalThis.addEventListener("storage", onStorage);
+  onUnmounted(() => {
+    globalThis.removeEventListener("twc-speedrun-refresh", onRefresh);
+    globalThis.removeEventListener("storage", onStorage);
+    channel?.close();
+  });
+
+  return { status, rows, refreshedAt, errDetail, boardDisplay, pbA, pbB, refresh };
 }
