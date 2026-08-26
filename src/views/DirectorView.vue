@@ -372,7 +372,7 @@ onUnmounted(() => {
                     <el-input
                       v-model="cfgForm[f.key]"
                       size="small"
-                      :placeholder="f.key.startsWith('hls') ? 'https://.../a.m3u8' : 'https://live.bilibili.com/blanc/房号 或 youtube.com/embed/...'"
+                      :placeholder="f.key.startsWith('hls') ? 'https://.../a.m3u8' : 'B站房间号/直播间链接 或 youtube.com/embed/...'"
                     />
                   </label>
                 </div>
@@ -559,6 +559,7 @@ onUnmounted(() => {
                   side="A"
                   :hls-url="cfgConfig.hlsA"
                   :embed-url="cfgConfig.embedA"
+                  :token="auth.token"
                   :refresh-nonce="cfgConfig.refreshA"
                 />
                 <Transition name="fade">
@@ -574,6 +575,7 @@ onUnmounted(() => {
                   side="B"
                   :hls-url="cfgConfig.hlsB"
                   :embed-url="cfgConfig.embedB"
+                  :token="auth.token"
                   :refresh-nonce="cfgConfig.refreshB"
                 />
                 <Transition name="fade">

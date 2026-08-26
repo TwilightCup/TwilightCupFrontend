@@ -2,92 +2,102 @@
 /**
  * 选手直播卡（4:3）。16:9 推流经 object-fit:cover 居中裁去左右两侧，铺满卡片。
  *
- * 播放优先级：HLS（自有流媒体服务器输出）> 外部嵌入（B站/YouTube）> 占位。
+ * 播放优先级：HLS（自有流媒体服务器输出）> B站直播代理 FLV > 外部嵌入（YouTube）> 占位。
  * - HLS：Safari/原生支持则 <video src> 直放；其余（Chrome/Edge/OBS CEF）
- *   动态 import hls.js 走 MSE 解码——OBS 浏览器源实为 Chromium，靠这条播放。
- * - 嵌入：配置 embedUrl（可 iframe 的嵌入播放器地址）时整卡 <iframe> 渲染；
- *   B站直播链接会自动转成 live.bilibili.com/blanc/{roomId}?liteVersion=true
- *   的轻量嵌入页（主站房间页带 X-Frame-Options: SAMEORIGIN，直接 iframe 在
- *   OBS 会黑屏；blanc 轻量页可嵌入且不触发本地网络拦截）。
- *   object-fit 不适用于 iframe，改为 16:9 定宽外溢 + overflow:hidden 裁左右
- *   （与 <video> 的 cover 裁切同口径）。
+ *   动态 import hls.js 走 MSE 解码。
+ * - B站：不再 iframe 嵌入（blanc 页会被 Chrome Local Network Access 拦截），
+ *   而是走后端同源代理，用 mpegts.js 播放 HTTP-FLV（参考 BililiveRecorder
+ *   的取流和播放方式）。
+ * - YouTube 等其它站仍走 iframe；object-fit 不适用，用 16:9 定宽外溢 +
+ *   overflow:hidden 裁左右（与 <video> 的 cover 裁切同口径）。
  *
  * side='A' 蓝（左）、'B' 红（右）。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type HlsClass from "hls.js";
 import { bi } from "@/utils/bilingual";
-import { toBilibiliLiveEmbedUrl } from "@/utils/bilibili";
+import { parseBilibiliLiveRoomId } from "@/utils/bilibili";
+import { bilibiliStreamUrl } from "@/api/bilibili";
+
+interface MpegtsPlayer {
+  attachMediaElement(el: HTMLVideoElement): void;
+  load(): void;
+  play?(): Promise<void> | void;
+  destroy(): void;
+  on(event: string, callback: (data: unknown) => void): void;
+}
+
+interface MpegtsModule {
+  isSupported(): boolean;
+  createPlayer(
+    opts: Record<string, unknown>,
+    config?: Record<string, unknown>,
+  ): MpegtsPlayer;
+  Events?: Record<string, string>;
+}
+
+declare global {
+  interface Window {
+    mpegts?: MpegtsModule;
+  }
+}
 
 const props = defineProps<{
   side: "A" | "B";
   hlsUrl: string;
   embedUrl?: string;
+  /** 当前导播/裁判/管理 JWT（B站代理流地址需要；场景页传 URL token） */
+  token?: string;
   /** 隐藏该侧画面（等待信号占位；应急开关，控制台经 config_update 广播） */
   hidden?: boolean;
   /** 重新拉流计数（变化即重挂播放器：卡顿应急刷新） */
   refreshNonce?: number;
 }>();
 
-/** HLS 播放失败（MSE 不可用 / 致命解码错误）→ 降级：嵌入 → 占位（可见，不黑屏） */
+/** HLS/B站流播放失败（MSE 不可用 / 致命解码错误）→ 占位（可见，不黑屏） */
 const videoBroken = ref(false);
 
-/** 展示模式：被隐藏直接占位；HLS 视频优先，其次外部嵌入，都无（或 HLS 已坏）则占位 */
-const mode = computed<"video" | "embed" | "none">(() => {
+/** 展示模式：被隐藏直接占位；HLS 视频优先，其次 B站代理流，再其次外部嵌入 */
+const mode = computed<"video" | "bili" | "embed" | "none">(() => {
   if (props.hidden) return "none";
   if (props.hlsUrl && !videoBroken.value) return "video";
+  if (props.embedUrl && parseBilibiliLiveRoomId(props.embedUrl)) return "bili";
   if (props.embedUrl) return "embed";
   return "none";
 });
 
-/** B站直播链接统一走 blanc 轻量嵌入页（主站房间页禁止 iframe，OBS 会黑屏） */
-const embedSrc = computed(() => toBilibiliLiveEmbedUrl(props.embedUrl ?? ""));
-
 const videoEl = ref<HTMLVideoElement | null>(null);
 let hls: HlsClass | null = null;
+let mpegtsPlayer: MpegtsPlayer | null = null;
+let mpegtsPromise: Promise<MpegtsModule> | null = null;
 
 /** 原生 HLS 支持（Safari 系） */
 function nativeHls(v: HTMLVideoElement): boolean {
   return !!v.canPlayType("application/vnd.apple.mpegurl");
 }
 
-/** 挂载/换源：按浏览器能力走原生或 hls.js（动态加载，不拖累首屏） */
-async function attach(): Promise<void> {
-  const v = videoEl.value;
-  destroyHls();
-  videoBroken.value = false;
-  if (props.hidden) return;
-  if (!v || !props.hlsUrl) return;
-  if (nativeHls(v)) {
-    v.src = props.hlsUrl;
-    void v.play().catch(() => {/* muted autoplay 被拦时静默，画面仍渲染 */});
-    return;
-  }
-  try {
-    const { default: Hls } = await import("hls.js");
-    if (videoEl.value !== v) return; // 等待期间已换卡/卸载
-    if (!Hls.isSupported()) {
-      videoBroken.value = true; // 理论上 OBS/Chrome 均支持；真不支持时可见降级
-      return;
-    }
-    destroyHls();
-    hls = new Hls({
-      enableWorker: true,
-      lowLatencyMode: true, // LL-HLS 源自动低延迟；普通 HLS 不受影响
-      liveDurationInfinity: true, // 直播不显示总时长，避免 seek 条异常
-      maxBufferLength: 10, // 小缓冲降低直播延迟
-    });
-    hls.on(Hls.Events.ERROR, (_e, data) => {
-      if (data.fatal) {
-        videoBroken.value = true; // 致命错误（404/解码失败…）→ 可见降级不黑屏
-        destroyHls();
+/** 动态加载 mpegts.js（从 public/vendor 提供，避免拖累首屏） */
+function loadMpegts(): Promise<MpegtsModule> {
+  if (window.mpegts) return Promise.resolve(window.mpegts);
+  if (mpegtsPromise) return mpegtsPromise;
+  mpegtsPromise = new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = `${import.meta.env.BASE_URL}vendor/mpegts.js`;
+    s.onload = () => {
+      if (window.mpegts) {
+        resolve(window.mpegts);
+      } else {
+        mpegtsPromise = null;
+        reject(new Error("mpegts.js loaded but global missing"));
       }
-    });
-    hls.loadSource(props.hlsUrl);
-    hls.attachMedia(v);
-  } catch {
-    videoBroken.value = true;
-  }
+    };
+    s.onerror = () => {
+      mpegtsPromise = null;
+      reject(new Error("mpegts.js load failed"));
+    };
+    document.head.appendChild(s);
+  });
+  return mpegtsPromise;
 }
 
 function destroyHls(): void {
@@ -97,18 +107,103 @@ function destroyHls(): void {
   }
 }
 
+function destroyMpegts(): void {
+  if (mpegtsPlayer) {
+    mpegtsPlayer.destroy();
+    mpegtsPlayer = null;
+  }
+}
+
+/** 挂载/换源：HLS 或 B站代理 FLV 或 YouTube iframe 由 mode 决定，只处理 video 类 */
+async function attach(): Promise<void> {
+  const v = videoEl.value;
+  destroyHls();
+  destroyMpegts();
+  videoBroken.value = false;
+  if (props.hidden) return;
+  if (!v) return;
+
+  // 方案①：自有服务器 HLS
+  if (props.hlsUrl) {
+    if (nativeHls(v)) {
+      v.src = props.hlsUrl;
+      void v.play().catch(() => {/* muted autoplay 被拦时静默，画面仍渲染 */});
+      return;
+    }
+    try {
+      const { default: Hls } = await import("hls.js");
+      if (videoEl.value !== v) return; // 等待期间已换卡/卸载
+      if (!Hls.isSupported()) {
+        videoBroken.value = true;
+        return;
+      }
+      hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: true,
+        liveDurationInfinity: true,
+        maxBufferLength: 10,
+      });
+      hls.on(Hls.Events.ERROR, (_e, data) => {
+        if (data.fatal) {
+          videoBroken.value = true;
+          destroyHls();
+        }
+      });
+      hls.loadSource(props.hlsUrl);
+      hls.attachMedia(v);
+    } catch {
+      videoBroken.value = true;
+    }
+    return;
+  }
+
+  // 方案②：B站直播同源代理 FLV（mpegts.js）
+  const roomId = parseBilibiliLiveRoomId(props.embedUrl ?? "");
+  if (!roomId) return;
+  try {
+    const Mpegts = await loadMpegts();
+    if (videoEl.value !== v) return;
+    if (!Mpegts.isSupported()) {
+      videoBroken.value = true;
+      return;
+    }
+    mpegtsPlayer = Mpegts.createPlayer(
+      {
+        type: "flv",
+        url: bilibiliStreamUrl(roomId, props.token),
+        isLive: true,
+      },
+      {
+        enableStashBuffer: false,
+        liveBufferLatencyChasing: true,
+        liveBufferLatencyMaxLatency: 1.5,
+      },
+    );
+    mpegtsPlayer.on(Mpegts.Events?.ERROR ?? "error", () => {
+      videoBroken.value = true;
+      destroyMpegts();
+    });
+    mpegtsPlayer.attachMediaElement(v);
+    mpegtsPlayer.load();
+    if (mpegtsPlayer.play) void mpegtsPlayer.play().catch(() => {});
+  } catch {
+    videoBroken.value = true;
+  }
+}
+
 onMounted(() => void attach());
-// flush:"post"：hlsUrl 在挂载后才到达（配置异步加载/config_update 广播）时，
+// flush:"post"：hlsUrl/embedUrl 在挂载后才到达（配置异步加载/config_update 广播）时，
 // mode 先翻转渲染出 <video>、DOM 就绪后再挂流——默认 pre-flush 此刻 videoEl
-// 尚未插入，attach 会空手而归且不再重试，视频永久黑屏。
+// 尚未插入，attach 会空手而归且不再重试，画面永久黑屏。
 // refreshNonce 变化 = 应急重拉流（重挂播放器）；hidden 翻转回来同理需重挂。
 watch(
-  () => [props.hlsUrl, props.refreshNonce, props.hidden],
+  () => [props.hlsUrl, props.embedUrl, props.token, props.refreshNonce, props.hidden],
   () => void attach(),
   { flush: "post" },
 );
 onBeforeUnmount(() => {
   destroyHls();
+  destroyMpegts();
   const v = videoEl.value;
   if (v) v.src = "";
 });
@@ -116,31 +211,30 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="frame" :class="side">
-    <!-- 方案②：外部直播嵌入（B站自动转 blanc 空白播放页 / YouTube iframe；
-         key 随刷新计数重建即重载） -->
+    <!-- 外部嵌入（YouTube 等非 B站直播；B站走下方 mpegts.js 代理流） -->
     <iframe
       v-if="mode === 'embed'"
       :key="refreshNonce ?? 0"
-      :src="embedSrc"
+      :src="embedUrl"
       class="video"
       allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
       allowfullscreen
       frameborder="0"
       referrerpolicy="no-referrer-when-downgrade"
     />
-    <!-- 方案①：自有服务器 HLS（Safari 原生 / 其余 hls.js） -->
+    <!-- 自有 HLS 或 B站代理 FLV：同一 video 元素，由 attach 按模式挂载 -->
     <video
-      v-else-if="mode === 'video'"
+      v-else-if="mode === 'video' || mode === 'bili'"
       ref="videoEl"
       autoplay
       muted
       playsinline
       class="video"
     />
-    <!-- 未推流 / HLS 播放失败：占位（可见降级，不黑屏） -->
+    <!-- 未推流 / 播放失败：占位（可见降级，不黑屏） -->
     <div v-else class="placeholder">
       <div class="live">● {{ bi("scenes.match.waitingSignal") }}</div>
-      <div v-if="videoBroken && hlsUrl" class="url">{{ hlsUrl }}</div>
+      <div v-if="videoBroken && (hlsUrl || embedUrl)" class="url">{{ hlsUrl || embedUrl }}</div>
     </div>
   </div>
 </template>

@@ -15,7 +15,7 @@ export interface DirectorConfig {
   /** 转码 HLS（m3u8）——自有流媒体服务器输出；hls.js/Safari 可播 */
   hlsA: string;
   hlsB: string;
-  /** 外部直播嵌入地址（B站直播间链接/房间号自动转 blanc / YouTube embed）——iframe 渲染 */
+  /** 外部直播嵌入地址（B站直播间链接/房间号走后端代理 FLV；YouTube 走 iframe） */
   embedA: string;
   embedB: string;
   /** 隐藏该侧直播画面（显示等待信号占位；直播中应急，经 config_update 广播） */

@@ -286,6 +286,7 @@ onUnmounted(() => {
             side="A"
             :hls-url="config.hlsA"
             :embed-url="config.embedA"
+            :token="params.token"
             :hidden="config.hideA"
             :refresh-nonce="config.refreshA"
           />
@@ -293,6 +294,7 @@ onUnmounted(() => {
             side="B"
             :hls-url="config.hlsB"
             :embed-url="config.embedB"
+            :token="params.token"
             :hidden="config.hideB"
             :refresh-nonce="config.refreshB"
           />
