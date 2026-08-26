@@ -493,7 +493,6 @@ const messages: MessageSchema = {
   "directorView.overlayCopyFail": "Copy failed — please select and copy manually",
   "directorView.sceneTitle": "Broadcast view link",
   "directorView.scenePreviewTitle": "Scene preview",
-  "directorView.sceneAutoFollow": "Auto · {scene}",
   "directorView.sceneUnavailable": "Unavailable (needs a tournament / connection)",
   "directorView.sceneBtnCategoryinfo": "Category Info",
   "directorView.sceneBtnMatch": "Match detail",

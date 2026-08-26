@@ -497,7 +497,6 @@ const messages = {
   "directorView.overlayCopyFail": "复制失败，请手动选中复制",
   "directorView.sceneTitle": "直播画面链接",
   "directorView.scenePreviewTitle": "场景预览",
-  "directorView.sceneAutoFollow": "自动 · {scene}",
   "directorView.sceneUnavailable": "暂不可用（需所属赛事 / 已连接）",
   "directorView.sceneBtnCategoryinfo": "项目信息",
   "directorView.sceneBtnMatch": "比赛详情",
