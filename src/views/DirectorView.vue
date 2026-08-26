@@ -476,31 +476,11 @@ onUnmounted(() => {
         </div>
 
         <!-- 选手画面监控：与舞台同源同配置实时预览（不受隐藏开关影响——先验证
-             画面加载正常，再开下方显示开关放上台；刷新按钮同时重拉预览与舞台） -->
+             画面加载正常，再开上方显示开关放上台；刷新按钮同时重拉预览与舞台） -->
         <div class="card">
           <div class="card-title">{{ $t("directorView.previewTitle") }}</div>
           <p class="hint">{{ $t("directorView.previewHint") }}</p>
-          <div class="stream-preview">
-            <div class="sp-col">
-              <span class="sp-label tc-a">A · {{ director.nameOf("A") }}</span>
-              <StreamFrame
-                side="A"
-                :hls-url="cfgConfig.hlsA"
-                :embed-url="cfgConfig.embedA"
-                :refresh-nonce="cfgConfig.refreshA"
-              />
-            </div>
-            <div class="sp-col">
-              <span class="sp-label tc-b">B · {{ director.nameOf("B") }}</span>
-              <StreamFrame
-                side="B"
-                :hls-url="cfgConfig.hlsB"
-                :embed-url="cfgConfig.embedB"
-                :refresh-nonce="cfgConfig.refreshB"
-              />
-            </div>
-          </div>
-          <!-- 直播画面实时控制：显示开关 + 应急重拉流（独立管 A/B，即时广播到舞台，与上方预览列对齐） -->
+          <!-- 直播画面实时控制：显示开关 + 应急重拉流（独立管 A/B，即时广播到舞台，与下方预览列对齐） -->
           <div class="cfg-ctl">
             <div class="ctl-side">
               <span class="lbl tc-a">A · {{ director.nameOf("A") }}</span>
@@ -515,6 +495,26 @@ onUnmounted(() => {
               <el-button size="small" :disabled="!director.matchId" @click="refreshStream('B')">
                 {{ $t("directorView.cfgRefresh") }}
               </el-button>
+            </div>
+          </div>
+          <div class="stream-preview">
+            <div class="sp-col">
+              <StreamFrame
+                side="A"
+                :hls-url="cfgConfig.hlsA"
+                :embed-url="cfgConfig.embedA"
+                :refresh-nonce="cfgConfig.refreshA"
+              />
+              <span class="sp-label tc-a">A · {{ director.nameOf("A") }}</span>
+            </div>
+            <div class="sp-col">
+              <StreamFrame
+                side="B"
+                :hls-url="cfgConfig.hlsB"
+                :embed-url="cfgConfig.embedB"
+                :refresh-nonce="cfgConfig.refreshB"
+              />
+              <span class="sp-label tc-b">B · {{ director.nameOf("B") }}</span>
             </div>
           </div>
         </div>
@@ -750,9 +750,7 @@ onUnmounted(() => {
 .cfg-ctl {
   display: flex;
   gap: 12px;
-  margin-top: 10px;
-  /* 与上方预览网格同宽（预览限宽半幅），A/B 控件对齐各自预览列 */
-  max-width: 50%;
+  margin-bottom: 10px;
 }
 .ctl-side {
   flex: 1;
@@ -786,8 +784,6 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
-  /* 预览缩小 50%：限宽半幅，两帧等比随之减半（4:3 比例不变） */
-  max-width: 50%;
 }
 .sp-col {
   display: flex;
