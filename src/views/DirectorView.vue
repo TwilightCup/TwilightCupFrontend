@@ -11,7 +11,7 @@ import StreamFrame from "@/scenes/match/StreamFrame.vue";
 import AuthFailMask from "@/components/AuthFailMask.vue";
 import { AttemptStatus, MatchPhase } from "@/api/types";
 import { formatMs, phaseInfo, playerStatusInfo, preloadTagInfo, shortTime } from "@/utils/format";
-import { DEFAULT_SCENE, type SceneKey } from "@/scenes/stage/useStageScene";
+import { DEFAULT_SCENE, isSceneKey, type SceneKey } from "@/scenes/stage/useStageScene";
 import {
   useDirectorConfig,
   type DirectorConfig,
@@ -198,9 +198,12 @@ watch(
   },
 );
 
-// ---- 场景预览（左栏日志上方）：预览播报流程的下一个场景 ----
-// 舞台(OBS)当前场景 → 预览场景：图池→项目信息→比赛详情→图池 循环；
-// 其它场景（待开始/赛程图）预览兜底为图池。
+// ---- 场景预览（左栏日志上方）：可自动跟随播报流程，也可下拉手动指定 ----
+// 自动逻辑保留：未手动指定时，预览场景跟随舞台当前场景的下一个
+// （图池→项目信息→比赛详情→图池 循环；其它场景（待开始/赛程图）兜底为图池）。
+// 下拉仅改变本控制台的预览 iframe，不改舞台广播（广播场景仍由顶部 radio 切换）。
+const AUTO_PREVIEW = "auto" as const;
+type PreviewChoice = SceneKey | typeof AUTO_PREVIEW;
 const PREVIEW_NEXT: Partial<Record<SceneKey, SceneKey>> = {
   mappool: "categoryinfo",
   categoryinfo: "match",
@@ -210,13 +213,31 @@ const PREVIEW_PAGES: Partial<Record<SceneKey, string>> = {
   mappool: "mappool.html",
   categoryinfo: "categoryinfo.html",
   match: "match-scene.html",
+  bracket: "bracket.html",
 };
-const previewScene = computed<SceneKey>(
+/** 可在下拉中手动预览的场景（均有独立入口页；soon 仅存活于合并舞台，无单页预览） */
+const MANUAL_PREVIEW_SCENES: SceneKey[] = ["mappool", "categoryinfo", "match", "bracket"];
+/** 自动预览场景：跟随舞台当前场景推演下一个 */
+const autoPreviewScene = computed<SceneKey>(
   () => PREVIEW_NEXT[activeScene.value] ?? "mappool",
+);
+/** 预览选择：auto = 跟随自动（默认）；否则手动指定该场景 */
+const previewChoice = ref<PreviewChoice>(AUTO_PREVIEW);
+const previewScene = computed<SceneKey>(() =>
+  previewChoice.value === AUTO_PREVIEW ? autoPreviewScene.value : previewChoice.value,
 );
 const previewUrl = computed(() =>
   withCfgParams(director.scenePageUrl(PREVIEW_PAGES[previewScene.value] ?? "mappool.html")),
 );
+/** 自动选项文案：动态显示当前跟随的场景（随舞台切换变化） */
+const previewAutoLabel = computed(() =>
+  t("directorView.sceneAutoFollow", { scene: t(sceneBtnLabels[autoPreviewScene.value]) }),
+);
+function onPickPreviewScene(v: unknown): void {
+  if (typeof v === "string" && (v === AUTO_PREVIEW || isSceneKey(v))) {
+    previewChoice.value = v;
+  }
+}
 
 // iframe 固定按 1920×1080 渲染再整体缩放到面板宽（与 OBS 浏览器源同口径，
 // 场景内 vw/clamp 版式不随面板尺寸变形）
@@ -396,11 +417,26 @@ onUnmounted(() => {
 
     <main class="main">
       <section class="col-left">
-        <!-- 场景预览：预览下一个场景（图池→项目信息→比赛详情→图池循环，其它场景
-             兜底图池）。iframe 按舞台同源同参加载独立场景页，1920×1080 缩放显示 -->
+        <!-- 场景预览：默认跟随播报流程预览下一个场景（图池→项目信息→比赛详情→图池循环，
+             其它场景兜底图池）；右上角下拉可手动指定预览某场景（仅影响预览 iframe，不改
+             舞台广播）。iframe 按舞台同源同参加载独立场景页，1920×1080 缩放显示 -->
         <div class="card">
-          <div class="card-title">
-            {{ $t("directorView.scenePreviewTitle") }} · {{ $t(sceneBtnLabels[previewScene]) }}
+          <div class="card-title preview-head">
+            <span>{{ $t("directorView.scenePreviewTitle") }}</span>
+            <el-select
+              :model-value="previewChoice"
+              size="small"
+              class="preview-select"
+              @update:model-value="(v: string | number | boolean | undefined) => onPickPreviewScene(v)"
+            >
+              <el-option :value="AUTO_PREVIEW" :label="previewAutoLabel" />
+              <el-option
+                v-for="key in MANUAL_PREVIEW_SCENES"
+                :key="key"
+                :value="key"
+                :label="$t(sceneBtnLabels[key])"
+              />
+            </el-select>
           </div>
           <div ref="previewWrapEl" class="scene-preview">
             <iframe
@@ -736,6 +772,25 @@ onUnmounted(() => {
   color: var(--tc-text-dim);
   margin-bottom: 8px;
   letter-spacing: 0.5px;
+}
+/* 场景预览卡标题行：标题居左，场景下拉居右对齐基线 */
+.preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.preview-select {
+  width: 168px;
+}
+.preview-select :deep(.el-select__wrapper) {
+  padding: 1px 8px;
+  min-height: 24px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.preview-select :deep(.el-select__selected-item) {
+  font-size: 12px;
 }
 .round-line {
   display: flex;
