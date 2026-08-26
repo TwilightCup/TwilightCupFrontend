@@ -538,39 +538,42 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- 当前回合 -->
-        <div class="card">
-          <div class="card-title">{{ $t("directorView.currentRoundTitle") }}</div>
-          <template v-if="director.currentRound">
-            <div class="round-line">
-              <b>{{ director.currentRound.pick.code }}</b>
-              <span class="dim">{{ director.currentRound.pick.name }}</span>
-              <el-tag size="small" effect="plain">
-                {{ director.isMulti ? $t("pickType.multi") : $t("pickType.single") }}
-              </el-tag>
-            </div>
-            <div class="dim">
-              {{ phaseLabel }}
-              <span v-if="director.countdownRemaining != null" class="cd">
-                · {{ $t("directorView.countdownLabel", { n: director.countdownRemaining }) }}
-              </span>
-            </div>
-          </template>
-          <div v-else class="dim">{{ $t("directorView.noRoundYet") }}</div>
-        </div>
-
-        <!-- 进度 -->
-        <div class="card">
-          <div class="card-title">{{ $t("directorView.bothProgressTitle") }}</div>
-          <div class="prog-row">
-            <span class="who tc-a">A · {{ director.nameOf("A") }}</span>
-            <span>{{ progText("A") }}</span>
-            <span class="dim">{{ $t("directorView.bestTimeLabel", { time: formatMs(bestMs("A")) }) }}</span>
+        <!-- 当前回合 + 进度：左右并列 -->
+        <div class="card-row">
+          <!-- 当前回合 -->
+          <div class="card">
+            <div class="card-title">{{ $t("directorView.currentRoundTitle") }}</div>
+            <template v-if="director.currentRound">
+              <div class="round-line">
+                <b>{{ director.currentRound.pick.code }}</b>
+                <span class="dim">{{ director.currentRound.pick.name }}</span>
+                <el-tag size="small" effect="plain">
+                  {{ director.isMulti ? $t("pickType.multi") : $t("pickType.single") }}
+                </el-tag>
+              </div>
+              <div class="dim">
+                {{ phaseLabel }}
+                <span v-if="director.countdownRemaining != null" class="cd">
+                  · {{ $t("directorView.countdownLabel", { n: director.countdownRemaining }) }}
+                </span>
+              </div>
+            </template>
+            <div v-else class="dim">{{ $t("directorView.noRoundYet") }}</div>
           </div>
-          <div class="prog-row">
-            <span class="who tc-b">B · {{ director.nameOf("B") }}</span>
-            <span>{{ progText("B") }}</span>
-            <span class="dim">{{ $t("directorView.bestTimeLabel", { time: formatMs(bestMs("B")) }) }}</span>
+
+          <!-- 进度 -->
+          <div class="card">
+            <div class="card-title">{{ $t("directorView.bothProgressTitle") }}</div>
+            <div class="prog-row">
+              <span class="who tc-a">A · {{ director.nameOf("A") }}</span>
+              <span>{{ progText("A") }}</span>
+              <span class="dim">{{ $t("directorView.bestTimeLabel", { time: formatMs(bestMs("A")) }) }}</span>
+            </div>
+            <div class="prog-row">
+              <span class="who tc-b">B · {{ director.nameOf("B") }}</span>
+              <span>{{ progText("B") }}</span>
+              <span class="dim">{{ $t("directorView.bestTimeLabel", { time: formatMs(bestMs("B")) }) }}</span>
+            </div>
           </div>
         </div>
       </aside>
@@ -663,6 +666,15 @@ onUnmounted(() => {
   border: 1px solid var(--tc-border);
   border-radius: 10px;
   padding: 12px 14px;
+}
+/* 并列卡片行（当前回合 / 双方进度）：两卡等分 */
+.card-row {
+  display: flex;
+  gap: 12px;
+}
+.card-row .card {
+  flex: 1;
+  min-width: 0;
 }
 .card-title {
   font-size: 12px;
