@@ -17,6 +17,12 @@ export const MOCK_MATCH = {
   /** 演示偏差（毫秒，有符号：正 = B 落后）：mock 关卡累计 B 快 3.68s → A 落后。
    *  真实数据来自 subsegment_gap 广播（director.subsegmentGap），mock 为静态值 */
   gapDiffMs: -3680,
+  /** 演示多关合集关卡名序列（关卡标识，与 currentLevel* 的 0 起序号配合，
+   *  驱动选手计时器旁的当前关卡名标签；经官方展示名对照后上屏） */
+  levelNames: ["Intro", "Train", "Climb", "Water", "Power"],
+  /** 双方当前所处关卡序号（0 起；与下方 levels* 已完成三关衔接，双方同在第 4 关） */
+  currentLevelA: 3,
+  currentLevelB: 3,
   /** 双方已完成关卡（含累计用时 total_ms），供偏差条 / 计时器计算 */
   levelsA: [
     { level_index: 0, time_ms: 42180, total_ms: 42180 },

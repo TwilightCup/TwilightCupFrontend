@@ -5,7 +5,8 @@
  * 布局（1920×1080）：
  *   顶部：信息栏 TopBar（选手名/比分指示器/赛事·比赛标题，需求见顶栏文档）
  *   中部：双 4:3 选手画面满宽无缝并列（16:9 推流裁左右）
- *   下部：多关偏差条（单关隐藏）→ 双方计时器（主大字 + 副小字，屏幕中轴对称）
+ *   下部：多关偏差条（单关隐藏）→ 双方计时器（主大字 + 副小字 + 多关当前
+ *         关卡名标签，屏幕中轴对称）
  *   左下角：当前选图角标卡（裁判宣布选图后常驻，PickCornerCard）
  *   右下角：PB 角标卡（当前项目 WR + 双方 PB，PbCornerCard，speedrun 同源）
  *
@@ -21,6 +22,7 @@ import { useDirectorStore } from "@/stores/director";
 import { CategoryKind, PickType } from "@/api/types";
 import { formatMs } from "@/utils/format";
 import { categoryKindOf } from "@/utils/mappool";
+import { officialDisplayName } from "@/utils/officialLevels";
 import { setSpeedrunToken } from "@/api/speedrun";
 import { useCategoryInfo } from "@/scenes/categoryinfo/useCategoryInfo";
 import SynthwaveBg from "@/scenes/components/SynthwaveBg.vue";
@@ -85,6 +87,28 @@ const { sideA, sideB } = useMatchTiming({
 const diffMs = computed(() =>
   liveReady.value ? director.subsegmentGap ?? 0 : MOCK_MATCH.gapDiffMs,
 );
+
+// ---- 多关当前关卡名：player_status 的 current_level_index × 合集关卡名序列
+//      （消息级 collection 已展开为关卡名，官方展示名口径；序号越界 = 未开赛 /
+//        已冲线 → null 隐藏，单关恒 null） ----
+const levelNames = computed<string[]>(() => {
+  if (!liveReady.value) return MOCK_MATCH.levelNames;
+  const raw = director.currentRound?.collection.raw as { levels?: unknown } | undefined;
+  return Array.isArray(raw?.levels) ? raw.levels.map((x) => (x == null ? "" : String(x))) : [];
+});
+
+function currentLevelName(side: "A" | "B"): string | null {
+  if (!isMulti.value) return null;
+  const idx = liveReady.value
+    ? director.playerOf(side).currentLevelIndex
+    : side === "A"
+      ? MOCK_MATCH.currentLevelA
+      : MOCK_MATCH.currentLevelB;
+  const name = levelNames.value[idx];
+  return name ? (officialDisplayName(name) ?? name) : null;
+}
+const levelA = computed(() => currentLevelName("A"));
+const levelB = computed(() => currentLevelName("B"));
 
 const mainA = computed(() => formatMs(sideA.value.mainMs));
 const mainB = computed(() => formatMs(sideB.value.mainMs));
@@ -305,10 +329,10 @@ onUnmounted(() => {
           <DiffBar :diff-ms="diffMs" :gap-ms="params.gapMs" />
         </section>
 
-        <!-- 双方计时器：屏幕中轴对称，A 左 B 右，沉底 -->
+        <!-- 双方计时器：屏幕中轴对称，A 左 B 右，沉底；多关时副行外侧带当前关卡名 -->
         <section ref="timersEl" class="timers">
-          <PlayerTimer side="A" :main="mainA" :sub="subA" />
-          <PlayerTimer side="B" :main="mainB" :sub="subB" />
+          <PlayerTimer side="A" :main="mainA" :sub="subA" :level="levelA" />
+          <PlayerTimer side="B" :main="mainB" :sub="subB" :level="levelB" />
         </section>
 
         <!-- 左下角当前选图角标卡：宣布选图后常驻（无选图不占位）；:key 换选图

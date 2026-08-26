@@ -1,9 +1,11 @@
 <script setup lang="ts">
 /**
  * 选手计时器：主计时器（大字，白色等宽）+ 主计时器正下方与文本等宽的选手色
- * 线条 + 副计时器（小字，单关模式不渲染）。
- * 多关：主 = 通过上一关卡时的累计总耗时，副 = 上一关卡的单段耗时；
- * 单关：主 = 后端成绩（最快 / 平均尝试），副隐藏。
+ * 线条 + 副计时器行（小字，单关模式不渲染）。
+ * 多关：主 = 通过上一关卡时的累计总耗时，副 = 上一关卡的单段耗时，副行外侧
+ * （A 左 / B 右）随行显示选手当前所处关卡名（player_status 的
+ * current_level_index × 合集关卡名序列，父级算好传入）；
+ * 单关：主 = 后端成绩（最快 / 平均尝试），副行隐藏。
  * A 块整体靠右对齐、B 块靠左对齐——外层 .timers 双列以画面水平中心为锚。
  */
 defineProps<{
@@ -12,6 +14,8 @@ defineProps<{
   main: string;
   /** 副计时器文本（已格式化）；null = 隐藏 */
   sub?: string | null;
+  /** 多关：选手当前所处关卡名（副行外侧随行显示）；null = 隐藏 */
+  level?: string | null;
 }>();
 </script>
 
@@ -22,8 +26,12 @@ defineProps<{
       <div class="main">{{ main }}</div>
       <div class="rule" />
     </div>
-    <!-- 副计时器隐藏时降为透明占位（保留行高，避免主计时器位置偏移） -->
-    <div class="sub" :class="{ ghost: sub == null }">{{ sub }}</div>
+    <!-- 副计时器行：小字计时 + 多关当前关卡名标签（标签在行外侧：A 左 / B 右）；
+         任一项缺省降为透明占位（保留行高，避免主计时器位置偏移） -->
+    <div class="sub-row">
+      <div class="level" :class="{ ghost: !level }">{{ level ?? "" }}</div>
+      <div class="sub" :class="{ ghost: sub == null }">{{ sub }}</div>
+    </div>
   </div>
 </template>
 
@@ -74,6 +82,34 @@ defineProps<{
 .timer.B .rule {
   background: var(--syn-b);
   box-shadow: 0 0 10px rgba(255, 107, 74, 0.55);
+}
+/* 副计时器行：小字计时 + 关卡名标签（默认 A 布局——标签在外侧左） */
+.sub-row {
+  display: flex;
+  align-items: baseline;
+  gap: 1vh;
+}
+/* B 侧镜像：标签移到外侧右 */
+.timer.B .sub-row {
+  flex-direction: row-reverse;
+}
+/* 当前关卡名：比计时小字低一档的暗色标签；超长截断（行宽不得越过主计时器
+   盒外缘——左/右下角角标卡锚定在那里） */
+.level {
+  font-size: clamp(12px, 2.3vh, 26px);
+  font-weight: 800;
+  color: var(--syn-text-dim);
+  line-height: 1.1;
+  min-height: 1.1em; /* 空内容时保留行高占位 */
+  max-width: 12ch;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
+  transition: opacity 0.3s ease;
+}
+.level.ghost {
+  opacity: 0;
 }
 .sub {
   font-size: clamp(14px, 2.8vh, 30px);
