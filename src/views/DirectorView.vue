@@ -9,7 +9,7 @@ import RoleSwitcher from "@/components/RoleSwitcher.vue";
 import AccountMenu from "@/components/AccountMenu.vue";
 import StreamFrame from "@/scenes/match/StreamFrame.vue";
 import AuthFailMask from "@/components/AuthFailMask.vue";
-import { AttemptStatus, PlayerStatus } from "@/api/types";
+import { AttemptStatus } from "@/api/types";
 import { formatMs, phaseInfo, shortTime } from "@/utils/format";
 import { DEFAULT_SCENE, type SceneKey } from "@/scenes/stage/useStageScene";
 import {
@@ -24,13 +24,6 @@ const route = useRoute();
 const router = useRouter();
 
 const phaseLabel = computed(() => phaseInfo(director.phase).label);
-
-function statusOf(side: "A" | "B"): { label: string; done: boolean; dead: boolean } {
-  const s = director.playerOf(side).status;
-  if (s === PlayerStatus.COMPLETED) return { label: t("playerStatus.completed"), done: true, dead: false };
-  if (s === PlayerStatus.FORFEITED) return { label: t("playerStatus.forfeited"), done: false, dead: true };
-  return { label: t("matchStatus.running"), done: false, dead: false };
-}
 
 function progText(side: "A" | "B"): string {
   if (!director.currentRound) return "—";
@@ -356,24 +349,6 @@ onUnmounted(() => {
 
     <main class="main">
       <section class="col-left">
-        <!-- 比分 -->
-        <div class="card score-card">
-          <div class="score-side a" :class="{ dim: statusOf('A').dead }">
-            <div class="sname tc-a">{{ director.nameOf("A") }}</div>
-            <div class="snum">{{ director.winsA }}</div>
-            <div class="sstat">{{ statusOf("A").label }}</div>
-          </div>
-          <div class="vs">
-            <span v-if="director.matchWinner" class="winner">🏆{{ director.matchWinner }}</span>
-            <template v-else>:</template>
-          </div>
-          <div class="score-side b" :class="{ dim: statusOf('B').dead }">
-            <div class="sname tc-b">{{ director.nameOf("B") }}</div>
-            <div class="snum">{{ director.winsB }}</div>
-            <div class="sstat">{{ statusOf("B").label }}</div>
-          </div>
-        </div>
-
         <!-- 当前回合 -->
         <div class="card">
           <div class="card-title">{{ $t("directorView.currentRoundTitle") }}</div>
@@ -513,7 +488,6 @@ onUnmounted(() => {
                   </div>
                 </Transition>
               </div>
-              <span class="sp-label tc-a">A · {{ director.nameOf("A") }}</span>
             </div>
             <div class="sp-col">
               <div class="sp-frame">
@@ -529,8 +503,15 @@ onUnmounted(() => {
                   </div>
                 </Transition>
               </div>
-              <span class="sp-label tc-b">B · {{ director.nameOf("B") }}</span>
             </div>
+          </div>
+          <!-- 比分：监控下方一行居中（原左栏比分卡已并入此处） -->
+          <div class="preview-score">
+            <span class="name tc-a">{{ director.nameOf("A") }}</span>
+            <span class="num">{{ director.winsA }}</span>
+            <span class="sep">:</span>
+            <span class="num">{{ director.winsB }}</span>
+            <span class="name tc-b">{{ director.nameOf("B") }}</span>
           </div>
         </div>
       </aside>
@@ -630,48 +611,6 @@ onUnmounted(() => {
   color: var(--tc-text-dim);
   margin-bottom: 8px;
   letter-spacing: 0.5px;
-}
-.score-card {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 24px;
-  padding: 18px;
-}
-.score-side {
-  text-align: center;
-  min-width: 120px;
-}
-.score-side.dim {
-  opacity: 0.5;
-}
-.sname {
-  font-size: 16px;
-  font-weight: 700;
-}
-.snum {
-  font-size: 48px;
-  font-weight: 900;
-  line-height: 1.1;
-}
-.score-side.a .snum {
-  color: var(--tc-a);
-}
-.score-side.b .snum {
-  color: var(--tc-b);
-}
-.sstat {
-  font-size: 12px;
-  color: var(--tc-text-dim);
-}
-.vs {
-  font-size: 28px;
-  color: var(--tc-text-dim);
-}
-.winner {
-  color: gold;
-  font-size: 18px;
-  font-weight: 700;
 }
 .round-line {
   display: flex;
@@ -801,10 +740,33 @@ onUnmounted(() => {
   gap: 10px;
 }
 .sp-col {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
   min-width: 0;
+}
+/* 监控下方比分行：名字按侧着色，大号数字居中 */
+.preview-score {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 10px;
+}
+.preview-score .name {
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.preview-score .num {
+  font-size: 28px;
+  font-weight: 900;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.preview-score .sep {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--tc-text-dim);
 }
 /* 预览画面容器：承载隐藏态遮罩（画面继续播放，仅提示舞台侧已隐藏） */
 .sp-frame {
@@ -819,13 +781,6 @@ onUnmounted(() => {
   justify-content: center;
   color: rgba(255, 255, 255, 0.55);
   pointer-events: none;
-}
-.sp-label {
-  font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .warn {
   margin: 8px 0 0;
