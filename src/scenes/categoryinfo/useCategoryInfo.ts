@@ -11,6 +11,9 @@
  *   code + 名称 + 词条 + 映射字段计算 key，相同不重拉（另加 300ms 防抖）。
  * - 绑定解析（/users?lookup=）与榜单拉取互不阻塞：绑定迟到只重算高亮、
  *   不重新请求榜单。
+ * - 榜单/PB/绑定解析走 SWR 双请求（api/speedrun swrGet）：后端持久化缓存
+ *   秒回先上屏（onCached），上游 refresh 成功后替换渲染；上游失败（限流/
+ *   不可达）时保留缓存渲染不回退，双双失败才进 error 状态。
  * - 限流（HTTP 420）/网络失败 → error 状态，不自动重试，待下次选图再拉。
  * - 后续扩展位：选手当前项目 PB（fetchUserPb）——榜单行高亮之外为未上榜
  *   选手展示 PB，数据层在此 hook 内加一路 resolveUser + personal-bests 即可。
@@ -150,9 +153,22 @@ export function useCategoryInfo(
       err instanceof SpeedrunError && err.kind === "rate-limit" ? "rateLimit" : "error";
   }
 
+  /** 把当前榜单状态提交到模块级快照（cached 先上屏 / refresh 替换两路共用）。 */
+  function commitSnapshot(key: string, display: BoardDisplay | null): void {
+    snapshot = {
+      key,
+      status: "ok",
+      rows: rawRows.value,
+      display,
+      refreshedAt: refreshedAt.value,
+      board: boardParams.value,
+    };
+  }
+
   /**
    * 拉取榜单。silent = 回显快照后的后台刷新：不动 status（不闪加载卡），
-   * 失败也保留旧内容；成功则更新数据与快照。
+   * 失败也保留旧内容；成功则更新数据与快照。SWR：onCached 秒回后端持久化
+   * 缓存先上屏（含 boardParams → PB 即刻可拉），refresh 返回后替换。
    */
   async function load(round: CategoryInfoRound, key: string, silent: boolean): Promise<void> {
     const pick = round.pick;
@@ -203,16 +219,34 @@ export function useCategoryInfo(
     }
     if (!board) return; // 类型收窄守卫（上方两条路径均已保证非空）
     try {
-      const rows = await fetchLeaderboard({
-        gameId: board.gameId,
-        categoryId: board.categoryId,
-        levelId: board.levelId,
-        variables: board.variables,
-        top: LEADERBOARD_TOP,
-      });
-      const at = Date.now();
+      const rows = await fetchLeaderboard(
+        {
+          gameId: board.gameId,
+          categoryId: board.categoryId,
+          levelId: board.levelId,
+          variables: board.variables,
+          top: LEADERBOARD_TOP,
+        },
+        {
+          // 后端持久化缓存秒回：先上屏（可能旧），PB 也可即刻开拉
+          onCached: (cachedRows, fetchedAt) => {
+            if (roundKey(roundRef.value) !== key) return; // 切图后旧回调丢弃
+            rawRows.value = cachedRows.map((r) => ({ ...r, highlight: null }));
+            refreshedAt.value = fetchedAt ? Date.parse(fetchedAt) : Date.now();
+            status.value = "ok";
+            boardParams.value = {
+              gameId: board.gameId,
+              categoryId: board.categoryId,
+              levelId: board.levelId,
+              variables: board.variables,
+            };
+            commitSnapshot(key, display);
+          },
+        },
+      );
+      if (roundKey(roundRef.value) !== key) return; // 切图后旧 refresh 晚到丢弃
       rawRows.value = rows.map((r) => ({ ...r, highlight: null }));
-      refreshedAt.value = at;
+      refreshedAt.value = Date.now();
       status.value = "ok";
       boardDisplay.value = display;
       boardParams.value = {
@@ -229,14 +263,7 @@ export function useCategoryInfo(
           boardDisplay.value = null;
         }
       }
-      snapshot = {
-        key,
-        status: "ok",
-        rows: rawRows.value,
-        display: boardDisplay.value,
-        refreshedAt: at,
-        board: boardParams.value,
-      };
+      commitSnapshot(key, boardDisplay.value);
     } catch (err) {
       if (!silent) fail(err);
     }
@@ -292,27 +319,35 @@ export function useCategoryInfo(
   async function resolveBind(
     lookup: string | null,
     into: Ref<{ id: string; name: string } | null>,
+    src: Ref<string | null>,
   ): Promise<void> {
     if (!lookup) {
       into.value = null;
       return;
     }
     try {
-      into.value = await resolveUser(lookup);
+      const resolved = await resolveUser(lookup, {
+        // 缓存秒回（可能旧）：绑定串已换人的迟到回调丢弃
+        onCached: (u) => {
+          if (src.value === lookup) into.value = u;
+        },
+      });
+      if (src.value === lookup) into.value = resolved;
     } catch {
-      into.value = null; // 解析失败回退：按原始绑定串匹配名字
+      if (src.value === lookup) into.value = null; // 解析失败回退：按原始绑定串匹配名字
     }
   }
 
-  watch(bindA, (v) => void resolveBind(v, resolvedA), { immediate: true });
-  watch(bindB, (v) => void resolveBind(v, resolvedB), { immediate: true });
+  watch(bindA, (v) => void resolveBind(v, resolvedA, bindA), { immediate: true });
+  watch(bindB, (v) => void resolveBind(v, resolvedB, bindB), { immediate: true });
 
   // ── 选手当前项目 PB（personal-bests 口径：未进 Top 15 也有成绩） ────
   async function refreshPb(
     userId: string | null,
     into: Ref<SrPersonalBest | null | undefined>,
   ): Promise<void> {
-    if (!boardParams.value) {
+    const board = boardParams.value;
+    if (!board) {
       into.value = undefined; // 榜单未就绪：保持待拉取（显示空串）
       return;
     }
@@ -321,7 +356,14 @@ export function useCategoryInfo(
       return;
     }
     try {
-      into.value = await fetchUserPb(userId, boardParams.value);
+      const pb = await fetchUserPb(userId, board, {
+        // 缓存秒回：null = 已拉取无成绩（N/A），照常上屏；已切项目的丢弃
+        onCached: (cached) => {
+          if (boardParams.value === board) into.value = cached;
+        },
+      });
+      if (boardParams.value !== board) return; // 已切项目：写入交给新回调
+      into.value = pb;
     } catch {
       into.value = undefined; // PB 非关键路径，失败保持待拉取（下次榜单再试）
     }
