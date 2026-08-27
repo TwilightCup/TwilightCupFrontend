@@ -3,9 +3,11 @@
  * 比赛详情场景右下角的 PB 角标卡：当前项目 speedrun.com 成绩速览，数据与
  * 项目信息场景（categoryinfo）同源——世界纪录（榜首成绩）+ 双方选手该项目 PB。
  *
- * 样式对齐该场景的霓虹 panel（neon-panel）但改直角边；三行各为
- * 「标签（左，等宽）→ 时间（紧随标签，列宽 = 可见行最长文本）→ 名称（占
- * 余宽、左对齐、过长省略号）」，元素间隔与卡片水平内边距一致：标签保留行色（WR 金 = 榜单榜首
+ * 组件只渲染行内容（透明背景）：面板背景由外层 MatchScene 的 .pb-backdrop
+ * 提供——同 neon-panel 样式、覆盖 B 侧主计时器及其下方整块；本组件排版
+ * 锚定关系不变（外层 .pb-corner 几何钉死）。三行各为「标签（左，等宽）→
+ * 时间（紧随标签，列宽 = 可见行最长文本）→ 名称（占余宽、左对齐、过长省略
+ * 号）」，元素间隔与卡片水平内边距一致：标签保留行色（WR 金 = 榜单榜首
  * 名次色，PB = 选手色），时间与名称统一榜单 4 名外名次色（弱化、无辉光）。
  * WR 名称 = speedrun 榜首玩家名；PB 名称 = 选手展示名，按用时升序（短者在
  * 上，无成绩沉底）。
@@ -68,7 +70,7 @@ const timeCol = computed(() => {
 </script>
 
 <template>
-  <div class="pbcard neon-panel" :style="{ '--time-col': timeCol }">
+  <div class="pbcard" :style="{ '--time-col': timeCol }">
     <div v-if="wrText" class="row wr">
       <span class="tag">WR</span>
       <span class="time">{{ wrText }}</span>
@@ -83,12 +85,11 @@ const timeCol = computed(() => {
 </template>
 
 <style scoped>
-/* 霓虹 panel 同款但直角边（满贴边口径，对齐偏差条 / 选图卡）。场景页无全局
-   border-box：width/height 100% 须显式声明，否则边框 + 内边距外溢出包裹层
-   （右/底贴边锚定时即伸出画面外） */
-.pbcard.neon-panel {
+/* 透明内容层：面板背景在外层 MatchScene 的 .pb-backdrop（覆盖 B 侧主计时
+   及下方整块）。场景页无全局 border-box：width/height 100% 须显式声明，
+   否则内边距外溢出包裹层 */
+.pbcard {
   box-sizing: border-box;
-  border-radius: 0;
   position: relative;
   width: 100%;
   height: 100%;

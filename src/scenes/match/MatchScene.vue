@@ -9,7 +9,9 @@
  *         当前关卡名 + 实时单段（live_time segment 外推），下行上一关名 +
  *         单段用时（淡紫），过一关上行内容沉入下行），屏幕中轴对称
  *   左下角：当前选图角标卡（裁判宣布选图后常驻，PickCornerCard）
- *   右下角：PB 角标卡（当前项目 WR + 双方 PB，PbCornerCard，speedrun 同源）
+ *   右下角：WR/PB 背景板（neon-panel 同款，覆盖 B 侧主计时及其下方整块）
+ *         + PB 卡内容（当前项目 WR + 双方 PB，PbCornerCard，speedrun 同源，
+ *         透明背景浮于背景板上，排版锚定不变）
  *
  * 数据：onMounted 连 WS（director.connect），WS 断 / 无 match → mock 兜底（绝不黑屏）。
  * 计时口径见 useMatchTiming：多关主计时 = live_time 实时走表（每秒上报矫正 +
@@ -284,6 +286,8 @@ const pickW = ref<number | null>(null);
 const pickH = ref<number | null>(null);
 const pbW = ref<number | null>(null);
 const pbH = ref<number | null>(null);
+/** WR/PB 背景板宽（px）：B 主计时文本左缘 → 画面右缘（高度同 pbH） */
+const pbBackW = ref<number | null>(null);
 let pickRo: ResizeObserver | null = null;
 
 function measureCornerBoxes(): void {
@@ -305,6 +309,9 @@ function measureCornerBoxes(): void {
   const h2 = Math.round(base.bottom - timerB.getBoundingClientRect().top);
   if (w2 > 0) pbW.value = w2;
   if (h2 > 0) pbH.value = h2;
+  // WR/PB 背景板：左缘扩到 B 主计时文本左缘（覆盖主计时及其下方整块）
+  const w3 = Math.round(base.right - stackB.getBoundingClientRect().left);
+  if (w3 > 0) pbBackW.value = w3;
 }
 
 /** 量测锚定注入的角标卡几何（未测得项不注入，走 CSS 兜底） */
@@ -314,6 +321,11 @@ const pickStyle = computed(() => ({
 }));
 const pbStyle = computed(() => ({
   ...(pbW.value != null ? { width: `${pbW.value}px` } : {}),
+  ...(pbH.value != null ? { height: `${pbH.value}px` } : {}),
+}));
+/** WR/PB 背景板几何（量测注入，未测得项走 CSS 兜底） */
+const pbBackStyle = computed(() => ({
+  ...(pbBackW.value != null ? { width: `${pbBackW.value}px` } : {}),
   ...(pbH.value != null ? { height: `${pbH.value}px` } : {}),
 }));
 
@@ -397,6 +409,11 @@ onUnmounted(() => {
           <DiffBar :diff-ms="diffMs" :gap-ms="params.gapMs" />
         </section>
 
+        <!-- WR/PB 背景板：同 neon-panel 样式（直角边），覆盖 B 侧主计时器及其
+             下方整块（左缘 = B 主计时文本左缘、顶缘 = 主计时顶、右/底贴画面边）。
+             置于 .timers 之前使其垫在计时文字下方；卡片内容排版锚定不变 -->
+        <div v-if="pbCardVisible" class="pb-backdrop neon-panel" :style="pbBackStyle" />
+
         <!-- 双方计时器：屏幕中轴对称，A 左 B 右，沉底；多关副计时两行（上行
              当前关 + 实时单段，下行上一关 + 单段用时（淡紫）） -->
         <section ref="timersEl" class="timers">
@@ -435,8 +452,9 @@ onUnmounted(() => {
           />
         </div>
 
-        <!-- 右下角 PB 角标卡：当前项目 WR（金）+ 双方 PB（选手色，快者在上）；
-             数据与 categoryinfo 场景同源，全未拉到时不占位（左缘锚定 B 计时器） -->
+        <!-- 右下角 PB 角标卡内容：当前项目 WR（金）+ 双方 PB（选手色，快者在
+             上）；数据与 categoryinfo 场景同源，全未拉到时不占位。排版锚定
+             关系不变（左缘锚定 B 计时器 +12px），透明背景浮于 .pb-backdrop 上 -->
         <div v-if="pbCardVisible" class="pb-corner" :style="pbStyle">
           <PbCornerCard
             :wr-sec="wrSec"
@@ -520,8 +538,19 @@ onUnmounted(() => {
   /* 尺寸容器：PickCornerCard 内以 cqh 单位随卡高折算标题字号（满高恰好三行） */
   container-type: size;
 }
-/* 右下角 PB 角标卡：镜像选图卡——贴右缘与底缘，左缘锚定 B 计时器右侧留
-   12px、顶缘锚定 B 计时器顶部；内部布局见 PbCornerCard */
+/* WR/PB 背景板：贴右缘与底缘（同卡片原满贴边口径），直角边；宽高由脚本
+   measureCornerBoxes 量测注入（左缘 = B 主计时文本左缘、顶缘 = 主计时顶），
+   此处仅兜底。无 z-index：DOM 先于 .timers，垫在计时文字下方 */
+.pb-backdrop {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 24vw;
+  height: 15vh;
+  border-radius: 0;
+}
+/* 右下角 PB 角标卡内容：镜像选图卡——贴右缘与底缘，左缘锚定 B 计时器右侧留
+   12px、顶缘锚定 B 计时器顶部（排版锚定关系不变）；内部布局见 PbCornerCard */
 .pb-corner {
   position: absolute;
   right: 0;
