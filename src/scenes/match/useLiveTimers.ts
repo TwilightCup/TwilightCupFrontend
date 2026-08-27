@@ -10,7 +10,9 @@
  * - 平滑矫正：网络抖动会让新锚点的外推值比已显示值倒退几十毫秒，小倒退
  *   （≤ SMOOTH_MS）保持已显示值等外推追上（计时器不回跳），明显倒退
  *   （回合重置等权威修正）直接跳变采纳；
- * - 样本为 null（回合外 / 一方无上报）该席显示 null，由上层回退离线口径。
+ * - 样本为 null（回合外 / 一方无上报 / 该席已完赛弃权由上层置 null——完赛即
+ *   停表于计时器最终累计读数，杜绝停报后外推多走数秒）该席显示 null，
+ *   由上层回退离线口径。
  */
 import { onBeforeUnmount, onMounted, ref, type Ref } from "vue";
 import type { LiveTime } from "@/stores/director";
