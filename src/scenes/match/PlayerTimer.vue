@@ -1,14 +1,14 @@
 <script setup lang="ts">
 /**
  * 选手计时器：主计时器（大字，白色等宽）+ 主计时器正下方与文本等宽的选手色
- * 线条 + 副计时器行（小字，单关模式不渲染）。
- * 多关：主 = 通过上一关卡时的累计总耗时，副 = 上一关卡的单段耗时，副行外侧
- * （A 左 / B 右）随行显示选手当前所处关卡名（player_status 的
- * current_level_index × 合集关卡名序列，父级算好传入）。关卡名盒外缘对齐
- * 线条外缘、盒宽占满「主计时器盒宽 − 副计时器」的余量，文本超余量时按比例
- * 缩小字号（下限后截断兜底）——几何由脚本量测钉死（fitLevel），量测手法与
- * MatchScene 角标卡锚定同源；
- * 单关：主 = 后端成绩（最快 / 平均尝试），副行隐藏。
+ * 线条 + 副计时器两行（主计时字号已收缩，为两行副计时让出纵向空间）。
+ * 多关：上行 = 当前关卡名 + 实时单段时间（live_time segment 外推，白色），
+ * 下行 = 上一关（最近完成）名 + 单段用时（淡紫 = PB 卡弱化色）；选手通过
+ * 一关后上行内容沉入下行、上行换新关。两行关卡名盒外缘对齐线条外缘、盒宽
+ * 占满「主计时器盒宽 − 该行计时」的余量，文本超余量时按比例缩小字号（下限
+ * 后截断兜底）——几何由脚本量测钉死（fitLevel），量测手法与 MatchScene 角标
+ * 卡锚定同源；
+ * 单关：两行副计时隐藏（透明占位）。
  * A 块整体靠右对齐、B 块靠左对齐——外层 .timers 双列以画面水平中心为锚。
  */
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
@@ -24,11 +24,15 @@ const props = defineProps<{
   side: "A" | "B";
   /** 主计时器文本（已格式化） */
   main: string;
-  /** 副计时器文本（已格式化）；null = 隐藏 */
-  sub?: string | null;
-  /** 多关：选手当前所处关卡名（仅回合进行中且该选手仍在游戏内时由父级传入，
-   *  副行外侧随行显示）；null = 隐藏 */
+  /** 上行：选手当前所处关卡名（仅回合进行中且该选手仍在游戏内时由父级传入）；
+   *  null = 隐藏 */
   level?: string | null;
+  /** 上行：当前关实时单段时间（live_time segment 外推，已格式化）；null = 隐藏 */
+  seg?: string | null;
+  /** 下行：上一关（最近完成）关卡名；null = 隐藏 */
+  prevLevel?: string | null;
+  /** 下行：上一关单段用时（已格式化）；null = 隐藏 */
+  prevSeg?: string | null;
 }>();
 
 // ---- 关卡名几何量测（.stack = 主计时器盒 = 线条宽，是全部宽度的锚） ----
@@ -36,22 +40,21 @@ const stackEl = ref<HTMLElement | null>(null);
 const rowEl = ref<HTMLElement | null>(null);
 const subEl = ref<HTMLElement | null>(null);
 const levelEl = ref<HTMLElement | null>(null);
+const prevSubEl = ref<HTMLElement | null>(null);
+const prevLevelEl = ref<HTMLElement | null>(null);
 
 /** 字号收缩下限（占基准字号比例），更长的名字按截断兜底 */
 const MIN_FONT_SCALE = 0.55;
 
 /**
- * 钉关卡名几何：盒宽 = 主计时器盒宽 − 副计时器盒宽 − 间隙（外缘恰好对齐
- * 线条外缘）；文本自然宽超出盒宽时按比例缩小字号（等宽文本宽随字号线性，
- * 一次缩放即贴合）。视口缩放 / 字体加载都会改变锚宽，由 RO + resize +
- * fonts.ready 复测；本组件自身写入不回馈锚元素尺寸，无循环触发。
+ * 钉单个关卡名盒几何：盒宽 = 主计时器盒宽 − 同行计时盒宽 − 间隙（外缘恰好
+ * 对齐线条外缘）；文本自然宽超出盒宽时按比例缩小字号（等宽文本宽随字号线性，
+ * 一次缩放即贴合）。
  */
-function fitLevel(): void {
+function fitLabel(level: HTMLElement, sub: HTMLElement): void {
   const stack = stackEl.value;
   const row = rowEl.value;
-  const sub = subEl.value;
-  const level = levelEl.value;
-  if (!stack || !row || !sub || !level) return;
+  if (!stack || !row) return;
   const gap = parseFloat(getComputedStyle(row).gap) || 0;
   const avail = Math.max(0, stack.offsetWidth - sub.offsetWidth - gap);
   // 先复位为自然宽量文本（右对齐的溢出不计入 scrollWidth，须 auto 实量）
@@ -69,6 +72,15 @@ function fitLevel(): void {
   level.style.fontSize = font;
 }
 
+/**
+ * 钉两行关卡名几何（各行独立量测收缩）。视口缩放 / 字体加载都会改变锚宽，
+ * 由 RO + resize + fonts.ready 复测；本组件自身写入不回馈锚元素尺寸，无循环触发。
+ */
+function fitLevel(): void {
+  if (levelEl.value && subEl.value) fitLabel(levelEl.value, subEl.value);
+  if (prevLevelEl.value && prevSubEl.value) fitLabel(prevLevelEl.value, prevSubEl.value);
+}
+
 let ro: ResizeObserver | null = null;
 
 onMounted(() => {
@@ -76,6 +88,7 @@ onMounted(() => {
   ro = new ResizeObserver(fitLevel);
   if (stackEl.value) ro.observe(stackEl.value);
   if (subEl.value) ro.observe(subEl.value);
+  if (prevSubEl.value) ro.observe(prevSubEl.value);
   window.addEventListener("resize", fitLevel);
   // webfont 迟到会改变 ch 实宽（stack/sub 锚宽随之变，RO 兜得住；此处补一次）
   document.fonts.ready.then(fitLevel).catch(() => {});
@@ -88,7 +101,7 @@ onBeforeUnmount(() => {
 
 // 关卡名变化：DOM 文本更新后再量（post），否则量到旧文本
 watch(
-  () => props.level,
+  () => [props.level, props.prevLevel],
   () => fitLevel(),
   { flush: "post" },
 );
@@ -101,12 +114,26 @@ watch(
       <div class="main">{{ main }}</div>
       <div class="rule" />
     </div>
-    <!-- 副计时器行：小字计时 + 多关当前关卡名标签（标签盒外缘对齐线条外缘，
-         A 在左 / B 在右）；任一项缺省降为透明占位（NBSP 保基线 + 满量程宽，
-         行高恒定，主计时器与另一项位置不偏移） -->
-    <div ref="rowEl" class="sub-row">
-      <div ref="levelEl" class="level" :class="{ ghost: !level }">{{ level ?? NBSP }}</div>
-      <div ref="subEl" class="sub" :class="{ ghost: sub == null }">{{ sub ?? NBSP }}</div>
+    <!-- 副计时器两行：上行 = 当前关卡名 + 实时单段（白），下行 = 上一关 +
+         单段用时（淡紫，PB 卡弱化色）；任一元素缺省降为透明占位（NBSP 保
+         基线 + 满量程宽，行高恒定，主计时器与另一行位置不偏移） -->
+    <div class="subs">
+      <div ref="rowEl" class="sub-row">
+        <div ref="levelEl" class="level" :class="{ ghost: !level }">{{ level ?? NBSP }}</div>
+        <div ref="subEl" class="sub" :class="{ ghost: seg == null }">{{ seg ?? NBSP }}</div>
+      </div>
+      <div class="sub-row prev">
+        <div
+          ref="prevLevelEl"
+          class="level"
+          :class="{ ghost: !prevLevel }"
+        >{{ prevLevel ?? NBSP }}</div>
+        <div
+          ref="prevSubEl"
+          class="sub"
+          :class="{ ghost: prevSeg == null }"
+        >{{ prevSeg ?? NBSP }}</div>
+      </div>
     </div>
   </div>
 </template>
@@ -132,7 +159,10 @@ watch(
   width: fit-content;
 }
 .main {
-  font-size: clamp(30px, 6vh, 66px);
+  /* 主计时收缩（原 6vh）：下方要让出两行副计时的纵向空间，仍保持大字主导
+     （3.3vh × 1.1 行高 + 两行 33px 副计时 ≈ 127px，恰好收进 .timers 减
+     底部内边距的 11.9vh ≈ 128px 可用高，不向上侵入偏差条） */
+  font-size: clamp(22px, 3.3vh, 38px);
   font-weight: 700;
   line-height: 1.1;
   color: #fff;
@@ -159,6 +189,12 @@ watch(
   background: var(--syn-b);
   box-shadow: 0 0 10px rgba(255, 107, 74, 0.55);
 }
+/* 副计时器两行容器 */
+.subs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5vh;
+}
 /* 副计时器行：小字计时 + 关卡名标签（默认 A 布局——标签在外侧左） */
 .sub-row {
   display: flex;
@@ -169,8 +205,14 @@ watch(
 .timer.B .sub-row {
   flex-direction: row-reverse;
 }
-/* 当前关卡名：白色小号标签。盒宽与字号由脚本 fitLevel 钉死（外缘对齐线条
-   外缘、超余量缩字号），flex 不再伸缩；短名贴外缘、超限截断吃内侧余量 */
+/* 下行（上一关）：淡紫弱化色（同 PB 卡时间 / 名称列），无辉光 */
+.sub-row.prev .level,
+.sub-row.prev .sub {
+  color: var(--syn-text-dim);
+  text-shadow: none;
+}
+/* 关卡名：小号标签。盒宽与字号由脚本 fitLevel 钉死（外缘对齐线条外缘、
+   超余量缩字号），flex 不再伸缩；短名贴外缘、超限截断吃内侧余量 */
 .level {
   flex: none;
   font-size: clamp(12px, 2.3vh, 26px);

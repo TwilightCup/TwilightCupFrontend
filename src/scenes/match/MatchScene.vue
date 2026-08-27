@@ -5,8 +5,9 @@
  * 布局（1920×1080）：
  *   顶部：信息栏 TopBar（选手名/比分指示器/赛事·比赛标题，需求见顶栏文档）
  *   中部：双 4:3 选手画面满宽无缝并列（16:9 推流裁左右）
- *   下部：多关偏差条（单关隐藏）→ 双方计时器（主大字 + 副小字 + 多关当前
- *         关卡名标签，屏幕中轴对称）
+ *   下部：多关偏差条（单关隐藏）→ 双方计时器（主大字 + 副计时两行：上行
+ *         当前关卡名 + 实时单段（live_time segment 外推），下行上一关名 +
+ *         单段用时（淡紫），过一关上行内容沉入下行），屏幕中轴对称
  *   左下角：当前选图角标卡（裁判宣布选图后常驻，PickCornerCard）
  *   右下角：PB 角标卡（当前项目 WR + 双方 PB，PbCornerCard，speedrun 同源）
  *
@@ -76,11 +77,12 @@ function mockLiveSample(side: "A" | "B"): LiveTime {
   return {
     levelIndex: side === "A" ? MOCK_MATCH.currentLevelA : MOCK_MATCH.currentLevelB,
     totalMs: (side === "A" ? mockLiveBaseA : mockLiveBaseB) + (now - mockLiveStart),
-    segmentMs: now - mockLiveStart,
+    // 演示分段：60 秒一循环，看起来像「当前关进行中」
+    segmentMs: (now - mockLiveStart) % 60_000,
     receivedAt: now,
   };
 }
-const { liveMsA, liveMsB } = useLiveTimers(
+const { liveMsA, liveMsB, liveSegA, liveSegB } = useLiveTimers(
   (side) =>
     liveReady.value
       ? // 完赛（status 离开 IN_GAME，player_status 即时下发）即停表：忽略残存
@@ -156,12 +158,32 @@ function currentLevelName(side: "A" | "B"): string | null {
 const levelA = computed(() => currentLevelName("A"));
 const levelB = computed(() => currentLevelName("B"));
 
+// ---- 多关下行：上一关（最近完成）名 × 单段用时（上行内容过关后沉到这里） ----
+function prevLevelName(side: "A" | "B"): string | null {
+  if (!isMulti.value) return null;
+  const levels = liveReady.value
+    ? director.playerOf(side).completedLevels
+    : side === "A"
+      ? MOCK_MATCH.levelsA
+      : MOCK_MATCH.levelsB;
+  if (!levels.length) return null;
+  const idx = levels.reduce((m, l) => Math.max(m, l.level_index), -1);
+  const name = levelNames.value[idx];
+  return name ? (officialDisplayName(name) ?? name) : null;
+}
+const prevLevelA = computed(() => prevLevelName("A"));
+const prevLevelB = computed(() => prevLevelName("B"));
+
 const mainA = computed(() => formatMs(sideA.value.mainMs));
 const mainB = computed(() => formatMs(sideB.value.mainMs));
-const subA = computed(() =>
+/** 上行：当前关实时单段（live_time segment 外推；无实时数据时隐藏） */
+const segA = computed(() => (liveSegA.value == null ? null : formatMs(liveSegA.value)));
+const segB = computed(() => (liveSegB.value == null ? null : formatMs(liveSegB.value)));
+/** 下行：上一关单段用时（离线权威口径，useMatchTiming 的 subMs） */
+const prevSegA = computed(() =>
   sideA.value.subMs == null ? null : formatMs(sideA.value.subMs),
 );
-const subB = computed(() =>
+const prevSegB = computed(() =>
   sideB.value.subMs == null ? null : formatMs(sideB.value.subMs),
 );
 
@@ -375,10 +397,25 @@ onUnmounted(() => {
           <DiffBar :diff-ms="diffMs" :gap-ms="params.gapMs" />
         </section>
 
-        <!-- 双方计时器：屏幕中轴对称，A 左 B 右，沉底；多关时副行外侧带当前关卡名 -->
+        <!-- 双方计时器：屏幕中轴对称，A 左 B 右，沉底；多关副计时两行（上行
+             当前关 + 实时单段，下行上一关 + 单段用时（淡紫）） -->
         <section ref="timersEl" class="timers">
-          <PlayerTimer side="A" :main="mainA" :sub="subA" :level="levelA" />
-          <PlayerTimer side="B" :main="mainB" :sub="subB" :level="levelB" />
+          <PlayerTimer
+            side="A"
+            :main="mainA"
+            :level="levelA"
+            :seg="segA"
+            :prev-level="prevLevelA"
+            :prev-seg="prevSegA"
+          />
+          <PlayerTimer
+            side="B"
+            :main="mainB"
+            :level="levelB"
+            :seg="segB"
+            :prev-level="prevLevelB"
+            :prev-seg="prevSegB"
+          />
         </section>
 
         <!-- 左下角当前选图角标卡：宣布选图后常驻（无选图不占位）；:key 换选图
