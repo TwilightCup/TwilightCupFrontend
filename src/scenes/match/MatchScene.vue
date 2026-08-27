@@ -495,15 +495,17 @@ onUnmounted(() => {
 .diff-zone.off {
   opacity: 0;
 }
-/* 计时器：双列以画面水平中心为锚（A 列靠右、B 列靠左）。区高 14.5vh——
-   上缘即偏差条下缘、下缘即画面底；行满高拉伸（默认 stretch），配合
-   PlayerTimer 内 space-between 实现锚定：主计时贴区顶（= 偏差条底）、
-   两行副计时贴画面底。上方组件（信息栏 / 画面 / 偏差条）位置不受影响 */
+/* 计时器：双列以画面水平中心为锚（A 列靠右、B 列靠左），行底对齐——两行副
+   计时贴画面底、行顶即主计时顶。区高 17.3vh = 计时内容 ~14.2vh + 顶部条带
+   ~3.1vh：偏差值挂在偏差条下方随游标左右移动（绝对定位不占布局高度），条带
+   给它留出行空间、其底部恰好贴主计时顶（0.2vh 偏移 + 1.1 行高 × 2.6vh 字号，
+   见 DiffBar .value）；上方组件（信息栏 / 画面 / 偏差条）整体上移让出条带 */
 .timers {
-  height: 14.5vh;
+  height: 17.3vh;
   display: grid;
   grid-template-columns: 1fr 1fr;
   column-gap: 4vw;
+  align-content: end;
 }
 /* 左下角选图角标卡：贴左缘与底缘（与偏差条同口径满贴边、无下边距），右缘
    锚定 A 计时器左侧留 12px、顶缘锚定 A 计时器顶部（脚本 measureCornerBoxes

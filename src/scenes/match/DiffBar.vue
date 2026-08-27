@@ -332,13 +332,16 @@ onBeforeUnmount(() => {
   z-index: 2;
   pointer-events: none;
 }
-/* 偏差值：顶部贴紧游标底部（仅留小空隙），随游标同步移动（水平 clamp 在画面内） */
+/* 偏差值：顶部贴紧游标底部（仅留小空隙），随游标同步移动（水平 clamp 在画面内）。
+   行高定值 1.1（不随字体度量漂移）：MatchScene 按此精确预算计时区顶部给偏差值
+   留出的条带高度（偏差值底部贴主计时顶） */
 .value {
   position: absolute;
   top: calc(1.2vh + 0.2vh);
   transform: translateX(-50%);
   font-size: clamp(16px, 2.6vh, 30px);
   font-weight: 800;
+  line-height: 1.1;
   color: #fff;
   /* 数字等宽，避免跳动刷新时文本抖动 */
   font-variant-numeric: tabular-nums;
