@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
  * 选手计时器：主计时器（大字，白色等宽）+ 主计时器正下方与文本等宽的选手色
- * 线条 + 副计时器两行（纵向空间由外层 .timers 区加高容纳，主计时不缩号）。
+ * 线条 + 副计时器两行。锚定：主计时贴外层计时区顶（= 偏差条下缘），两行副
+ * 计时贴画面底，中间余量由 space-between 自然分布（主计时不缩号）。
  * 多关：上行 = 当前关卡名 + 实时单段时间（live_time segment 外推，白色），
  * 下行 = 上一关（最近完成）名 + 单段用时（淡紫 = PB 卡弱化色）；选手通过
  * 一关后上行内容沉入下行、上行换新关。两行关卡名盒外缘对齐线条外缘、盒宽
@@ -142,7 +143,9 @@ watch(
 .timer {
   display: flex;
   flex-direction: column;
-  gap: 0.6vh;
+  /* 满高撑开（外层 .timers 行拉伸）：主计时贴区顶（= 偏差条下缘），两行
+     副计时贴区底（= 画面底），中间余量自然分布——锚定关系由此钉死 */
+  justify-content: space-between;
   font-family: "JetBrains Mono Variable", ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
 }
 /* A 靠右、B 靠左，对齐画面水平中心 */
