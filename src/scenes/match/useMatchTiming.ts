@@ -1,9 +1,11 @@
 /**
  * 比赛详情场景计时中枢：双方计时器数值。
  *
- * 数据来自 director store 的 player_status（关卡完成 / 尝试明细）：多关主计时 =
- * 最近完成关卡的累计耗时（副计时 = 该关单段），单关 = 回合权威成绩（无则按
- * 计分制折算尝试明细：最快 / 平均）。
+ * 多关主计时 = live_time 实时走表（选手端每秒上报真实计时器累计读数，
+ * useLiveTimers 两次上报间墙钟外推 + 新样本矫正；无上报 / 回合外回退
+ * 最近完成关卡的累计耗时）；副计时 = 最近完成关卡的单段耗时（离线口径，
+ * 不随 live_time 走）。单关主计时 = 回合权威成绩（无则按计分制折算尝试
+ * 明细：最快 / 平均）。
  *
  * 多关偏差条不在此计算——已改由 subsegment 实时时间差驱动（subsegment_gap
  * 广播 → director store.subsegmentGap → DiffBar，双方 TwilightTimer 时间线与
@@ -14,7 +16,7 @@ import { AttemptStatus, type Attempt, type LevelTime } from "@/api/types";
 
 /** 单侧计时器数值（展示格式化交给组件层） */
 export interface SideTiming {
-  /** 主计时器：多关 = 最近完成关卡的累计耗时；单关 = 后端成绩 */
+  /** 主计时器：多关 = live_time 实时走表（回退最近完成关卡累计）；单关 = 后端成绩 */
   mainMs: number | null;
   /** 副计时器：多关 = 最近完成关卡的单段耗时；单关 = null（隐藏） */
   subMs: number | null;
@@ -24,6 +26,8 @@ export interface SideTiming {
 export interface MatchTimingSource {
   /** 多关选图模式（计时器口径） */
   isMulti: () => boolean;
+  /** 多关主计时实时走表值（live_time 外推，毫秒）；null = 无实时数据，回退离线口径 */
+  liveOf: (side: "A" | "B") => number | null;
   /** 某侧已完成关卡列表（多关） */
   levelsOf: (side: "A" | "B") => LevelTime[];
   /** 某侧尝试明细（单关） */
@@ -68,8 +72,15 @@ export function useMatchTiming(src: MatchTimingSource): {
 
   const method = computed<"FASTEST" | "AVERAGE">(() => src.scoring() || "FASTEST");
 
-  function multiSide(last: { cum: number; seg: number } | null): SideTiming {
-    return { mainMs: last ? last.cum : 0, subMs: last ? last.seg : null };
+  function multiSide(
+    side: "A" | "B",
+    last: { cum: number; seg: number } | null,
+  ): SideTiming {
+    return {
+      // 实时走表优先；无 live_time（插件未升级 / 回合外）回退离线累计口径
+      mainMs: src.liveOf(side) ?? (last ? last.cum : 0),
+      subMs: last ? last.seg : null,
+    };
   }
   function singleSide(side: "A" | "B"): SideTiming {
     return {
@@ -77,8 +88,8 @@ export function useMatchTiming(src: MatchTimingSource): {
       subMs: null,
     };
   }
-  const sideA = computed(() => (src.isMulti() ? multiSide(lastA.value) : singleSide("A")));
-  const sideB = computed(() => (src.isMulti() ? multiSide(lastB.value) : singleSide("B")));
+  const sideA = computed(() => (src.isMulti() ? multiSide("A", lastA.value) : singleSide("A")));
+  const sideB = computed(() => (src.isMulti() ? multiSide("B", lastB.value) : singleSide("B")));
 
   return { sideA, sideB };
 }

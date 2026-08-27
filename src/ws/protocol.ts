@@ -372,6 +372,27 @@ export interface SrvSubsegmentGap {
   /** hit_ms − sample_ms：>0 = 穿越方落后 */
   gap_ms: number;
 }
+/**
+ * 选手实时计时中转（每秒一条；仅裁判与全体导播收到，选手双方互不感知）。
+ * 内容取自选手端真实计时器（TwilightTimer，与官方计分同源）当前读数：
+ * total_ms = 回合累计（已完成关之和 + 当前关进行中），segment_ms = 当前分段
+ * 进行时长（自该关加载沿起算）。回合活跃期间持续（含加载 / 出生阶段），
+ * 回合中裁判/导播连入时握手补发双方最近一条；回合结束服务端即清空。
+ * 消息无时间戳，陈旧度用本地接收时间判断。原始上报（C→S live_time）
+ * 仅选手发送，前端不构造。
+ * 详见 ignored/需求-live_time实时计时中转.md。
+ */
+export interface SrvLiveTime {
+  type: "live_time";
+  seat: SeatName;
+  round_id: string;
+  /** 该选手当前所在合集关卡（0 基，双方索引一致） */
+  level_index: number;
+  /** 回合累计毫秒 */
+  total_ms: number;
+  /** 当前分段进行时长（毫秒） */
+  segment_ms: number;
+}
 export interface SrvRoundResult {
   type: "round_result";
   round_id: string;
@@ -450,6 +471,7 @@ export type ServerMessage =
   | SrvPlayerStatus
   | SrvLevelTimeUpdate
   | SrvSubsegmentGap
+  | SrvLiveTime
   | SrvRoundResult
   | SrvCumulativeScore
   | SrvMatchEnd

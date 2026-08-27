@@ -66,6 +66,16 @@ export interface DirectorChatLine {
   text: string;
 }
 
+/** 某席最近一条 live_time 实时计时读数（receivedAt = 本地接收时刻） */
+export interface LiveTime {
+  levelIndex: number;
+  /** 回合累计毫秒（与官方计分同一条时间线） */
+  totalMs: number;
+  /** 当前分段进行时长（自该关加载沿起算） */
+  segmentMs: number;
+  receivedAt: number;
+}
+
 const MAX_LOG = 200;
 
 function clock(): string {
@@ -159,6 +169,15 @@ export const useDirectorStore = defineStore("director", () => {
    */
   const subsegmentGap = ref<number | null>(null);
 
+  /**
+   * 双席最近一条 live_time 实时计时（每秒上报，仅裁判/导播收到，需求见
+   * ignored/需求-live_time实时计时中转.md）。消息无时间戳，receivedAt 记本地
+   * 接收时刻供场景页判断陈旧度。回合级内存态：与 subsegmentGap 同生命周期
+   * （服务端回合结束即清空且断线不补发，仅握手时补发最近一条）。
+   */
+  const liveTimeA = ref<LiveTime | null>(null);
+  const liveTimeB = ref<LiveTime | null>(null);
+
   socket.onStatusChange = (s) => {
     connStatus.value = s;
   };
@@ -174,6 +193,13 @@ export const useDirectorStore = defineStore("director", () => {
   function applyPlayer(s: SeatName, live: PlayerLive): void {
     if (s === "PLAYER_A") playerA.value = live;
     else if (s === "PLAYER_B") playerB.value = live;
+  }
+
+  /** 回合级实时遥测清空（subsegment 差距 + 双席 live_time，随回合边界重置） */
+  function clearRoundTelemetry(): void {
+    subsegmentGap.value = null;
+    liveTimeA.value = null;
+    liveTimeB.value = null;
   }
 
   function handle(msg: ServerMessage): void {
@@ -192,9 +218,9 @@ export const useDirectorStore = defineStore("director", () => {
         authError.value = msg.msg;
         break;
       case "phase_change":
-        // 离开 IN_ROUND：服务端已清空回合级 subsegment 数据，前端同步清掉差距显示
+        // 离开 IN_ROUND：服务端已清空回合级 subsegment / live_time 数据，前端同步清掉
         if (phase.value === MatchPhase.IN_ROUND && msg.phase !== MatchPhase.IN_ROUND) {
-          subsegmentGap.value = null;
+          clearRoundTelemetry();
         }
         phase.value = msg.phase;
         break;
@@ -232,7 +258,7 @@ export const useDirectorStore = defineStore("director", () => {
         playerB.value = freshPlayer();
         matchWinner.value = null;
         lastResult.value = null;
-        subsegmentGap.value = null;
+        clearRoundTelemetry();
         break;
       }
       case "round_start":
@@ -246,7 +272,7 @@ export const useDirectorStore = defineStore("director", () => {
         playerB.value = freshPlayer();
         matchWinner.value = null;
         lastResult.value = null;
-        subsegmentGap.value = null;
+        clearRoundTelemetry();
         break;
       case "player_status":
         applyPlayer(msg.seat, {
@@ -265,6 +291,22 @@ export const useDirectorStore = defineStore("director", () => {
         subsegmentGap.value =
           // gap_ms >0 = 穿越方（hit_seat）落后 → 归一为偏差条口径「正 = B 落后」
           msg.hit_seat === "PLAYER_B" ? msg.gap_ms : -msg.gap_ms;
+        break;
+      }
+      case "live_time": {
+        // 双席实时计时（每秒）：按席暂存最近一条供场景页平滑外推走表，每条
+        // 到达即重新锚定。同 subsegment_gap 按 round_id 防御过期回合串扰
+        // （回合 id 未知时放行——中途接入尚未收到 round_start 也能立即对齐）。
+        const cur = currentRound.value?.roundId;
+        if (cur && msg.round_id !== cur) break;
+        const sample: LiveTime = {
+          levelIndex: msg.level_index,
+          totalMs: msg.total_ms,
+          segmentMs: msg.segment_ms,
+          receivedAt: Date.now(),
+        };
+        if (msg.seat === "PLAYER_A") liveTimeA.value = sample;
+        else if (msg.seat === "PLAYER_B") liveTimeB.value = sample;
         break;
       }
       case "round_result":
@@ -480,6 +522,10 @@ export const useDirectorStore = defineStore("director", () => {
   function playerOf(side: "A" | "B"): PlayerLive {
     return side === "A" ? playerA.value : playerB.value;
   }
+  /** 某席最近一条 live_time 实时计时（无上报 / 回合外为 null） */
+  function liveTimeOf(side: "A" | "B"): LiveTime | null {
+    return side === "A" ? liveTimeA.value : liveTimeB.value;
+  }
 
   /**
    * 场景独立入口页链接（stage.html / mappool.html 等，页面名不带斜杠）：
@@ -544,6 +590,9 @@ export const useDirectorStore = defineStore("director", () => {
     draft,
     // subsegment 实时时间差（偏差条数据源）
     subsegmentGap,
+    // 双席 live_time 实时计时（主计时器实时走表数据源）
+    liveTimeA,
+    liveTimeB,
     // 派生 / 动作
     isMulti,
     stageUrl,
@@ -558,5 +607,6 @@ export const useDirectorStore = defineStore("director", () => {
     disconnect,
     nameOf,
     playerOf,
+    liveTimeOf,
   };
 });

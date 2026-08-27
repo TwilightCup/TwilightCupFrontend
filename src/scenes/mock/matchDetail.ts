@@ -23,7 +23,8 @@ export const MOCK_MATCH = {
   /** 双方当前所处关卡序号（0 起；与下方 levels* 已完成三关衔接，双方同在第 4 关） */
   currentLevelA: 3,
   currentLevelB: 3,
-  /** 双方已完成关卡（含累计用时 total_ms），供偏差条 / 计时器计算 */
+  /** 双方已完成关卡（含累计用时 total_ms）：偏差条 / 离线口径计时用，
+   *  累计和同时是 mock 实时主计时走表（MatchScene 的 mockLiveSample）的起始值 */
   levelsA: [
     { level_index: 0, time_ms: 42180, total_ms: 42180 },
     { level_index: 1, time_ms: 38900, total_ms: 81080 },

@@ -11,7 +11,9 @@
  *   右下角：PB 角标卡（当前项目 WR + 双方 PB，PbCornerCard，speedrun 同源）
  *
  * 数据：onMounted 连 WS（director.connect），WS 断 / 无 match → mock 兜底（绝不黑屏）。
- * 计时口径见 useMatchTiming；偏差条由 subsegment 实时时间差驱动（subsegment_gap
+ * 计时口径见 useMatchTiming：多关主计时 = live_time 实时走表（每秒上报矫正 +
+ * 墙钟外推，见 useLiveTimers / ignored/需求-live_time实时计时中转.md），无实时
+ * 数据回退离线累计口径。偏差条由 subsegment 实时时间差驱动（subsegment_gap
  * 广播 → director.subsegmentGap，最近一条覆盖、回合级生命周期，见
  * ignored/需求-subsegment实时时间差追踪与前端接入.md）。导播配置（RTMP/HLS）走
  * useDirectorConfig（localStorage），?edit=1 唤出面板。
@@ -35,6 +37,8 @@ import { MOCK_LEADERBOARD, MOCK_SPEEDRUN_A, MOCK_SPEEDRUN_B } from "@/scenes/moc
 import { useDraftStatus, retryOf } from "@/scenes/mappool/useDraftStatus";
 import TopBar from "@/scenes/components/TopBar.vue";
 import { useMatchTiming } from "./useMatchTiming";
+import { useLiveTimers } from "./useLiveTimers";
+import type { LiveTime } from "@/stores/director";
 import DiffBar from "./DiffBar.vue";
 import PlayerTimer from "./PlayerTimer.vue";
 import StreamFrame from "./StreamFrame.vue";
@@ -61,8 +65,28 @@ const isMulti = computed(() => {
   return director.currentRound ? director.currentRound.type === PickType.MULTI : true;
 });
 
+// ---- 多关主计时实时走表：live_time 每秒上报（director store 按席暂存）→
+//      useLiveTimers 墙钟外推 + 新样本矫正；mock 模式合成「自挂载起从 mock
+//      累计值继续走」的样本（receivedAt 恒为当下，演示平滑走表不触发陈旧冻结） ----
+const mockLiveStart = Date.now();
+const mockLiveBaseA = MOCK_MATCH.levelsA.reduce((s, l) => s + l.time_ms, 0);
+const mockLiveBaseB = MOCK_MATCH.levelsB.reduce((s, l) => s + l.time_ms, 0);
+function mockLiveSample(side: "A" | "B"): LiveTime {
+  const now = Date.now();
+  return {
+    levelIndex: side === "A" ? MOCK_MATCH.currentLevelA : MOCK_MATCH.currentLevelB,
+    totalMs: (side === "A" ? mockLiveBaseA : mockLiveBaseB) + (now - mockLiveStart),
+    segmentMs: now - mockLiveStart,
+    receivedAt: now,
+  };
+}
+const { liveMsA, liveMsB } = useLiveTimers((side) =>
+  liveReady.value ? director.liveTimeOf(side) : mockLiveSample(side),
+);
+
 const { sideA, sideB } = useMatchTiming({
   isMulti: () => isMulti.value,
+  liveOf: (side) => (side === "A" ? liveMsA.value : liveMsB.value),
   levelsOf: (side) =>
     liveReady.value
       ? director.playerOf(side).completedLevels
