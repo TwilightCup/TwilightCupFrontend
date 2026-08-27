@@ -13,6 +13,13 @@
  */
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 
+/**
+ * 透明占位字符（不间断空格）：空 flex 项没有文本基线，浏览器按盒底缘合成
+ * 基线，baseline 行会被撑高——关卡名出现 / 副计时出值瞬间主计时器与线条被
+ * 顶起跳位。占位用 NBSP 保住真实基线，行高在空 / 有值各组合下恒定。
+ */
+const NBSP = "\u00A0";
+
 const props = defineProps<{
   side: "A" | "B";
   /** 主计时器文本（已格式化） */
@@ -95,11 +102,11 @@ watch(
       <div class="rule" />
     </div>
     <!-- 副计时器行：小字计时 + 多关当前关卡名标签（标签盒外缘对齐线条外缘，
-         A 在左 / B 在右）；任一项缺省降为透明占位（保留行高与满量程宽，
-         主计时器与另一项位置不偏移） -->
+         A 在左 / B 在右）；任一项缺省降为透明占位（NBSP 保基线 + 满量程宽，
+         行高恒定，主计时器与另一项位置不偏移） -->
     <div ref="rowEl" class="sub-row">
-      <div ref="levelEl" class="level" :class="{ ghost: !level }">{{ level ?? "" }}</div>
-      <div ref="subEl" class="sub" :class="{ ghost: sub == null }">{{ sub }}</div>
+      <div ref="levelEl" class="level" :class="{ ghost: !level }">{{ level ?? NBSP }}</div>
+      <div ref="subEl" class="sub" :class="{ ghost: sub == null }">{{ sub ?? NBSP }}</div>
     </div>
   </div>
 </template>
