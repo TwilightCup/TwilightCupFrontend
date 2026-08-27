@@ -80,16 +80,22 @@ function mockLiveSample(side: "A" | "B"): LiveTime {
     receivedAt: now,
   };
 }
-const { liveMsA, liveMsB } = useLiveTimers((side) =>
-  liveReady.value
-    ? // 完赛 / 弃权（status 离开 IN_GAME，player_status 即时下发）即停表：忽略
-      // 残存样本走离线权威口径——完赛 = 计时器最终累计读数（completed_levels
-      // 末关 total_ms，与 live_time 同一时间线）。否则插件完赛后停报，外推会
-      // 多走 STALE_MS（数秒）才冻结，停表值失真
-      director.playerOf(side).status === PlayerStatus.IN_GAME
+const { liveMsA, liveMsB } = useLiveTimers(
+  (side) =>
+    liveReady.value
+      ? // 完赛（status 离开 IN_GAME，player_status 即时下发）即停表：忽略残存
+        // 样本走离线权威口径——完赛 = 计时器最终累计读数（completed_levels
+        // 末关 total_ms，与 live_time 同一时间线）。否则插件完赛后停报，外推会
+        // 多走 STALE_MS（数秒）才冻结，停表值失真。弃权不停在此处（见下方
+        // holdOf，原地冻结而非回跳累计）
+        director.playerOf(side).status === PlayerStatus.IN_GAME
         ? director.liveTimeOf(side)
         : null
-    : mockLiveSample(side),
+      : mockLiveSample(side),
+  // 弃权（FORFEITED）→ 原地冻结：可能没有任何完成时间，回退离线累计会把
+  // 已走的主计时回跳一大截，保持停表瞬间的读数即可（不过冲不回跳）
+  (side) =>
+    liveReady.value && director.playerOf(side).status === PlayerStatus.FORFEITED,
 );
 
 const { sideA, sideB } = useMatchTiming({

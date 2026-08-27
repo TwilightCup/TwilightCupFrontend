@@ -10,9 +10,11 @@
  * - 平滑矫正：网络抖动会让新锚点的外推值比已显示值倒退几十毫秒，小倒退
  *   （≤ SMOOTH_MS）保持已显示值等外推追上（计时器不回跳），明显倒退
  *   （回合重置等权威修正）直接跳变采纳；
- * - 样本为 null（回合外 / 一方无上报 / 该席已完赛弃权由上层置 null——完赛即
+ * - 样本为 null（回合外 / 一方无上报 / 该席已完赛由上层置 null——完赛即
  *   停表于计时器最终累计读数，杜绝停报后外推多走数秒）该席显示 null，
- *   由上层回退离线口径。
+ *   由上层回退离线口径；
+ * - 原地冻结（holdOf，弃权）：可能没有任何完成时间，回退离线累计会把已走
+ *   的主计时回跳一大截——保持停表瞬间的读数，不外推不过冲不回跳。
  */
 import { onBeforeUnmount, onMounted, ref, type Ref } from "vue";
 import type { LiveTime } from "@/stores/director";
@@ -26,6 +28,8 @@ const SMOOTH_MS = 500;
 
 export function useLiveTimers(
   sampleOf: (side: "A" | "B") => LiveTime | null,
+  /** 某席是否原地冻结（弃权：无完成时间，保持停表瞬间读数） */
+  holdOf?: (side: "A" | "B") => boolean,
 ): { liveMsA: Ref<number | null>; liveMsB: Ref<number | null> } {
   function makeSide(side: "A" | "B") {
     const liveMs = ref<number | null>(null);
@@ -34,6 +38,8 @@ export function useLiveTimers(
     return {
       liveMs,
       tick(now: number): void {
+        // 原地冻结：跳过本轮全部更新，保持最后一次显示值
+        if (holdOf?.(side)) return;
         const s = sampleOf(side);
         if (!s) {
           shown = null;
