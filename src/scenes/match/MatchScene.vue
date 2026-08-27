@@ -19,7 +19,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useDirectorStore } from "@/stores/director";
-import { CategoryKind, PickType } from "@/api/types";
+import { CategoryKind, MatchPhase, PickType, PlayerStatus } from "@/api/types";
 import { formatMs } from "@/utils/format";
 import { categoryKindOf } from "@/utils/mappool";
 import { officialDisplayName } from "@/utils/officialLevels";
@@ -89,8 +89,10 @@ const diffMs = computed(() =>
 );
 
 // ---- 多关当前关卡名：player_status 的 current_level_index × 合集关卡名序列
-//      （消息级 collection 已展开为关卡名，官方展示名口径；序号越界 = 未开赛 /
-//        已冲线 → null 隐藏，单关恒 null） ----
+//      （消息级 collection 已展开为关卡名，官方展示名口径）。选手没在关卡时
+//      隐藏：仅回合进行中（phase=IN_ROUND）且该选手仍在游戏内（status=IN_GAME，
+//      完赛 COMPLETED / 弃权 FORFEITED 均不算）且序号未越界（越界 = 已冲线）
+//      才显示；PREP / 判决后 / 单关恒 null ----
 const levelNames = computed<string[]>(() => {
   if (!liveReady.value) return MOCK_MATCH.levelNames;
   const raw = director.currentRound?.collection.raw as { levels?: unknown } | undefined;
@@ -99,6 +101,10 @@ const levelNames = computed<string[]>(() => {
 
 function currentLevelName(side: "A" | "B"): string | null {
   if (!isMulti.value) return null;
+  if (liveReady.value) {
+    if (director.phase !== MatchPhase.IN_ROUND) return null;
+    if (director.playerOf(side).status !== PlayerStatus.IN_GAME) return null;
+  }
   const idx = liveReady.value
     ? director.playerOf(side).currentLevelIndex
     : side === "A"

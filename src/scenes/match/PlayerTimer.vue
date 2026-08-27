@@ -14,7 +14,8 @@ defineProps<{
   main: string;
   /** 副计时器文本（已格式化）；null = 隐藏 */
   sub?: string | null;
-  /** 多关：选手当前所处关卡名（副行外侧随行显示）；null = 隐藏 */
+  /** 多关：选手当前所处关卡名（仅回合进行中且该选手仍在游戏内时由父级传入，
+   *  副行外侧随行显示）；null = 隐藏 */
   level?: string | null;
 }>();
 </script>
@@ -27,7 +28,7 @@ defineProps<{
       <div class="rule" />
     </div>
     <!-- 副计时器行：小字计时 + 多关当前关卡名标签（标签在行外侧：A 左 / B 右）；
-         任一项缺省降为透明占位（保留行高，避免主计时器位置偏移） -->
+         任一项缺省降为透明占位（保留行高与满量程宽，主计时器与另一项位置不偏移） -->
     <div class="sub-row">
       <div class="level" :class="{ ghost: !level }">{{ level ?? "" }}</div>
       <div class="sub" :class="{ ghost: sub == null }">{{ sub }}</div>
@@ -93,12 +94,12 @@ defineProps<{
 .timer.B .sub-row {
   flex-direction: row-reverse;
 }
-/* 当前关卡名：比计时小字低一档的暗色标签；超长截断（行宽不得越过主计时器
-   盒外缘——左/右下角角标卡锚定在那里） */
+/* 当前关卡名：白色小号标签；超长截断（行宽不得越过主计时器盒外缘——
+   左/右下角角标卡锚定在那里） */
 .level {
   font-size: clamp(12px, 2.3vh, 26px);
   font-weight: 800;
-  color: var(--syn-text-dim);
+  color: #fff;
   line-height: 1.1;
   min-height: 1.1em; /* 空内容时保留行高占位 */
   max-width: 12ch;
@@ -117,6 +118,9 @@ defineProps<{
   color: #fff;
   line-height: 1.1;
   min-height: 1.1em; /* 空内容时保留行高占位 */
+  /* 隐藏时也按满量程（MM:SS.mmm = 9 字符）占宽：关卡名标签锚在副计时器
+     外侧，首条成绩出现时标签不横向跳动（同 .main 的 min-width 手法） */
+  min-width: 9ch;
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
   transition: opacity 0.3s ease;
 }
