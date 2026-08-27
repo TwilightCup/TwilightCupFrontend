@@ -495,9 +495,11 @@ onUnmounted(() => {
 .diff-zone.off {
   opacity: 0;
 }
-/* 计时器：双列以画面水平中心为锚（A 列靠右、B 列靠左），锚定画面底部 */
+/* 计时器：双列以画面水平中心为锚（A 列靠右、B 列靠左），锚定画面底部。
+   高度按内容满配：主计时 6vh 原字号 + 两行副计时（内含 2.6vh 底部留白），
+   差额由上方 top-zone（flex:1）吸收 */
 .timers {
-  height: 14.5vh;
+  height: 17.4vh;
   display: grid;
   grid-template-columns: 1fr 1fr;
   column-gap: 4vw;
