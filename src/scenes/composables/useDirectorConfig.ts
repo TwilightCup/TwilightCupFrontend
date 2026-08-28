@@ -1,5 +1,5 @@
 /**
- * 导播场景页配置持久化（RTMP/HLS 流地址）。
+ * 导播场景页配置持久化（RTMP/HLS 流地址、画面显隐 / 计时显示延迟等实时控制）。
  *
  * 仿 src/stores/draft.ts 的 localStorage 模式：按 matchId 键控（无 matchId 用 "_global_"），
  * JSON 序列化，try/catch 容错。导播在编辑面板填一次，刷新 / OBS 重开即恢复。
@@ -24,6 +24,12 @@ export interface DirectorConfig {
   /** 重新拉流计数（自增即触发该侧播放器重挂：卡顿时应急刷新） */
   refreshA: number;
   refreshB: number;
+  /** 计时显示延迟（秒）：选手画面常有数秒延迟而计时近实时，把该侧计时器
+   *  整块（主计时 + 两行副计时）回放对齐画面；0 = 实时直通 */
+  delayA: number;
+  delayB: number;
+  /** 偏差条显示延迟（秒），同上（通常对齐较慢一侧的画面） */
+  delayDiff: number;
 }
 
 const EMPTY: DirectorConfig = {
@@ -35,6 +41,9 @@ const EMPTY: DirectorConfig = {
   hideB: false,
   refreshA: 0,
   refreshB: 0,
+  delayA: 0,
+  delayB: 0,
+  delayDiff: 0,
 };
 
 const PREFIX = "twc-director-cfg";
@@ -95,6 +104,9 @@ export function useDirectorConfig() {
       hideB: stored.hideB,
       refreshA: stored.refreshA,
       refreshB: stored.refreshB,
+      delayA: stored.delayA,
+      delayB: stored.delayB,
+      delayDiff: stored.delayDiff,
     };
     Object.assign(config, merged);
     write(matchId, merged);

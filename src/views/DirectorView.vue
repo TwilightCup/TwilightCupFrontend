@@ -95,6 +95,9 @@ const cfgForm = reactive<DirectorConfig>({
   hideB: false,
   refreshA: 0,
   refreshB: 0,
+  delayA: 0,
+  delayB: 0,
+  delayDiff: 0,
 });
 const cfgFields: { key: keyof DirectorConfig; label: string }[] = [
   { key: "hlsA", label: "scenes.edit.hlsA" },
@@ -150,6 +153,13 @@ function refreshStream(side: "A" | "B"): void {
   const next = cfgForm[key] + 1;
   cfgForm[key] = next;
   pushConfig({ [key]: next } as Partial<DirectorConfig>);
+}
+
+/** 计时显示延迟（秒）：把比赛详情场景的计时器 / 偏差条回放对齐有延迟的
+ *  选手画面；改动即时保存并广播（与显示开关同通道，不等「保存」按钮） */
+function pushDelay(key: "delayA" | "delayB" | "delayDiff"): void {
+  if (!director.matchId) return;
+  pushConfig({ [key]: cfgForm[key] } as Partial<DirectorConfig>);
 }
 
 // 其他控制台（同账号另一浏览器）保存的配置广播过来：并入本地面板与舞台链接
@@ -654,6 +664,60 @@ onUnmounted(() => {
           </div>
         </div>
 
+        <!-- 计时显示延迟：比赛详情场景的计时器 / 偏差条按各画面延迟回放对齐
+             （秒，−/+ 以 0.5 步进；改动即时广播到舞台与场景，与显示开关同通道） -->
+        <div class="card">
+          <div class="card-title">{{ $t("directorView.delayTitle") }}</div>
+          <p class="hint">{{ $t("directorView.delayHint") }}</p>
+          <div class="delay-ctl">
+            <div class="ctl-side">
+              <span class="lbl tc-a">A · {{ director.nameOf("A") }}</span>
+              <el-input-number
+                v-model="cfgForm.delayA"
+                :min="0"
+                :max="60"
+                :step="0.5"
+                :precision="1"
+                :step-strict="true"
+                size="small"
+                class="delay-num"
+                :disabled="!director.matchId"
+                @change="pushDelay('delayA')"
+              />
+            </div>
+            <div class="ctl-side">
+              <span class="lbl tc-b">B · {{ director.nameOf("B") }}</span>
+              <el-input-number
+                v-model="cfgForm.delayB"
+                :min="0"
+                :max="60"
+                :step="0.5"
+                :precision="1"
+                :step-strict="true"
+                size="small"
+                class="delay-num"
+                :disabled="!director.matchId"
+                @change="pushDelay('delayB')"
+              />
+            </div>
+            <div class="ctl-side">
+              <span class="lbl">{{ $t("directorView.delayDiff") }}</span>
+              <el-input-number
+                v-model="cfgForm.delayDiff"
+                :min="0"
+                :max="60"
+                :step="0.5"
+                :precision="1"
+                :step-strict="true"
+                size="small"
+                class="delay-num"
+                :disabled="!director.matchId"
+                @change="pushDelay('delayDiff')"
+              />
+            </div>
+          </div>
+        </div>
+
         <!-- 当前回合 + 进度：左右并列 -->
         <div class="card-row">
           <!-- 当前回合 -->
@@ -927,6 +991,16 @@ onUnmounted(() => {
   text-overflow: ellipsis;
 }
 .ctl-side .el-button {
+  margin-left: auto;
+}
+/* 计时显示延迟面板：三行（A / B / 偏差条），标签左、数字输入右 */
+.delay-ctl {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.delay-num {
+  width: 128px;
   margin-left: auto;
 }
 .cfg-foot {

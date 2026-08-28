@@ -19,7 +19,9 @@
  * 数据回退离线累计口径。偏差条由 subsegment 实时时间差驱动（subsegment_gap
  * 广播 → director.subsegmentGap，最近一条覆盖、回合级生命周期，见
  * ignored/需求-subsegment实时时间差追踪与前端接入.md）。导播配置（RTMP/HLS）走
- * useDirectorConfig（localStorage），?edit=1 唤出面板。
+ * useDirectorConfig（localStorage），?edit=1 唤出面板。计时显示延迟（对齐有延迟
+ * 的选手画面，控制台 0.5s 步进设置、config_update 实时下发）由 useDelayedRef
+ * 按 delayA/delayB/delayDiff 回放实现。
  */
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -41,6 +43,7 @@ import { useDraftStatus, retryOf } from "@/scenes/mappool/useDraftStatus";
 import TopBar from "@/scenes/components/TopBar.vue";
 import { useMatchTiming } from "./useMatchTiming";
 import { useLiveTimers } from "./useLiveTimers";
+import { useDelayedRef } from "./useDelayedRef";
 import type { LiveTime } from "@/stores/director";
 import DiffBar from "./DiffBar.vue";
 import PlayerTimer from "./PlayerTimer.vue";
@@ -188,6 +191,32 @@ const prevSegA = computed(() =>
 const prevSegB = computed(() =>
   sideB.value.subMs == null ? null : formatMs(sideB.value.subMs),
 );
+
+// ---- 计时显示延迟回放（useDelayedRef）：选手画面常有数秒延迟而计时近实时，
+//      把该席计时器整块（主计时 + 两行副计时）与偏差条各自回放 delay 秒对齐
+//      画面。delay 秒来自导播配置（控制台 0.5 步进调整，config_update 实时下发，
+//      见 useDirectorConfig）；0 = 实时直通，调大即刻回跳到 delay 秒前 ----
+const timerAV = useDelayedRef(
+  () => ({
+    main: mainA.value,
+    level: levelA.value,
+    seg: segA.value,
+    prevLevel: prevLevelA.value,
+    prevSeg: prevSegA.value,
+  }),
+  () => config.delayA * 1000,
+);
+const timerBV = useDelayedRef(
+  () => ({
+    main: mainB.value,
+    level: levelB.value,
+    seg: segB.value,
+    prevLevel: prevLevelB.value,
+    prevSeg: prevSegB.value,
+  }),
+  () => config.delayB * 1000,
+);
+const diffV = useDelayedRef(() => diffMs.value, () => config.delayDiff * 1000);
 
 // ---- 左下角当前选图角标卡（pick_announced → currentRound.pick 常驻展示） ----
 // mock 演示选图：图池 mock 的 CT 选图（带词条与重试，角标各要素齐备）
@@ -399,9 +428,10 @@ onUnmounted(() => {
           />
         </section>
 
-        <!-- 多关偏差条（单关模式降为透明占位，不参与布局收缩） -->
+        <!-- 多关偏差条（单关模式降为透明占位，不参与布局收缩）；diffV 为
+             按导播配置回放后的显示值（对齐画面延迟） -->
         <section class="diff-zone" :class="{ off: !isMulti }">
-          <DiffBar :diff-ms="diffMs" :gap-ms="params.gapMs" />
+          <DiffBar :diff-ms="diffV" :gap-ms="params.gapMs" />
         </section>
 
         <!-- WR/PB 背景板：同 neon-panel 样式（直角边），横向铺满画面、顶缘 =
@@ -411,23 +441,24 @@ onUnmounted(() => {
         <div v-if="pbCardVisible" class="pb-backdrop neon-panel" :style="pbBackStyle" />
 
         <!-- 双方计时器：屏幕中轴对称，A 左 B 右，沉底；多关副计时两行（上行
-             当前关 + 实时单段，下行上一关 + 单段用时（淡紫）） -->
+             当前关 + 实时单段，下行上一关 + 单段用时（淡紫））。timerA/V 为按
+             导播配置回放后的显示值（对齐各侧画面延迟） -->
         <section ref="timersEl" class="timers">
           <PlayerTimer
             side="A"
-            :main="mainA"
-            :level="levelA"
-            :seg="segA"
-            :prev-level="prevLevelA"
-            :prev-seg="prevSegA"
+            :main="timerAV.main"
+            :level="timerAV.level"
+            :seg="timerAV.seg"
+            :prev-level="timerAV.prevLevel"
+            :prev-seg="timerAV.prevSeg"
           />
           <PlayerTimer
             side="B"
-            :main="mainB"
-            :level="levelB"
-            :seg="segB"
-            :prev-level="prevLevelB"
-            :prev-seg="prevSegB"
+            :main="timerBV.main"
+            :level="timerBV.level"
+            :seg="timerBV.seg"
+            :prev-level="timerBV.prevLevel"
+            :prev-seg="timerBV.prevSeg"
           />
         </section>
 
