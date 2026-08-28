@@ -5,7 +5,7 @@
  * Chromecast / 本地设备探测会被 Chrome Local Network Access 拦截，显示
  * “此连接已被阻止，因为它是公共页面发起的，旨在连接到您本地网络上的设备
  * 或服务器”。这里统一把常见的 YouTube 分享链接转换成官方 iframe 嵌入页
- * `youtube.com/embed/{id}`，避免完整页面触发本地网络探测。
+ * `youtube-nocookie.com/embed/{id}`，避免完整页面触发本地网络探测。
  */
 
 const YOUTUBE_VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
@@ -76,19 +76,26 @@ export function toYouTubeEmbedUrl(input: string): string {
   // 频道直播页：/live_stream?channel=... → /embed/live_stream?channel=...
   const channel = parseYouTubeLiveStreamChannel(input);
   if (channel) {
-    if (/\/embed\/live_stream\?/i.test(input.trim())) return input;
-    return `https://www.youtube.com/embed/live_stream?channel=${encodeURIComponent(channel)}`;
+    const suffix = input.trim().includes("?")
+      ? input.trim().slice(input.trim().indexOf("?"))
+      : "";
+    if (/\/embed\/live_stream\?/i.test(input.trim())) {
+      // 已嵌入页也统一换到 nocookie 域，尽量避开完整播放器的本地设备探测
+      return `https://www.youtube-nocookie.com/embed/live_stream${suffix}`;
+    }
+    return `https://www.youtube-nocookie.com/embed/live_stream?channel=${encodeURIComponent(channel)}`;
   }
 
   const id = parseYouTubeVideoId(input);
   if (!id) return input;
 
-  // 已经是 /embed/ 页时保留原始 URL（含用户自带的 autoplay、mute 等参数）
+  // 已是 /embed/ 页时保留用户自带参数，只把域统一换成 privacy-enhanced 域
   if (/^(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com|youtube-nocookie\.com)\/embed\//i.test(
     input.trim(),
   )) {
-    return input;
+    const q = input.trim().includes("?") ? input.trim().slice(input.trim().indexOf("?")) : "";
+    return `https://www.youtube-nocookie.com/embed/${id}${q}`;
   }
 
-  return `https://www.youtube.com/embed/${id}`;
+  return `https://www.youtube-nocookie.com/embed/${id}`;
 }

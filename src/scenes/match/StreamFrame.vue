@@ -224,7 +224,7 @@ onBeforeUnmount(() => {
       :key="refreshNonce ?? 0"
       :src="embedSrc"
       class="video"
-      allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+      allow="autoplay; fullscreen; encrypted-media; picture-in-picture; local-network; local-network-access"
       allowfullscreen
       frameborder="0"
       referrerpolicy="no-referrer-when-downgrade"

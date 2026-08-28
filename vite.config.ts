@@ -13,6 +13,12 @@ const ALLOWED_HOSTS: true | string[] = process.env.TWILIGHT_ALLOWED_HOST
   ? [process.env.TWILIGHT_ALLOWED_HOST]
   : true;
 
+// Chrome 142+ 的 Local Network Access 默认不允许跨域 iframe 访问本地网络；
+// 导播页需要给 YouTube 嵌入页放行该权限，避免“公共页面连接本地网络被阻止”。
+const LNA_HEADERS = {
+  "Permissions-Policy": "local-network=*, local-network-access=*",
+};
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [vue()],
@@ -25,6 +31,7 @@ export default defineConfig({
     host: true,
     port: 5173,
     allowedHosts: ALLOWED_HOSTS,
+    headers: LNA_HEADERS,
     proxy: {
       // REST：浏览器请求 /api/...，代理去掉 /api 前缀后转发给后端
       "/api": {
@@ -44,6 +51,7 @@ export default defineConfig({
     host: true,
     port: 4173,
     allowedHosts: ALLOWED_HOSTS,
+    headers: LNA_HEADERS,
   },
   build: {
     // 构建产物放 static/：默认的 assets/ 会与对象存储反代路径 /assets/ 冲突
