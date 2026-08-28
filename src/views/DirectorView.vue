@@ -692,35 +692,38 @@ onUnmounted(() => {
           <div class="card">
             <div class="card-title">{{ $t("directorView.delayTitle") }}</div>
             <div class="delay-ctl">
-              <div class="ctl-side">
-                <span class="lbl tc-a">A · {{ director.nameOf("A") }}</span>
-                <el-input-number
-                  v-model="cfgForm.delayA"
-                  :min="0"
-                  :max="60"
-                  :step="0.5"
-                  :precision="1"
-                  :step-strict="true"
-                  size="small"
-                  class="delay-num"
-                  :disabled="!director.matchId"
-                  @change="pushDelay('delayA')"
-                />
-              </div>
-              <div class="ctl-side">
-                <span class="lbl tc-b">B · {{ director.nameOf("B") }}</span>
-                <el-input-number
-                  v-model="cfgForm.delayB"
-                  :min="0"
-                  :max="60"
-                  :step="0.5"
-                  :precision="1"
-                  :step-strict="true"
-                  size="small"
-                  class="delay-num"
-                  :disabled="!director.matchId"
-                  @change="pushDelay('delayB')"
-                />
+              <!-- 两选手一行：调整框紧跟各自选手名尾部（不吸右缘） -->
+              <div class="delay-duo">
+                <div class="ctl-side">
+                  <span class="lbl tc-a">A · {{ director.nameOf("A") }}</span>
+                  <el-input-number
+                    v-model="cfgForm.delayA"
+                    :min="0"
+                    :max="60"
+                    :step="0.5"
+                    :precision="1"
+                    :step-strict="true"
+                    size="small"
+                    class="delay-num"
+                    :disabled="!director.matchId"
+                    @change="pushDelay('delayA')"
+                  />
+                </div>
+                <div class="ctl-side">
+                  <span class="lbl tc-b">B · {{ director.nameOf("B") }}</span>
+                  <el-input-number
+                    v-model="cfgForm.delayB"
+                    :min="0"
+                    :max="60"
+                    :step="0.5"
+                    :precision="1"
+                    :step-strict="true"
+                    size="small"
+                    class="delay-num"
+                    :disabled="!director.matchId"
+                    @change="pushDelay('delayB')"
+                  />
+                </div>
               </div>
               <div class="ctl-side">
                 <span class="lbl">{{ $t("directorView.delayDiff") }}</span>
@@ -992,15 +995,28 @@ onUnmounted(() => {
 .ctl-side .el-button {
   margin-left: auto;
 }
-/* 计时显示延迟面板：三行（A / B / 偏差条），标签左、数字输入右 */
+/* 计时显示延迟面板：两选手合并一行（调整框紧跟选手名尾部），偏差条行输入靠右 */
 .delay-ctl {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
+/* 选手组按自然宽排布（flex:0 1 auto，覆盖 .ctl-side 的等分），过长名走省略号 */
+.delay-duo {
+  display: flex;
+  gap: 12px;
+}
+.delay-duo .ctl-side {
+  flex: 0 1 auto;
+}
 .delay-num {
   width: 128px;
+  flex: none;
   margin-left: auto;
+}
+/* 选手调整框：不吃右侧余量，紧跟选手名尾部 */
+.delay-duo .delay-num {
+  margin-left: 0;
 }
 .cfg-foot {
   display: flex;
