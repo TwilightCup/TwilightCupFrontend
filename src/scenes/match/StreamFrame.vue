@@ -8,8 +8,10 @@
  * - B站：不再 iframe 嵌入（blanc 页会被 Chrome Local Network Access 拦截），
  *   而是走后端同源代理，用 mpegts.js 播放 HTTP-FLV（参考 BililiveRecorder
  *   的取流和播放方式）。
- * - YouTube 等其它站仍走 iframe；object-fit 不适用，用 16:9 定宽外溢 +
- *   overflow:hidden 裁左右（与 <video> 的 cover 裁切同口径）。
+ * - YouTube 等其它站仍走 iframe；完整 watch/live 分享链接会先转成官方
+ *   /embed/ 页，避免页面内本地设备探测触发 Chrome Local Network Access 拦截。
+ *   object-fit 不适用，用 16:9 定宽外溢 + overflow:hidden 裁左右
+ *   （与 <video> 的 cover 裁切同口径）。
  *
  * side='A' 蓝（左）、'B' 红（右）。
  */
@@ -17,6 +19,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type HlsClass from "hls.js";
 import { bi } from "@/utils/bilingual";
 import { parseBilibiliLiveRoomId } from "@/utils/bilibili";
+import { toYouTubeEmbedUrl } from "@/utils/youtube";
 import { bilibiliStreamUrl } from "@/api/bilibili";
 
 interface MpegtsPlayer {
@@ -65,6 +68,9 @@ const mode = computed<"video" | "bili" | "embed" | "none">(() => {
   if (props.embedUrl) return "embed";
   return "none";
 });
+
+/** 外部嵌入地址：YouTube 完整分享链接统一转成官方 embed 页，避免本地网络探测被拦 */
+const embedSrc = computed(() => toYouTubeEmbedUrl(props.embedUrl ?? ""));
 
 const videoEl = ref<HTMLVideoElement | null>(null);
 let hls: HlsClass | null = null;
@@ -216,7 +222,7 @@ onBeforeUnmount(() => {
     <iframe
       v-if="mode === 'embed'"
       :key="refreshNonce ?? 0"
-      :src="embedUrl"
+      :src="embedSrc"
       class="video"
       allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
       allowfullscreen

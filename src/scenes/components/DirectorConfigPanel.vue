@@ -42,8 +42,8 @@ interface Field {
 const fields: Field[] = [
   { key: "hlsA", label: t("scenes.edit.hlsA"), placeholder: "https://.../a.m3u8" },
   { key: "hlsB", label: t("scenes.edit.hlsB"), placeholder: "https://.../b.m3u8" },
-  { key: "embedA", label: t("scenes.edit.embedA"), placeholder: "B站房间号/直播间链接 或 youtube.com/embed/..." },
-  { key: "embedB", label: t("scenes.edit.embedB"), placeholder: "B站房间号/直播间链接 或 youtube.com/embed/..." },
+  { key: "embedA", label: t("scenes.edit.embedA"), placeholder: "B站房间号/直播间链接 或 YouTube 直播/视频链接（自动转嵌入）" },
+  { key: "embedB", label: t("scenes.edit.embedB"), placeholder: "B站房间号/直播间链接 或 YouTube 直播/视频链接（自动转嵌入）" },
 ];
 
 function close(): void {
