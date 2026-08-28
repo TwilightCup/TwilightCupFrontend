@@ -13,8 +13,8 @@
  *
  * diffMs 有符号：正 = B 落后（游标向 B/右侧），负 = A 落后（向左侧）。
  * 游标随偏差线性移动，|diff| = gapMs（默认 60s）时触边钉住；偏差值无上限继续增长。
- * 触边钉住后偏差仍在向钉住侧增大时：游标在边缘轻微抖动（transform ±3px、
- * ~9Hz，避开 left 的 0.3s 过渡），并按原行进方向持续喷射尾焰（见 frame 内触边分支）。
+ * 触边钉住后：游标在边缘持续轻微抖动（transform，~9Hz，基幅 ±3px、每次抖动
+ * 叠加微小随机偏移，避开 left 的 0.3s 过渡），并按钉住侧持续喷射尾焰（见 frame 内触边分支）。
  *
  * 游标喷射粒子：移动时留下"尾焰"——向 B 侧推进（A 方领地扩张）在游标左侧
  * 向左喷 A 色三角形线框颗粒，向 A 侧推进在右侧向右喷 B 色（canvas 层，见下）。
@@ -98,12 +98,12 @@ let lastFrame = 0;
 let lastCursorX: number | null = null;
 /** 上一帧是否画过粒子：空闲时只在画过后的第一帧 clear 一次 */
 let painted = false;
-/** 偏差趋势（+1 = 向 B 增大、−1 = 向 A 增大）与其最后确认时刻；停增 300ms 后归零 */
-let diffTrend = 0;
-let trendAt = 0;
-let lastDiff: number | null = null;
 /** 触边抖动是否激活（用于退出抖动时复位 transform） */
 let shakeOn = false;
+/** 当前抖动的幅度（px）：基幅 3px + 每次抖动（半个正弦周期）重掷的 ±0.8px 随机偏移 */
+let shakeAmp = 3;
+/** 当前抖动半周期序号（phase / π 向下取整），变化时重掷幅度偏移 */
+let lastShakeCycle = -1;
 
 /** #rrggbb 向白混合（t ∈ [0,1]）；非 6 位 hex 原样返回，提亮失败时退回本色 */
 function brighten(hex: string, t: number): string {
@@ -157,22 +157,19 @@ function frame(now: number): void {
   const cur = cursorEl.value;
   if (!ctx || !cur || !cw) return;
 
-  // ---- 触边钉住后偏差继续向钉住侧增大：游标边缘抖动 + 按趋势持续喷射 ----
-  const d = props.diffMs;
-  if (d !== lastDiff) {
-    const dir = lastDiff === null ? 0 : Math.sign(d - lastDiff);
-    if (dir !== 0) {
-      diffTrend = dir;
-      trendAt = now;
-    }
-    lastDiff = d;
-  }
-  if (diffTrend !== 0 && now - trendAt > 300) diffTrend = 0; // 偏差停增即止息
-  const ratio = props.gapMs > 0 ? d / props.gapMs : 0;
-  const shaking = Math.abs(ratio) >= 1 && Math.sign(ratio) === diffTrend;
+  // ---- 触边钉住（|偏差| ≥ gapMs）：游标边缘持续抖动 + 按钉住侧持续喷射 ----
+  const ratio = props.gapMs > 0 ? props.diffMs / props.gapMs : 0;
+  const shaking = Math.abs(ratio) >= 1;
   if (shaking) {
-    // 抖动走 transform（无过渡，不与 left 的 0.3s linear 打架）
-    const j = Math.sin((now / 1000) * Math.PI * 18) * 3; // ~9Hz、±3px
+    // 抖动走 transform（无过渡，不与 left 的 0.3s linear 打架）；每进入一个
+    // 半周期（每摆一下）就在 ±3px 基幅上重掷 ±0.8px 偏移，避免等幅正弦过于机械
+    const phase = (now / 1000) * Math.PI * 18; // ~9Hz
+    const cycle = Math.floor(phase / Math.PI);
+    if (cycle !== lastShakeCycle) {
+      lastShakeCycle = cycle;
+      shakeAmp = 3 + (Math.random() - 0.5) * 1.6;
+    }
+    const j = Math.sin(phase) * shakeAmp;
     cur.style.transform = `translateX(calc(-50% + ${j.toFixed(2)}px))`;
     shakeOn = true;
   } else if (shakeOn) {
@@ -184,8 +181,9 @@ function frame(now: number): void {
   const x = parseFloat(getComputedStyle(cur).left);
   if (Number.isFinite(x)) {
     if (shaking) {
-      // 钉住后 left 不变（dx 恒 0 且抖动会污染方向），改按偏差趋势定喷射色向
-      spawn(x, diffTrend > 0 ? "a" : "b", 0.45); // 伪速度 ≈ 40 颗/s 持续喷流
+      // 钉住后 left 不变（dx 恒 0 且抖动会污染方向），改按钉住侧定喷射色向：
+      // 钉 B 侧（ratio > 0）= A 方领地扩张，向左喷 A 色
+      spawn(x, ratio > 0 ? "a" : "b", 0.45); // 伪速度 ≈ 40 颗/s 持续喷流
     } else if (lastCursorX !== null) {
       const dx = x - lastCursorX;
       if (dx > 0.1) spawn(x, "a", dx); // 向 B 侧推进：左侧喷 A 色
