@@ -2,16 +2,16 @@
 /**
  * 选手直播卡（4:3）。16:9 推流经 object-fit:cover 居中裁去左右两侧，铺满卡片。
  *
- * 播放优先级：HLS（自有流媒体服务器输出）> B站直播代理 FLV > 外部嵌入（YouTube）> 占位。
+ * 播放优先级：HLS（自有流媒体服务器输出）> YouTube/B站代理流 > 外部嵌入 > 占位。
  * - HLS：Safari/原生支持则 <video src> 直放；其余（Chrome/Edge/OBS CEF）
  *   动态 import hls.js 走 MSE 解码。
  * - B站：不再 iframe 嵌入（blanc 页会被 Chrome Local Network Access 拦截），
  *   而是走后端同源代理，用 mpegts.js 播放 HTTP-FLV（参考 BililiveRecorder
  *   的取流和播放方式）。
- * - YouTube 等其它站仍走 iframe；完整 watch/live 分享链接会先转成官方
- *   /embed/ 页，避免页面内本地设备探测触发 Chrome Local Network Access 拦截。
- *   object-fit 不适用，用 16:9 定宽外溢 + overflow:hidden 裁左右
- *   （与 <video> 的 cover 裁切同口径）。
+ * - YouTube：不再 iframe 嵌入（embed 页仍会触发 Chrome Local Network Access
+ *   拦截），而是走后端同源 HLS 代理，用 hls.js 播放（参考 B站代理流思路）。
+ * - 其它外部站点仍走 iframe；object-fit 不适用，用 16:9 定宽外溢 +
+ *   overflow:hidden 裁左右（与 <video> 的 cover 裁切同口径）。
  *
  * side='A' 蓝（左）、'B' 红（右）。
  */
@@ -19,8 +19,9 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type HlsClass from "hls.js";
 import { bi } from "@/utils/bilingual";
 import { parseBilibiliLiveRoomId } from "@/utils/bilibili";
-import { toYouTubeEmbedUrl } from "@/utils/youtube";
+import { parseYouTubeVideoId, toYouTubeEmbedUrl } from "@/utils/youtube";
 import { bilibiliStreamUrl } from "@/api/bilibili";
+import { youtubeStreamUrl } from "@/api/youtube";
 
 interface MpegtsPlayer {
   attachMediaElement(el: HTMLVideoElement): void;
@@ -49,7 +50,7 @@ const props = defineProps<{
   side: "A" | "B";
   hlsUrl: string;
   embedUrl?: string;
-  /** 当前导播/裁判/管理 JWT（B站代理流地址需要；场景页传 URL token） */
+  /** 当前导播/裁判/管理 JWT（YouTube/B站代理流地址需要；场景页传 URL token） */
   token?: string;
   /** 隐藏该侧画面（等待信号占位；应急开关，控制台经 config_update 广播） */
   hidden?: boolean;
@@ -60,16 +61,24 @@ const props = defineProps<{
 /** HLS/B站流播放失败（MSE 不可用 / 致命解码错误）→ 占位（可见，不黑屏） */
 const videoBroken = ref(false);
 
-/** 展示模式：被隐藏直接占位；HLS 视频优先，其次 B站代理流，再其次外部嵌入 */
-const mode = computed<"video" | "bili" | "embed" | "none">(() => {
+/** 展示模式：被隐藏直接占位；HLS 视频优先，其次 YouTube/B站代理流，再其次外部嵌入 */
+const mode = computed<"video" | "yt" | "bili" | "embed" | "none">(() => {
   if (props.hidden) return "none";
   if (props.hlsUrl && !videoBroken.value) return "video";
+  if (props.embedUrl && parseYouTubeVideoId(props.embedUrl)) return "yt";
   if (props.embedUrl && parseBilibiliLiveRoomId(props.embedUrl)) return "bili";
   if (props.embedUrl) return "embed";
   return "none";
 });
 
-/** 外部嵌入地址：YouTube 完整分享链接统一转成官方 embed 页，避免本地网络探测被拦 */
+/** YouTube 视频 ID（同源代理流用） */
+const youtubeId = computed(() => parseYouTubeVideoId(props.embedUrl ?? ""));
+/** YouTube 同源 HLS 代理流地址 */
+const youtubeSrc = computed(() =>
+  youtubeId.value ? youtubeStreamUrl(youtubeId.value, props.token) : "",
+);
+
+/** 外部嵌入地址：其它站点 iframe 时使用，YouTube 已改走同源代理 */
 const embedSrc = computed(() => toYouTubeEmbedUrl(props.embedUrl ?? ""));
 
 const videoEl = ref<HTMLVideoElement | null>(null);
@@ -120,7 +129,7 @@ function destroyMpegts(): void {
   }
 }
 
-/** 挂载/换源：HLS 或 B站代理 FLV 或 YouTube iframe 由 mode 决定，只处理 video 类 */
+/** 挂载/换源：HLS、YouTube/B站代理流或外部 iframe 由 mode 决定，只处理 video 类 */
 async function attach(): Promise<void> {
   const v = videoEl.value;
   destroyHls();
@@ -163,7 +172,37 @@ async function attach(): Promise<void> {
     return;
   }
 
-  // 方案②：B站直播同源代理 FLV（mpegts.js）
+  // 方案②：YouTube 直播同源 HLS 代理（hls.js）
+  const ytId = youtubeId.value;
+  if (ytId) {
+    try {
+      const { default: Hls } = await import("hls.js");
+      if (videoEl.value !== v) return;
+      if (!Hls.isSupported()) {
+        videoBroken.value = true;
+        return;
+      }
+      hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: true,
+        liveDurationInfinity: true,
+        maxBufferLength: 10,
+      });
+      hls.on(Hls.Events.ERROR, (_e, data) => {
+        if (data.fatal) {
+          videoBroken.value = true;
+          destroyHls();
+        }
+      });
+      hls.loadSource(youtubeSrc.value);
+      hls.attachMedia(v);
+    } catch {
+      videoBroken.value = true;
+    }
+    return;
+  }
+
+  // 方案③：B站直播同源代理 FLV（mpegts.js）
   const roomId = parseBilibiliLiveRoomId(props.embedUrl ?? "");
   if (!roomId) return;
   try {
@@ -218,20 +257,20 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="frame" :class="side">
-    <!-- 外部嵌入（YouTube 等非 B站直播；B站走下方 mpegts.js 代理流） -->
+    <!-- 其它外部站点嵌入（YouTube/B站已改走同源代理，不走 iframe） -->
     <iframe
       v-if="mode === 'embed'"
       :key="refreshNonce ?? 0"
       :src="embedSrc"
       class="video"
-      allow="autoplay; fullscreen; encrypted-media; picture-in-picture; local-network; local-network-access"
+      allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
       allowfullscreen
       frameborder="0"
       referrerpolicy="no-referrer-when-downgrade"
     />
-    <!-- 自有 HLS 或 B站代理 FLV：同一 video 元素，由 attach 按模式挂载 -->
+    <!-- 自有 HLS / YouTube 代理 / B站代理 FLV：同一 video 元素，由 attach 按模式挂载 -->
     <video
-      v-else-if="mode === 'video' || mode === 'bili'"
+      v-else-if="mode === 'video' || mode === 'yt' || mode === 'bili'"
       ref="videoEl"
       autoplay
       muted

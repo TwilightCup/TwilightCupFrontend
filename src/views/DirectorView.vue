@@ -392,7 +392,7 @@ onUnmounted(() => {
                     <el-input
                       v-model="cfgForm[f.key]"
                       size="small"
-                      :placeholder="f.key.startsWith('hls') ? 'https://.../a.m3u8' : 'B站房间号/直播间链接 或 YouTube 直播/视频链接（自动转嵌入）'"
+                      :placeholder="f.key.startsWith('hls') ? 'https://.../a.m3u8' : 'B站房间号/直播间链接 或 YouTube 直播链接（自动代理）'"
                     />
                   </label>
                 </div>
