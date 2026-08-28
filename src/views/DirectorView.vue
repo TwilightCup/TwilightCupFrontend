@@ -691,7 +691,6 @@ onUnmounted(() => {
                （秒，−/+ 以 0.5 步进；改动即时广播到舞台与场景，与显示开关同通道） -->
           <div class="card">
             <div class="card-title">{{ $t("directorView.delayTitle") }}</div>
-            <p class="hint">{{ $t("directorView.delayHint") }}</p>
             <div class="delay-ctl">
               <div class="ctl-side">
                 <span class="lbl tc-a">A · {{ director.nameOf("A") }}</span>

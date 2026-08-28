@@ -514,7 +514,6 @@ const messages = {
   "directorView.previewTitle": "选手画面监控",
   "directorView.previewHint": "与舞台同源同配置实时预览，不受显示开关影响——确认画面加载正常后，再开下方开关放上台；「重拉流」同时刷新预览与舞台。",
   "directorView.delayTitle": "计时显示延迟",
-  "directorView.delayHint": "选手直播画面常有数秒延迟而计时数据近实时，按各画面延迟把比赛详情场景的计时器与偏差条回放对齐（单位：秒，0.5 步进），改动即时广播到舞台。",
   "directorView.delayDiff": "偏差条",
   "directorView.soonLabel": "倒计时(秒)",
   "directorView.soonStart": "开始",
