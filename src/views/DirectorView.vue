@@ -692,10 +692,10 @@ onUnmounted(() => {
           <div class="card">
             <div class="card-title">{{ $t("directorView.delayTitle") }}</div>
             <div class="delay-ctl">
-              <!-- 两选手一行：调整框紧跟各自选手名尾部（不吸右缘） -->
+              <!-- 两选手一行：调整框紧跟各自标签尾部（不吸右缘） -->
               <div class="delay-duo">
                 <div class="ctl-side">
-                  <span class="lbl tc-a">A · {{ director.nameOf("A") }}</span>
+                  <span class="lbl tc-a">A</span>
                   <el-input-number
                     v-model="cfgForm.delayA"
                     :min="0"
@@ -710,7 +710,7 @@ onUnmounted(() => {
                   />
                 </div>
                 <div class="ctl-side">
-                  <span class="lbl tc-b">B · {{ director.nameOf("B") }}</span>
+                  <span class="lbl tc-b">B</span>
                   <el-input-number
                     v-model="cfgForm.delayB"
                     :min="0"
@@ -995,7 +995,7 @@ onUnmounted(() => {
 .ctl-side .el-button {
   margin-left: auto;
 }
-/* 计时显示延迟面板：两选手合并一行（调整框紧跟选手名尾部），偏差条行输入靠右 */
+/* 计时显示延迟面板：两选手合并一行（调整框紧跟标签尾部），偏差条行输入靠右 */
 .delay-ctl {
   display: flex;
   flex-direction: column;
@@ -1014,7 +1014,7 @@ onUnmounted(() => {
   flex: none;
   margin-left: auto;
 }
-/* 选手调整框：不吃右侧余量，紧跟选手名尾部 */
+/* 选手调整框：不吃右侧余量，紧跟标签尾部 */
 .delay-duo .delay-num {
   margin-left: 0;
 }
