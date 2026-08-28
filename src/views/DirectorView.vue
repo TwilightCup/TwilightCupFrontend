@@ -664,61 +664,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- 计时显示延迟：比赛详情场景的计时器 / 偏差条按各画面延迟回放对齐
-             （秒，−/+ 以 0.5 步进；改动即时广播到舞台与场景，与显示开关同通道） -->
-        <div class="card">
-          <div class="card-title">{{ $t("directorView.delayTitle") }}</div>
-          <p class="hint">{{ $t("directorView.delayHint") }}</p>
-          <div class="delay-ctl">
-            <div class="ctl-side">
-              <span class="lbl tc-a">A · {{ director.nameOf("A") }}</span>
-              <el-input-number
-                v-model="cfgForm.delayA"
-                :min="0"
-                :max="60"
-                :step="0.5"
-                :precision="1"
-                :step-strict="true"
-                size="small"
-                class="delay-num"
-                :disabled="!director.matchId"
-                @change="pushDelay('delayA')"
-              />
-            </div>
-            <div class="ctl-side">
-              <span class="lbl tc-b">B · {{ director.nameOf("B") }}</span>
-              <el-input-number
-                v-model="cfgForm.delayB"
-                :min="0"
-                :max="60"
-                :step="0.5"
-                :precision="1"
-                :step-strict="true"
-                size="small"
-                class="delay-num"
-                :disabled="!director.matchId"
-                @change="pushDelay('delayB')"
-              />
-            </div>
-            <div class="ctl-side">
-              <span class="lbl">{{ $t("directorView.delayDiff") }}</span>
-              <el-input-number
-                v-model="cfgForm.delayDiff"
-                :min="0"
-                :max="60"
-                :step="0.5"
-                :precision="1"
-                :step-strict="true"
-                size="small"
-                class="delay-num"
-                :disabled="!director.matchId"
-                @change="pushDelay('delayDiff')"
-              />
-            </div>
-          </div>
-        </div>
-
-        <!-- 当前回合 + 进度：左右并列 -->
+        <!-- 当前回合 + 计时显示延迟 + 进度：三卡并列同高 -->
         <div class="card-row">
           <!-- 当前回合 -->
           <div class="card">
@@ -739,6 +685,60 @@ onUnmounted(() => {
               </div>
             </template>
             <div v-else class="dim">{{ $t("directorView.noRoundYet") }}</div>
+          </div>
+
+          <!-- 计时显示延迟：比赛详情场景的计时器 / 偏差条按各画面延迟回放对齐
+               （秒，−/+ 以 0.5 步进；改动即时广播到舞台与场景，与显示开关同通道） -->
+          <div class="card">
+            <div class="card-title">{{ $t("directorView.delayTitle") }}</div>
+            <p class="hint">{{ $t("directorView.delayHint") }}</p>
+            <div class="delay-ctl">
+              <div class="ctl-side">
+                <span class="lbl tc-a">A · {{ director.nameOf("A") }}</span>
+                <el-input-number
+                  v-model="cfgForm.delayA"
+                  :min="0"
+                  :max="60"
+                  :step="0.5"
+                  :precision="1"
+                  :step-strict="true"
+                  size="small"
+                  class="delay-num"
+                  :disabled="!director.matchId"
+                  @change="pushDelay('delayA')"
+                />
+              </div>
+              <div class="ctl-side">
+                <span class="lbl tc-b">B · {{ director.nameOf("B") }}</span>
+                <el-input-number
+                  v-model="cfgForm.delayB"
+                  :min="0"
+                  :max="60"
+                  :step="0.5"
+                  :precision="1"
+                  :step-strict="true"
+                  size="small"
+                  class="delay-num"
+                  :disabled="!director.matchId"
+                  @change="pushDelay('delayB')"
+                />
+              </div>
+              <div class="ctl-side">
+                <span class="lbl">{{ $t("directorView.delayDiff") }}</span>
+                <el-input-number
+                  v-model="cfgForm.delayDiff"
+                  :min="0"
+                  :max="60"
+                  :step="0.5"
+                  :precision="1"
+                  :step-strict="true"
+                  size="small"
+                  class="delay-num"
+                  :disabled="!director.matchId"
+                  @change="pushDelay('delayDiff')"
+                />
+              </div>
+            </div>
           </div>
 
           <!-- 进度 -->
@@ -847,7 +847,7 @@ onUnmounted(() => {
   border-radius: 10px;
   padding: 12px 14px;
 }
-/* 并列卡片行（当前回合 / 双方进度）：两卡等分 */
+/* 并列卡片行（当前回合 / 计时显示延迟 / 双方进度）：三卡等分同高 */
 .card-row {
   display: flex;
   gap: 12px;
