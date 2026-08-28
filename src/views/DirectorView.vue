@@ -691,55 +691,47 @@ onUnmounted(() => {
                （秒，−/+ 以 0.5 步进；改动即时广播到舞台与场景，与显示开关同通道） -->
           <div class="card">
             <div class="card-title">{{ $t("directorView.delayTitle") }}</div>
-            <div class="delay-ctl">
-              <!-- 两选手一行：调整框紧跟各自标签尾部（不吸右缘） -->
-              <div class="delay-duo">
-                <div class="ctl-side">
-                  <span class="lbl tc-a">A</span>
-                  <el-input-number
-                    v-model="cfgForm.delayA"
-                    :min="0"
-                    :max="60"
-                    :step="0.5"
-                    :precision="1"
-                    :step-strict="true"
-                    size="small"
-                    class="delay-num"
-                    :disabled="!director.matchId"
-                    @change="pushDelay('delayA')"
-                  />
-                </div>
-                <div class="ctl-side">
-                  <span class="lbl tc-b">B</span>
-                  <el-input-number
-                    v-model="cfgForm.delayB"
-                    :min="0"
-                    :max="60"
-                    :step="0.5"
-                    :precision="1"
-                    :step-strict="true"
-                    size="small"
-                    class="delay-num"
-                    :disabled="!director.matchId"
-                    @change="pushDelay('delayB')"
-                  />
-                </div>
-              </div>
-              <div class="ctl-side">
-                <span class="lbl">{{ $t("directorView.delayDiff") }}</span>
-                <el-input-number
-                  v-model="cfgForm.delayDiff"
-                  :min="0"
-                  :max="60"
-                  :step="0.5"
-                  :precision="1"
-                  :step-strict="true"
-                  size="small"
-                  class="delay-num"
-                  :disabled="!director.matchId"
-                  @change="pushDelay('delayDiff')"
-                />
-              </div>
+            <div class="delay-grid">
+              <span class="lbl tc-a">A</span>
+              <el-input-number
+                v-model="cfgForm.delayA"
+                :min="0"
+                :max="60"
+                :step="0.5"
+                :precision="1"
+                :step-strict="true"
+                size="small"
+                class="delay-num"
+                :disabled="!director.matchId"
+                @change="pushDelay('delayA')"
+              />
+              <span class="lbl tc-b">B</span>
+              <el-input-number
+                v-model="cfgForm.delayB"
+                :min="0"
+                :max="60"
+                :step="0.5"
+                :precision="1"
+                :step-strict="true"
+                size="small"
+                class="delay-num"
+                :disabled="!director.matchId"
+                @change="pushDelay('delayB')"
+              />
+              <!-- 偏差条标签横跨前三列（左缘与 A 对齐），输入框与 B 调整框同列 -->
+              <span class="lbl diff">{{ $t("directorView.delayDiff") }}</span>
+              <el-input-number
+                v-model="cfgForm.delayDiff"
+                :min="0"
+                :max="60"
+                :step="0.5"
+                :precision="1"
+                :step-strict="true"
+                size="small"
+                class="delay-num"
+                :disabled="!director.matchId"
+                @change="pushDelay('delayDiff')"
+              />
             </div>
           </div>
 
@@ -995,28 +987,26 @@ onUnmounted(() => {
 .ctl-side .el-button {
   margin-left: auto;
 }
-/* 计时显示延迟面板：两选手合并一行（调整框紧跟标签尾部），偏差条行输入靠右 */
-.delay-ctl {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+/* 计时显示延迟面板：四列网格（标签A 输入A 标签B 输入B），两行——偏差条输入框
+   与 B 调整框同列对齐 */
+.delay-grid {
+  display: grid;
+  grid-template-columns: auto auto auto auto;
+  column-gap: 10px;
+  row-gap: 10px;
+  align-items: center;
 }
-/* 选手组按自然宽排布（flex:0 1 auto，覆盖 .ctl-side 的等分），过长名走省略号 */
-.delay-duo {
-  display: flex;
-  gap: 12px;
+.delay-grid .lbl {
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
 }
-.delay-duo .ctl-side {
-  flex: 0 1 auto;
+/* 偏差条标签横跨前三列，左缘与 A 标签对齐 */
+.delay-grid .lbl.diff {
+  grid-column: 1 / 4;
 }
 .delay-num {
   width: 128px;
-  flex: none;
-  margin-left: auto;
-}
-/* 选手调整框：不吃右侧余量，紧跟标签尾部 */
-.delay-duo .delay-num {
-  margin-left: 0;
 }
 .cfg-foot {
   display: flex;
