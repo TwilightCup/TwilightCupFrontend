@@ -73,6 +73,8 @@ export interface LiveTime {
   totalMs: number;
   /** 当前分段进行时长（自该关加载沿起算） */
   segmentMs: number;
+  /** 现实/墙钟累计（毫秒）；提供方支持时存在 */
+  realTimeMs?: number | null;
   receivedAt: number;
 }
 
@@ -303,6 +305,7 @@ export const useDirectorStore = defineStore("director", () => {
           levelIndex: msg.level_index,
           totalMs: msg.total_ms,
           segmentMs: msg.segment_ms,
+          realTimeMs: msg.real_time_ms ?? null,
           receivedAt: Date.now(),
         };
         if (msg.seat === "PLAYER_A") liveTimeA.value = sample;

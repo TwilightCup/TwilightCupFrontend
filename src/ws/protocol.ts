@@ -392,6 +392,8 @@ export interface SrvLiveTime {
   total_ms: number;
   /** 当前分段进行时长（毫秒） */
   segment_ms: number;
+  /** 现实/墙钟累计（毫秒）；选手端提供方支持 Real Time 时携带，可能为 null */
+  real_time_ms?: number | null;
 }
 export interface SrvRoundResult {
   type: "round_result";
