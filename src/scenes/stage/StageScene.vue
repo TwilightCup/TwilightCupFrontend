@@ -23,6 +23,8 @@ import {
 } from "@/scenes/composables/useSceneContext";
 import {
   isSceneKey,
+  readStoredScene,
+  sceneStorageKey as sceneStorageKeyOf,
   type SceneKey,
 } from "./useStageScene";
 import CategoryInfoScene from "@/scenes/categoryinfo/CategoryInfoScene.vue";
@@ -68,6 +70,15 @@ const showTopBar = computed(
     currentScene.value === "categoryinfo",
 );
 let unwatchCmd: (() => void) | null = null;
+let unwatchStorage: (() => void) | null = null;
+
+/** 同源兜底键：按账号+比赛隔离，避免不同导播在同一浏览器串台。 */
+const storageKey = computed(() => sceneStorageKeyOf(director.accountId, director.matchId));
+function onSceneStorage(e: StorageEvent): void {
+  if (e.key === storageKey.value && isSceneKey(e.newValue)) {
+    currentScene.value = e.newValue;
+  }
+}
 
 onMounted(() => {
   if (params.token) director.connect(params.token, params.matchId || undefined);
@@ -80,11 +91,27 @@ onMounted(() => {
       if (isSceneKey(scene)) currentScene.value = scene;
     },
   );
+  // 同源兜底：控制台切场景写 localStorage → 同一 storage 分区触发 storage 事件。
+  // WS 仍是跨进程主通道；此兜底只在同浏览器/同 OBS CEF 分区且 WS 未达时立即补齐。
+  window.addEventListener("storage", onSceneStorage);
+  unwatchStorage = () => window.removeEventListener("storage", onSceneStorage);
 });
 onUnmounted(() => {
   unwatchCmd?.();
+  unwatchStorage?.();
   director.disconnect();
 });
+
+// 账号/比赛确定后先读同源缓存（WS state_sync / 后续 switch_scene 优先覆盖）
+watch(
+  [() => director.accountId, () => director.matchId],
+  ([acc, mid]) => {
+    if (!acc || !mid || director.currentSceneCmd) return;
+    const stored = readStoredScene(acc, mid);
+    if (stored) currentScene.value = stored;
+  },
+  { immediate: true },
+);
 
 /** 当前场景组件（响应式） */
 const sceneMap: Record<SceneKey, typeof CategoryInfoScene> = {

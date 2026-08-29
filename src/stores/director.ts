@@ -101,6 +101,7 @@ export const useDirectorStore = defineStore("director", () => {
   const connStatus = ref<ConnStatus>("idle");
   const seat = ref<SeatName | "">("");
   const matchId = ref("");
+  const accountId = ref("");
   const displayName = ref("");
   const authError = ref("");
 
@@ -213,6 +214,7 @@ export const useDirectorStore = defineStore("director", () => {
       case "auth_ok":
         seat.value = msg.seat;
         matchId.value = msg.match_id;
+        accountId.value = msg.account_id;
         displayName.value = msg.display_name;
         // 双方选手名：auth_ok 即带（后端已补），连入即有，不再依赖聊天捕获
         if (msg.player_a_name) nameA.value = msg.player_a_name;
@@ -561,6 +563,7 @@ export const useDirectorStore = defineStore("director", () => {
     connStatus,
     seat,
     matchId,
+    accountId,
     displayName,
     authError,
     // 比赛

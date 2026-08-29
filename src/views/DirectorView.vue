@@ -12,7 +12,13 @@ import AuthFailMask from "@/components/AuthFailMask.vue";
 import { requestSpeedrunRefresh } from "@/api/speedrun";
 import { AttemptStatus, MatchPhase } from "@/api/types";
 import { formatMs, phaseInfo, playerStatusInfo, preloadTagInfo, shortTime } from "@/utils/format";
-import { DEFAULT_SCENE, isSceneKey, type SceneKey } from "@/scenes/stage/useStageScene";
+import {
+  DEFAULT_SCENE,
+  isSceneKey,
+  readStoredScene,
+  writeStoredScene,
+  type SceneKey,
+} from "@/scenes/stage/useStageScene";
 import {
   useDirectorConfig,
   type DirectorConfig,
@@ -183,7 +189,20 @@ const CFG_URL_KEYS: Partial<Record<keyof DirectorConfig, string>> = {
   embedA: "embed_a",
   embedB: "embed_b",
 };
-const stageUrl = computed(() => withCfgParams(director.stageUrl));
+const stageUrl = computed(() => withCfgParams(directorPageUrl("stage.html")));
+
+/** 场景页链接：确保即使 auth_ok 前 matchId 尚未写入 store，也带上当前路由的场次。
+ *  否则舞台可能连到同账号的另一场，收不到本控制台的场景广播。 */
+function directorPageUrl(page: string): string {
+  const base = director.scenePageUrl(page);
+  if (!base) return "";
+  const url = new URL(base);
+  if (!url.searchParams.get("match")) {
+    const sid = String(route.params.matchId ?? "");
+    if (sid) url.searchParams.set("match", sid);
+  }
+  return url.toString();
+}
 
 /** 场景页链接通用后缀：附当前导播配置（hls/embed），跨浏览器随链接下发 */
 function withCfgParams(base: string): string {
@@ -205,9 +224,24 @@ const sceneBtnLabels: Record<SceneKey, string> = {
   soon: "directorView.sceneBtnSoon",
 };
 const activeScene = ref<SceneKey>(DEFAULT_SCENE);
+// 同源缓存初始化：WS 尚未回放/未连接时先对齐本地上次场景（仅作控制台显示，
+// 舞台仍以 state_sync / storage / WS 为准）
+watch(
+  [() => director.accountId, () => director.matchId],
+  ([acc, mid]) => {
+    if (!acc || !mid || director.currentSceneCmd) return;
+    const stored = readStoredScene(acc, mid);
+    if (stored) activeScene.value = stored;
+  },
+  { immediate: true },
+);
 function onSwitchScene(key: SceneKey): void {
   activeScene.value = key;
-  director.sendDirectorCommand("switch_scene", { scene: key }); // WS 广播（唯一通道，按账号隔离）
+  // 同源兜底（键按账号+比赛隔离）：同一浏览器/同一 storage 分区跨标签即时同步；
+  // WS 仍是跨进程主通道。
+  const sid = String(route.params.matchId ?? "");
+  writeStoredScene(director.accountId, director.matchId || sid, key);
+  director.sendDirectorCommand("switch_scene", { scene: key }); // WS 广播（跨进程主通道）
 }
 // WS 侧场景指令（state_sync 回放 / 其他控制台切换）→ 本地 radio 跟随
 watch(
@@ -251,7 +285,7 @@ const previewScene = computed<SceneKey>(() => previewManual.value ?? autoPreview
 const previewUrlMap = computed<Partial<Record<SceneKey, string>>>(() => {
   const map: Partial<Record<SceneKey, string>> = {};
   for (const k of MANUAL_PREVIEW_SCENES) {
-    map[k] = director.scenePageUrl(PREVIEW_PAGES[k] ?? "mappool.html");
+    map[k] = directorPageUrl(PREVIEW_PAGES[k] ?? "mappool.html");
   }
   return map;
 });
