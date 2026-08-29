@@ -8,7 +8,8 @@
  *   下部：多关偏差条（单关隐藏）→ 双方计时器（主大字 + 副计时两行：多关
  *         上行当前关卡名 + 实时单段，下行上一关名 + 单段用时；单关第一行为
  *         「当前次数/总次数」+ 当前尝试实时分段时间，第二行为「上一次次数/总次数」
- *         + 上一次尝试用时（跳过显示 N/A）），屏幕中轴对称
+ *         + 上一次尝试用时（跳过显示 N/A）。完成最后一关/最后一次尝试后，第一行
+ *         定格在最终成绩，不再往下推），屏幕中轴对称
  *   左下角：当前选图角标卡（裁判宣布选图后常驻，PickCornerCard）
  *   底部：WR/PB 背景板（neon-panel 同款，横向铺满画面、垫在全部计时器与
  *         角标卡之下）+ PB 卡内容（当前项目 WR + 双方 PB，PbCornerCard，
@@ -27,7 +28,14 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useDirectorStore } from "@/stores/director";
-import { CategoryKind, MatchPhase, PickType, PlayerStatus } from "@/api/types";
+import {
+  CategoryKind,
+  MatchPhase,
+  PickType,
+  PlayerStatus,
+  type Attempt,
+  type LevelTime,
+} from "@/api/types";
 import { formatMs } from "@/utils/format";
 import { categoryKindOf } from "@/utils/mappool";
 import { officialDisplayName } from "@/utils/officialLevels";
@@ -134,66 +142,156 @@ const diffMs = computed(() =>
   liveReady.value ? director.subsegmentGap ?? 0 : MOCK_MATCH.gapDiffMs,
 );
 
-// ---- 多关当前关卡名：player_status 的 current_level_index × 合集关卡名序列
-//      （消息级 collection 已展开为关卡名，官方展示名口径）。选手没在关卡时
-//      隐藏：仅回合进行中（phase=IN_ROUND）且该选手座席在线（seat_state 维护；
-//      未连接的选手从未上报 player_status，status 恒为默认 IN_GAME，不能只看它）
-//      且仍在游戏内（status=IN_GAME，完赛 COMPLETED / 弃权 FORFEITED 均不算）
-//      且序号未越界（越界 = 已冲线）才显示；PREP / 判决后隐藏，单关由调用方
-//      换成「当前次数/总次数」标签 ----
+// ---- 副计时器两行统一计算 ----
+// 多关：进行中 = 第一行当前关 + 实时单段、第二行上一关；完赛/无当前关时第一行
+// 定格在最后一关最终单段，不再往第二行推，第二行显示倒数第二关（如有）。
+// 单关：进行中 = 第一行当前尝试 + 实时分段、第二行上一次尝试；完成最后一次后
+// 第一行定格在最后一次尝试成绩，第二行显示上一次（倒数第二次，如有）。
+// 未开始/未连接/未进入游戏时第一行隐藏，第二行仅在已有历史记录时出现。
+interface SubRow {
+  label: string | null;
+  time: string | null;
+}
+
 const levelNames = computed<string[]>(() => {
   if (!liveReady.value) return MOCK_MATCH.levelNames;
   const raw = director.currentRound?.collection.raw as { levels?: unknown } | undefined;
   return Array.isArray(raw?.levels) ? raw.levels.map((x) => (x == null ? "" : String(x))) : [];
 });
 
-function currentLevelName(side: "A" | "B"): string | null {
-  if (!isMulti.value) return null;
-  if (liveReady.value) {
-    if (director.phase !== MatchPhase.IN_ROUND) return null;
-    if (!(side === "A" ? director.aOnline : director.bOnline)) return null;
-    if (director.playerOf(side).status !== PlayerStatus.IN_GAME) return null;
-  }
-  const idx = liveReady.value
-    ? director.playerOf(side).currentLevelIndex
-    : side === "A"
-      ? MOCK_MATCH.currentLevelA
-      : MOCK_MATCH.currentLevelB;
-  const name = levelNames.value[idx];
-  return name ? (officialDisplayName(name) ?? name) : null;
-}
-const levelA = computed(() => (isMulti.value ? currentLevelName("A") : currentAttemptLabel("A")));
-const levelB = computed(() => (isMulti.value ? currentLevelName("B") : currentAttemptLabel("B")));
-
-// ---- 多关下行：上一关（最近完成）名 × 单段用时（上行内容过关后沉到这里） ----
-// 单关下行：上一尝试序号/总次数 + 上一次尝试用时（跳过/未完成显示 N/A）。
-function prevLevelName(side: "A" | "B"): string | null {
-  if (!isMulti.value) return null;
+function completedLevelsOf(side: "A" | "B"): LevelTime[] {
   const levels = liveReady.value
     ? director.playerOf(side).completedLevels
     : side === "A"
       ? MOCK_MATCH.levelsA
       : MOCK_MATCH.levelsB;
-  if (!levels.length) return null;
-  const idx = levels.reduce((m, l) => Math.max(m, l.level_index), -1);
+  return [...levels].sort((a, b) => a.level_index - b.level_index);
+}
+
+function attemptsOf(side: "A" | "B"): Attempt[] {
+  const attempts = liveReady.value
+    ? director.playerOf(side).attempts
+    : side === "A"
+      ? MOCK_MATCH.attemptsA
+      : MOCK_MATCH.attemptsB;
+  return [...attempts].sort((a, b) => a.index - b.index);
+}
+
+function levelNameOf(idx: number): string | null {
   const name = levelNames.value[idx];
   return name ? (officialDisplayName(name) ?? name) : null;
 }
-const prevLevelA = computed(() => (isMulti.value ? prevLevelName("A") : previousAttemptLabel("A")));
-const prevLevelB = computed(() => (isMulti.value ? prevLevelName("B") : previousAttemptLabel("B")));
+
+function liveSegTime(side: "A" | "B"): string | null {
+  const val = side === "A" ? liveSegA.value : liveSegB.value;
+  return val == null ? null : formatMs(val);
+}
+
+function multiActive(side: "A" | "B"): boolean {
+  if (!liveReady.value) return true;
+  if (director.phase !== MatchPhase.IN_ROUND) return false;
+  if (!(side === "A" ? director.aOnline : director.bOnline)) return false;
+  if (director.playerOf(side).status !== PlayerStatus.IN_GAME) return false;
+  // 最后一关已上报、等待项目完成信号的瞬间也视为“已完赛”，让第一行立即定格
+  const idx = director.playerOf(side).currentLevelIndex;
+  return levelNames.value.length === 0 || idx < levelNames.value.length;
+}
+
+function singleActive(side: "A" | "B"): boolean {
+  if (!liveReady.value) return true;
+  if (director.phase !== MatchPhase.IN_ROUND) return false;
+  if (!(side === "A" ? director.aOnline : director.bOnline)) return false;
+  if (director.playerOf(side).status !== PlayerStatus.IN_GAME) return false;
+  // 最后一次尝试已上报但尚未发项目完成信号时，同样按“已完成”定格第一行
+  const total = attemptTotal();
+  return total == null || attemptsOf(side).length < total;
+}
+
+function multiFirstRow(side: "A" | "B"): SubRow {
+  const levels = completedLevelsOf(side);
+  if (multiActive(side)) {
+    const idx = liveReady.value
+      ? director.playerOf(side).currentLevelIndex
+      : side === "A"
+        ? MOCK_MATCH.currentLevelA
+        : MOCK_MATCH.currentLevelB;
+    const time = liveSegTime(side);
+    return { label: levelNameOf(idx), time };
+  }
+  if (!levels.length) return { label: null, time: null };
+  const last = levels[levels.length - 1]!;
+  return { label: levelNameOf(last.level_index), time: formatMs(last.time_ms) };
+}
+
+function multiSecondRow(side: "A" | "B"): SubRow {
+  const levels = completedLevelsOf(side);
+  if (multiActive(side)) {
+    if (!levels.length) return { label: null, time: null };
+    const last = levels[levels.length - 1]!;
+    return { label: levelNameOf(last.level_index), time: formatMs(last.time_ms) };
+  }
+  if (levels.length <= 1) return { label: null, time: null };
+  const prev = levels[levels.length - 2]!;
+  return { label: levelNameOf(prev.level_index), time: formatMs(prev.time_ms) };
+}
+
+function singleFirstRow(side: "A" | "B"): SubRow {
+  const attempts = attemptsOf(side);
+  if (singleActive(side)) {
+    const total = attemptTotal();
+    const maxIndex = attempts.length ? attempts[attempts.length - 1]!.index : -1;
+    const label =
+      total == null
+        ? null
+        : `${Math.min(maxIndex + 2, total)}/${total}`;
+    const time = liveSegTime(side);
+    return { label, time };
+  }
+  if (!attempts.length) return { label: null, time: null };
+  const last = attempts[attempts.length - 1]!;
+  return {
+    label: attemptLabelOf(last.index),
+    time: formatMs(last.time_ms ?? null),
+  };
+}
+
+function singleSecondRow(side: "A" | "B"): SubRow {
+  const attempts = attemptsOf(side);
+  if (singleActive(side)) {
+    if (!attempts.length) return { label: null, time: null };
+    const last = attempts[attempts.length - 1]!;
+    return {
+      label: attemptLabelOf(last.index),
+      time: formatMs(last.time_ms ?? null),
+    };
+  }
+  if (attempts.length <= 1) return { label: null, time: null };
+  const prev = attempts[attempts.length - 2]!;
+  return {
+    label: attemptLabelOf(prev.index),
+    time: formatMs(prev.time_ms ?? null),
+  };
+}
+
+function firstRow(side: "A" | "B"): SubRow {
+  return isMulti.value ? multiFirstRow(side) : singleFirstRow(side);
+}
+
+function secondRow(side: "A" | "B"): SubRow {
+  return isMulti.value ? multiSecondRow(side) : singleSecondRow(side);
+}
+
+const levelA = computed(() => firstRow("A").label);
+const levelB = computed(() => firstRow("B").label);
+const segA = computed(() => firstRow("A").time);
+const segB = computed(() => firstRow("B").time);
+const prevLevelA = computed(() => secondRow("A").label);
+const prevLevelB = computed(() => secondRow("B").label);
+const prevSegA = computed(() => secondRow("A").time);
+const prevSegB = computed(() => secondRow("B").time);
 
 const mainA = computed(() => formatMs(sideA.value.mainMs));
 const mainB = computed(() => formatMs(sideB.value.mainMs));
-/** 上行：当前关/当前尝试实时分段时间（live_time segment 外推；无实时数据时隐藏） */
-const segA = computed(() => (liveSegA.value == null ? null : formatMs(liveSegA.value)));
-const segB = computed(() => (liveSegB.value == null ? null : formatMs(liveSegB.value)));
-/** 下行：多关 = 上一关单段用时；单关 = 上一次尝试用时；有记录但无成绩（跳过）显示 N/A */
-const prevSegA = computed(() =>
-  sideA.value.hasSubMs ? formatMs(sideA.value.subMs) : null,
-);
-const prevSegB = computed(() =>
-  sideB.value.hasSubMs ? formatMs(sideB.value.subMs) : null,
-);
 
 // ---- 计时显示延迟回放（useDelayedRef）：选手画面常有数秒延迟而计时近实时，
 //      把该席计时器整块（主计时 + 两行副计时）与偏差条各自回放 delay 秒对齐
@@ -259,49 +357,17 @@ const pickRetry = computed(() =>
   currentPick.value ? retryOf(draftStatus.value, currentPick.value) : null,
 );
 
-/** 单关某侧已上报尝试（含跳过/未完成）的最高 0 基序号；无记录返回 -1 */
-function latestAttemptIndex(side: "A" | "B"): number {
-  const attempts = liveReady.value
-    ? director.playerOf(side).attempts
-    : side === "A"
-      ? MOCK_MATCH.attemptsA
-      : MOCK_MATCH.attemptsB;
-  return attempts.reduce((m, a) => Math.max(m, a.index), -1);
-}
-
 /** 单关总重试次数；不可得时为 null */
 function attemptTotal(): number | null {
   const total = pickRetry.value;
   return total != null && total > 0 ? total : null;
 }
 
-/**
- * 单关第一行“当前次数/总次数”：只在回合进行中、该选手在线且仍在游戏内时显示；
- * 未开始 / 未连接 / 已完赛不占第一行。
- */
-function currentAttemptLabel(side: "A" | "B"): string | null {
-  if (isMulti.value) return null;
-  if (liveReady.value) {
-    if (director.phase !== MatchPhase.IN_ROUND) return null;
-    if (!(side === "A" ? director.aOnline : director.bOnline)) return null;
-    if (director.playerOf(side).status !== PlayerStatus.IN_GAME) return null;
-  }
+/** 单关第 n 次（1 基）的“n/总次数”标签；总次数不可得时隐藏 */
+function attemptLabelOf(index: number): string | null {
   const total = attemptTotal();
   if (total == null) return null;
-  // 0 基已上报序号的最大值 + 2 = 当前（进行中）尝试的 1 基序号；空列表 = 第 1 次
-  const current = Math.min(latestAttemptIndex(side) + 2, total);
-  return `${current}/${total}`;
-}
-
-/** 单关第二行“上一次尝试序号/总次数”：有至少一条已上报尝试才显示 */
-function previousAttemptLabel(side: "A" | "B"): string | null {
-  if (isMulti.value) return null;
-  const total = attemptTotal();
-  if (total == null) return null;
-  const maxIndex = latestAttemptIndex(side);
-  if (maxIndex < 0) return null;
-  const previous = Math.min(maxIndex + 1, total);
-  return `${previous}/${total}`;
+  return `${Math.min(index + 1, total)}/${total}`;
 }
 
 // ---- 右下角 PB 角标卡（speedrun.com 数据与 categoryinfo 场景同源共享） ----
@@ -491,7 +557,8 @@ onUnmounted(() => {
         <!-- 双方计时器：屏幕中轴对称，A 左 B 右，沉底；多关副计时两行（上行
              当前关 + 实时单段，下行上一关 + 单段用时（淡紫））；单关第一行
              为「当前次数/总次数」+ 当前尝试实时单段，第二行为「上一次次数/
-             总次数」+ 上一次尝试用时（跳过显示 N/A）。timerA/V 为按导播配置
+             总次数」+ 上一次尝试用时（跳过显示 N/A）。完成最后一关/最后一
+             次尝试后第一行定格在最终成绩，不再下推。timerA/V 为按导播配置
              回放后的显示值（对齐各侧画面延迟） -->
         <section ref="timersEl" class="timers">
           <PlayerTimer
