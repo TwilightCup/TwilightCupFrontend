@@ -1101,6 +1101,7 @@ onUnmounted(() => {
   letter-spacing: 0.5px;
 }
 .theme-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 12px;

@@ -57,51 +57,52 @@ function confirm(): void {
 </script>
 
 <template>
-  <el-popover
-    v-model:visible="open"
-    trigger="click"
-    placement="bottom-start"
-    :width="330"
-    :disabled="disabled"
-    :teleported="false"
-  >
-    <template #reference>
-      <button
-        type="button"
-        class="color-swatch"
-        :style="{ backgroundColor: modelValue }"
-        :disabled="disabled"
-        :aria-label="label"
-        :title="modelValue"
-      ></button>
-    </template>
-
-    <el-color-picker-panel
-      :model-value="draft"
-      :show-alpha="false"
-      :color-format="'hex'"
-      :border="false"
+  <div class="color-field">
+    <button
+      type="button"
+      class="color-swatch"
+      :style="{ backgroundColor: modelValue }"
       :disabled="disabled"
-      @update:model-value="onPanelUpdate"
-    >
-      <template #footer>
-        <div class="color-footer">
-          <el-button size="small" :disabled="disabled" @click="reset">
-            {{ t("directorView.sceneCfgReset") }}
-          </el-button>
-          <el-button size="small" :disabled="disabled" @click="cancel">
-            {{ t("directorView.sceneCfgCancel") }}
-          </el-button>
-          <el-button size="small" type="primary" :disabled="disabled" @click="confirm">
-            {{ t("directorView.sceneCfgOk") }}
-          </el-button>
-        </div>
-      </template>
-    </el-color-picker-panel>
-  </el-popover>
+      :aria-label="label"
+      :title="modelValue"
+      @click="open = !open"
+    ></button>
+
+    <div v-if="open" class="color-panel">
+      <el-color-picker-panel
+        :model-value="draft"
+        :show-alpha="false"
+        :color-format="'hex'"
+        :border="false"
+        :disabled="disabled"
+        @update:model-value="onPanelUpdate"
+      >
+        <template #footer>
+          <div class="color-footer">
+            <el-button size="small" :disabled="disabled" @click="reset">
+              {{ t("directorView.sceneCfgReset") }}
+            </el-button>
+            <el-button size="small" :disabled="disabled" @click="cancel">
+              {{ t("directorView.sceneCfgCancel") }}
+            </el-button>
+            <el-button size="small" type="primary" :disabled="disabled" @click="confirm">
+              {{ t("directorView.sceneCfgOk") }}
+            </el-button>
+          </div>
+        </template>
+      </el-color-picker-panel>
+    </div>
+  </div>
 </template>
 
 <style scoped>
+.color-field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
 .color-swatch {
   width: 40px;
   height: 40px;
@@ -122,6 +123,22 @@ function confirm(): void {
 .color-swatch:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+/* 颜色选择器面板：相对于所在行绝对定位，在下拉菜单内部居中且不超宽 */
+.color-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 8px);
+  display: flex;
+  justify-content: center;
+}
+.color-panel :deep(.el-color-picker-panel) {
+  width: 100%;
+  max-width: 300px;
+  box-sizing: border-box;
+  margin: 0;
 }
 
 /* HEX 输入框：收窄到刚好容纳 #RRGGBB 文本 */
