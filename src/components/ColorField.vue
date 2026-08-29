@@ -150,10 +150,6 @@ function confirm(): void {
   width: 300px;
   box-sizing: content-box;
   margin: 0;
-  /* 保持 Element Plus 默认内部布局（调色板 + 右侧纵向色相条不重叠），
-     再整体缩放以略小于下拉菜单并留出边距 */
-  transform: scale(0.88);
-  transform-origin: center center;
 }
 
 /* HEX 输入框：收窄到刚好容纳 #RRGGBB 文本 */

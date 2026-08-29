@@ -1102,7 +1102,7 @@ onUnmounted(() => {
 /* 场景配置下拉：主题色配置项（与导播配置下拉同构图） */
 .scene-cfg-dd {
   position: relative;
-  width: 340px;
+  width: 380px;
   padding: 10px 12px;
   box-sizing: border-box;
   display: flex;
@@ -1110,7 +1110,7 @@ onUnmounted(() => {
   gap: 12px;
 }
 .scene-cfg-dd.has-open-picker {
-  min-height: 300px;
+  min-height: 320px;
 }
 .cfg-section-title {
   font-size: 13px;
