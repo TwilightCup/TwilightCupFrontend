@@ -25,7 +25,7 @@ const route = useRoute();
 const router = useRouter();
 
 const phaseLabel = computed(() => phaseInfo(director.phase).label);
-/** 已结束比赛：导播控制台只读，所有舞台操控/配置编辑均锁定。 */
+/** 已结束比赛：导播控制台只读；除场景切换（纯展示控制）外，配置编辑/倒计时等舞台操控均锁定。 */
 const readOnly = computed(() => director.matchEnded);
 
 /** 选手状态标签（离线优先，口径同裁判端 PlayerStatusCard）：离线时状态标签让位为「未连接」 */
@@ -358,12 +358,11 @@ onUnmounted(() => {
         </el-button>
       </div>
 
-      <!-- 场景切换（合并舞台）：居中，写 localStorage，舞台页跨标签监听 -->
+      <!-- 场景切换（合并舞台）：居中；已结束比赛也保留切换（纯展示控制，不改比赛状态） -->
       <el-radio-group
         :model-value="activeScene"
         size="small"
         class="scene-switch"
-        :disabled="readOnly"
         @update:model-value="(v: string | number | boolean) => onSwitchScene(v as SceneKey)"
       >
         <el-radio-button

@@ -186,7 +186,7 @@ export const useDirectorStore = defineStore("director", () => {
   socket.onMessage = (msg) => handle(msg);
 
   const isMulti = computed(() => currentRound.value?.type === PickType.MULTI);
-  /** 已结束比赛：导播仅可查看，武器（场景切换 / 倒计时 / 配置广播）全部锁定。 */
+  /** 已结束比赛：导播仅可查看；除场景切换（纯舞台展示控制）外，倒计时 / 配置广播等操作全部锁定。 */
   const matchEnded = computed(
     () => matchStatus.value === MS.ENDED || phase.value === MatchPhase.MATCH_END,
   );
@@ -495,7 +495,9 @@ export const useDirectorStore = defineStore("director", () => {
       | "config_update",
     payload?: Record<string, unknown>,
   ): boolean {
-    if (matchEnded.value) return false;
+    // 已结束比赛仅锁定会改变比赛/直播配置的操作；场景切换只是舞台展示控制，
+    // 仍应允许导播在结束后切换查看比赛详情 / 图池 / 赛程图等回放画面。
+    if (matchEnded.value && action !== "switch_scene") return false;
     // 同步本地状态（config_update 无需：发送方本地已保存，后端广播排除发送者）
     if (action === "switch_scene") {
       currentSceneCmd.value = (payload?.scene as string) ?? null;
