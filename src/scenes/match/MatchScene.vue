@@ -5,9 +5,10 @@
  * 布局（1920×1080）：
  *   顶部：信息栏 TopBar（选手名/比分指示器/赛事·比赛标题，需求见顶栏文档）
  *   中部：双 4:3 选手画面满宽无缝并列（16:9 推流裁左右）
- *   下部：多关偏差条（单关隐藏）→ 双方计时器（主大字 + 副计时两行：上行
- *         当前关卡名 + 实时单段（live_time segment 外推），下行上一关名 +
- *         单段用时（淡紫），过一关上行内容沉入下行），屏幕中轴对称
+ *   下部：多关偏差条（单关隐藏）→ 双方计时器（主大字 + 副计时两行：多关
+ *         上行当前关卡名 + 实时单段，下行上一关名 + 单段用时；单关两行均
+ *         为「当前次数/总次数」，上行当前尝试实时分段时间，下行上一次尝试
+ *         用时），屏幕中轴对称
  *   左下角：当前选图角标卡（裁判宣布选图后常驻，PickCornerCard）
  *   底部：WR/PB 背景板（neon-panel 同款，横向铺满画面、垫在全部计时器与
  *         角标卡之下）+ PB 卡内容（当前项目 WR + 双方 PB，PbCornerCard，
@@ -138,7 +139,8 @@ const diffMs = computed(() =>
 //      隐藏：仅回合进行中（phase=IN_ROUND）且该选手座席在线（seat_state 维护；
 //      未连接的选手从未上报 player_status，status 恒为默认 IN_GAME，不能只看它）
 //      且仍在游戏内（status=IN_GAME，完赛 COMPLETED / 弃权 FORFEITED 均不算）
-//      且序号未越界（越界 = 已冲线）才显示；PREP / 判决后 / 单关恒 null ----
+//      且序号未越界（越界 = 已冲线）才显示；PREP / 判决后隐藏，单关由调用方
+//      换成「当前次数/总次数」标签 ----
 const levelNames = computed<string[]>(() => {
   if (!liveReady.value) return MOCK_MATCH.levelNames;
   const raw = director.currentRound?.collection.raw as { levels?: unknown } | undefined;
@@ -160,10 +162,11 @@ function currentLevelName(side: "A" | "B"): string | null {
   const name = levelNames.value[idx];
   return name ? (officialDisplayName(name) ?? name) : null;
 }
-const levelA = computed(() => currentLevelName("A"));
-const levelB = computed(() => currentLevelName("B"));
+const levelA = computed(() => (isMulti.value ? currentLevelName("A") : attemptProgressLabel("A")));
+const levelB = computed(() => (isMulti.value ? currentLevelName("B") : attemptProgressLabel("B")));
 
 // ---- 多关下行：上一关（最近完成）名 × 单段用时（上行内容过关后沉到这里） ----
+// 单关下行同样显示“当前次数/总次数”，右侧为上一次尝试的离线用时（subMs）。
 function prevLevelName(side: "A" | "B"): string | null {
   if (!isMulti.value) return null;
   const levels = liveReady.value
@@ -176,15 +179,15 @@ function prevLevelName(side: "A" | "B"): string | null {
   const name = levelNames.value[idx];
   return name ? (officialDisplayName(name) ?? name) : null;
 }
-const prevLevelA = computed(() => prevLevelName("A"));
-const prevLevelB = computed(() => prevLevelName("B"));
+const prevLevelA = computed(() => (isMulti.value ? prevLevelName("A") : attemptProgressLabel("A")));
+const prevLevelB = computed(() => (isMulti.value ? prevLevelName("B") : attemptProgressLabel("B")));
 
 const mainA = computed(() => formatMs(sideA.value.mainMs));
 const mainB = computed(() => formatMs(sideB.value.mainMs));
-/** 上行：当前关实时单段（live_time segment 外推；无实时数据时隐藏） */
+/** 上行：当前关/当前尝试实时分段时间（live_time segment 外推；无实时数据时隐藏） */
 const segA = computed(() => (liveSegA.value == null ? null : formatMs(liveSegA.value)));
 const segB = computed(() => (liveSegB.value == null ? null : formatMs(liveSegB.value)));
-/** 下行：上一关单段用时（离线权威口径，useMatchTiming 的 subMs） */
+/** 下行：多关 = 上一关单段用时；单关 = 上一次尝试用时（离线权威口径，subMs） */
 const prevSegA = computed(() =>
   sideA.value.subMs == null ? null : formatMs(sideA.value.subMs),
 );
@@ -255,6 +258,22 @@ const pickTags = computed(() => {
 const pickRetry = computed(() =>
   currentPick.value ? retryOf(draftStatus.value, currentPick.value) : null,
 );
+
+/** 单关“当前次数/总次数”：当前在尝试第几关（已上报尝试数 + 1）÷ 总重试次数 */
+function attemptProgressLabel(side: "A" | "B"): string | null {
+  if (isMulti.value) return null;
+  const total = pickRetry.value;
+  if (total == null || total <= 0) return null;
+  const attempts = liveReady.value
+    ? director.playerOf(side).attempts
+    : side === "A"
+      ? MOCK_MATCH.attemptsA
+      : MOCK_MATCH.attemptsB;
+  // 0 基已上报序号的最大值 + 2 = 当前（进行中）尝试的 1 基序号；空列表 = 第 1 次
+  const maxIndex = attempts.reduce((m, a) => Math.max(m, a.index), -1);
+  const current = Math.min(maxIndex + 2, total);
+  return `${current}/${total}`;
+}
 
 // ---- 右下角 PB 角标卡（speedrun.com 数据与 categoryinfo 场景同源共享） ----
 // 复用 useCategoryInfo：模块级快照跨组件共享——舞台在 categoryinfo 场景拉过
@@ -441,8 +460,9 @@ onUnmounted(() => {
         <div v-if="pbCardVisible" class="pb-backdrop neon-panel" :style="pbBackStyle" />
 
         <!-- 双方计时器：屏幕中轴对称，A 左 B 右，沉底；多关副计时两行（上行
-             当前关 + 实时单段，下行上一关 + 单段用时（淡紫））。timerA/V 为按
-             导播配置回放后的显示值（对齐各侧画面延迟） -->
+             当前关 + 实时单段，下行上一关 + 单段用时（淡紫））；单关两行标签
+             均为「当前次数/总次数」，上行当前尝试实时单段、下行上一次尝试
+             用时。timerA/V 为按导播配置回放后的显示值（对齐各侧画面延迟） -->
         <section ref="timersEl" class="timers">
           <PlayerTimer
             side="A"

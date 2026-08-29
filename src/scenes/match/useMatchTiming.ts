@@ -5,7 +5,9 @@
  * useLiveTimers 两次上报间墙钟外推 + 新样本矫正；无上报 / 回合外回退
  * 最近完成关卡的累计耗时）；副计时 = 最近完成关卡的单段耗时（离线口径，
  * 不随 live_time 走）。单关主计时 = 回合权威成绩（无则按计分制折算尝试
- * 明细：最快 / 平均）。
+ * 明细：最快 / 平均）。单关副计时 = 当前尝试的实时分段时间（live_time
+ * segment，见 MatchScene / useLiveTimers）+ 上一次尝试的离线成绩（这里只算
+ * 上一次尝试，当前尝试实时值由上层 liveSeg 提供）。
  *
  * 多关偏差条不在此计算——已改由 subsegment 实时时间差驱动（subsegment_gap
  * 广播 → director store.subsegmentGap → DiffBar，双方 TwilightTimer 时间线与
@@ -18,7 +20,8 @@ import { AttemptStatus, type Attempt, type LevelTime } from "@/api/types";
 export interface SideTiming {
   /** 主计时器：多关 = live_time 实时走表（回退最近完成关卡累计）；单关 = 后端成绩 */
   mainMs: number | null;
-  /** 副计时器：多关 = 最近完成关卡的单段耗时；单关 = null（隐藏） */
+  /** 副计时器：多关 = 最近完成关卡的单段耗时；单关 = 上一次尝试（最近一次已上报）
+   *  的用时；当前尝试实时分段时间由上层 liveSeg 单独提供 */
   subMs: number | null;
 }
 
@@ -46,6 +49,15 @@ function lastLevel(levels: LevelTime[]): { idx: number; cum: number; seg: number
   const sum = upTo.reduce((s, l) => s + l.time_ms, 0);
   const hit = upTo.find((l) => l.level_index === idx)!;
   return { idx, cum: hit.total_ms ?? sum, seg: hit.time_ms };
+}
+
+/** 单关上一次尝试：取最近一条带用时的尝试（跳过/未完成无成绩不计入） */
+function lastAttemptMs(attempts: Attempt[]): number | null {
+  const withTime = attempts
+    .filter((a) => a.time_ms != null)
+    .sort((a, b) => a.index - b.index);
+  const last = withTime[withTime.length - 1];
+  return last?.time_ms ?? null;
 }
 
 /** 单关成绩：FASTEST = 最快有效尝试；AVERAGE = 有效尝试平均（口径对齐后端计分制） */
@@ -85,7 +97,8 @@ export function useMatchTiming(src: MatchTimingSource): {
   function singleSide(side: "A" | "B"): SideTiming {
     return {
       mainMs: src.scoreOf(side) ?? attemptScore(src.attemptsOf(side), method.value),
-      subMs: null,
+      // 当前尝试的实时分段时间由上层 liveSeg 提供；这里给下行“上一次尝试”用时
+      subMs: lastAttemptMs(src.attemptsOf(side)),
     };
   }
   const sideA = computed(() => (src.isMulti() ? multiSide("A", lastA.value) : singleSide("A")));
