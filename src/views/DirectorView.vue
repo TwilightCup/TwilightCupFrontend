@@ -25,6 +25,8 @@ const route = useRoute();
 const router = useRouter();
 
 const phaseLabel = computed(() => phaseInfo(director.phase).label);
+/** 已结束比赛：导播控制台只读，所有舞台操控/配置编辑均锁定。 */
+const readOnly = computed(() => director.matchEnded);
 
 /** 选手状态标签（离线优先，口径同裁判端 PlayerStatusCard）：离线时状态标签让位为「未连接」 */
 function sideStatusInfo(side: "A" | "B"): ReturnType<typeof playerStatusInfo> {
@@ -351,7 +353,7 @@ onUnmounted(() => {
           🎬 {{ $t("directorView.brand") }}
           <el-tag size="small" type="warning" effect="dark">{{ $t("directorView.readOnlyTag") }}</el-tag>
         </div>
-        <el-button size="small" @click="refreshSpeedrun">
+        <el-button size="small" :disabled="readOnly" @click="refreshSpeedrun">
           {{ $t("directorView.refreshSpeedrun") }}
         </el-button>
       </div>
@@ -361,6 +363,7 @@ onUnmounted(() => {
         :model-value="activeScene"
         size="small"
         class="scene-switch"
+        :disabled="readOnly"
         @update:model-value="(v: string | number | boolean) => onSwitchScene(v as SceneKey)"
       >
         <el-radio-button
@@ -381,8 +384,8 @@ onUnmounted(() => {
         </div>
 
         <!-- 导播配置下拉：HLS/嵌入链接填写 + 保存（WS 实时推送到已打开的舞台，并写入舞台链接） -->
-        <el-dropdown trigger="click" placement="bottom-end">
-          <el-button size="small">{{ $t("directorView.cfgTitle") }}</el-button>
+        <el-dropdown trigger="click" placement="bottom-end" :disabled="readOnly">
+          <el-button size="small" :disabled="readOnly">{{ $t("directorView.cfgTitle") }}</el-button>
           <template #dropdown>
             <el-dropdown-menu>
               <div class="cfg-dd">
@@ -392,6 +395,7 @@ onUnmounted(() => {
                     <el-input
                       v-model="cfgForm[f.key]"
                       size="small"
+                      :disabled="readOnly"
                       :placeholder="f.key.startsWith('hls') ? 'https://.../a.m3u8' : 'B站房间号/直播间链接 或 YouTube 直播链接（自动代理）'"
                     />
                   </label>
@@ -400,7 +404,7 @@ onUnmounted(() => {
                   <el-button
                     size="small"
                     type="primary"
-                    :disabled="!director.matchId"
+                    :disabled="!director.matchId || readOnly"
                     @click="saveConfig()"
                   >
                     {{ $t("common.save") }}
@@ -415,7 +419,7 @@ onUnmounted(() => {
                   :disabled="!stageUrl"
                 >
                   <template #append>
-                    <el-button size="small" :disabled="!stageUrl" @click="copyUrl(stageUrl)">
+                    <el-button size="small" :disabled="!stageUrl || readOnly" @click="copyUrl(stageUrl)">
                       {{ $t("directorView.copyOverlayBtn") }}
                     </el-button>
                   </template>
@@ -430,6 +434,10 @@ onUnmounted(() => {
         <AccountMenu @logout="logout" />
       </div>
     </header>
+
+    <div v-if="readOnly" class="readonly-banner">
+      {{ $t("directorView.endedReadonly") }}
+    </div>
 
     <div
       v-if="['connecting', 'reconnecting'].includes(director.connStatus)"
@@ -456,6 +464,7 @@ onUnmounted(() => {
               :model-value="previewScene"
               size="small"
               class="preview-select"
+              :disabled="readOnly"
               @update:model-value="(v: string | number | boolean | undefined) => onPickPreviewScene(v)"
             >
               <el-option
@@ -503,7 +512,7 @@ onUnmounted(() => {
 
       <aside class="col-right">
         <!-- Coming Soon 倒计时控制（仅待开始场景可用） -->
-        <div v-if="activeScene === 'soon'" class="card">
+        <div v-if="activeScene === 'soon' && !readOnly" class="card">
           <div class="card-title">{{ $t("directorView.soonTitle") }}</div>
           <p class="hint">{{ $t("directorView.soonHint") }}</p>
           <div class="soon-row">
@@ -558,15 +567,15 @@ onUnmounted(() => {
           <div class="cfg-ctl">
             <div class="ctl-side">
               <span class="lbl tc-a">A · {{ director.nameOf("A") }}</span>
-              <el-switch v-model="showA" size="small" />
-              <el-button size="small" :disabled="!director.matchId" @click="refreshStream('A')">
+              <el-switch v-model="showA" size="small" :disabled="readOnly" />
+              <el-button size="small" :disabled="!director.matchId || readOnly" @click="refreshStream('A')">
                 {{ $t("directorView.cfgRefresh") }}
               </el-button>
             </div>
             <div class="ctl-side">
               <span class="lbl tc-b">B · {{ director.nameOf("B") }}</span>
-              <el-switch v-model="showB" size="small" />
-              <el-button size="small" :disabled="!director.matchId" @click="refreshStream('B')">
+              <el-switch v-model="showB" size="small" :disabled="readOnly" />
+              <el-button size="small" :disabled="!director.matchId || readOnly" @click="refreshStream('B')">
                 {{ $t("directorView.cfgRefresh") }}
               </el-button>
             </div>
@@ -702,7 +711,7 @@ onUnmounted(() => {
                 :step-strict="true"
                 size="small"
                 class="delay-num"
-                :disabled="!director.matchId"
+                :disabled="!director.matchId || readOnly"
                 @change="pushDelay('delayA')"
               />
               <span class="lbl tc-b">B</span>
@@ -715,7 +724,7 @@ onUnmounted(() => {
                 :step-strict="true"
                 size="small"
                 class="delay-num"
-                :disabled="!director.matchId"
+                :disabled="!director.matchId || readOnly"
                 @change="pushDelay('delayB')"
               />
               <!-- 偏差条标签横跨前三列（左缘与 A 对齐），输入框与 B 调整框同列 -->
@@ -729,7 +738,7 @@ onUnmounted(() => {
                 :step-strict="true"
                 size="small"
                 class="delay-num"
-                :disabled="!director.matchId"
+                :disabled="!director.matchId || readOnly"
                 @change="pushDelay('delayDiff')"
               />
             </div>
@@ -811,6 +820,14 @@ onUnmounted(() => {
   text-align: center;
   padding: 3px 0;
   border-bottom: 1px solid #5a3f12;
+}
+.readonly-banner {
+  background: rgba(37, 143, 90, 0.12);
+  color: #7ee2a8;
+  font-size: 12px;
+  text-align: center;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(55, 210, 122, 0.25);
 }
 .main {
   flex: 1;

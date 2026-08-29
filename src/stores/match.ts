@@ -16,6 +16,7 @@ import { api } from "@/api/client";
 import {
   AttemptStatus,
   MatchPhase,
+  MatchStatus,
   PlayerStatus,
   RoundVerdict,
   type Attempt,
@@ -115,6 +116,8 @@ export const useMatchStore = defineStore("match", () => {
 
   // --- 比赛元数据（来自 match_log.initial_info，可能尚未就绪）---
   const matchName = ref("");
+  /** 比赛状态（来自 /me/matches/{id}；已结束比赛进入只读查看用） */
+  const matchStatus = ref<MatchStatus | null>(null);
   const boFormat = ref(0);
   const winThreshold = ref(0);
   const scoringMethodName = ref<string>("");
@@ -183,7 +186,10 @@ export const useMatchStore = defineStore("match", () => {
   const canVerdict = computed(
     () => phase.value === MatchPhase.ROUND_JUDGING && !!currentRoundId.value,
   );
-  const matchEnded = computed(() => phase.value === MatchPhase.MATCH_END);
+  const matchEnded = computed(
+    () =>
+      phase.value === MatchPhase.MATCH_END || matchStatus.value === MatchStatus.ENDED,
+  );
   /** 胜负已定：某方达到取胜分数（达阈值后比赛不自动结束，等裁判手动收尾） */
   const decidedWinner = computed<"A" | "B" | null>(() => {
     if (winThreshold.value <= 0) return null;
@@ -550,6 +556,7 @@ export const useMatchStore = defineStore("match", () => {
       if (m.player_b_username) playerNames.B = m.player_b_username;
       if (m.bo_format) boFormat.value = m.bo_format;
       if (m.win_threshold) winThreshold.value = m.win_threshold;
+      matchStatus.value = m.status;
     } catch {
       // 纯裁判无权或网络失败：保持空，由 match_log/WS 兜底
     }
@@ -716,6 +723,7 @@ export const useMatchStore = defineStore("match", () => {
     seat.value = null;
     authErrorMessage.value = "";
     matchName.value = "";
+    matchStatus.value = null;
     boFormat.value = 0;
     winThreshold.value = 0;
     scoringMethodName.value = "";
@@ -755,6 +763,7 @@ export const useMatchStore = defineStore("match", () => {
     seat,
     authErrorMessage,
     matchName,
+    matchStatus,
     boFormat,
     winThreshold,
     scoringMethodName,

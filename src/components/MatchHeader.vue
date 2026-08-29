@@ -145,10 +145,10 @@ async function onResume(): Promise<void> {
       </div>
       <div class="actions">
         <RoleSwitcher />
-        <el-button v-if="draft.canPause" size="small" type="warning" plain @click="onPause">
+        <el-button v-if="!match.matchEnded && draft.canPause" size="small" type="warning" plain @click="onPause">
           {{ $t('matchHeader.pauseMatchBtn') }}
         </el-button>
-        <el-button v-if="draft.canResume" size="small" type="success" plain @click="onResume">
+        <el-button v-if="!match.matchEnded && draft.canResume" size="small" type="success" plain @click="onResume">
           {{ $t('matchHeader.resumeMatchBtn') }}
         </el-button>
         <el-button size="small" @click="emit('back')">{{ $t('matchHeader.myMatchesBtn') }}</el-button>

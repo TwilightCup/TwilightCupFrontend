@@ -14,12 +14,12 @@ import { computed, ref } from "vue";
 import { api } from "@/api/client";
 import {
   MatchPhase,
+  MatchStatus as MS,
   PickType,
   PlayerStatus,
   type Attempt,
   type LevelTime,
   type MatchPhase as MP,
-  type MatchStatus as MS,
   type Pick,
   type PickType as PT,
   type PlayerStatus as PS,
@@ -186,6 +186,10 @@ export const useDirectorStore = defineStore("director", () => {
   socket.onMessage = (msg) => handle(msg);
 
   const isMulti = computed(() => currentRound.value?.type === PickType.MULTI);
+  /** 已结束比赛：导播仅可查看，武器（场景切换 / 倒计时 / 配置广播）全部锁定。 */
+  const matchEnded = computed(
+    () => matchStatus.value === MS.ENDED || phase.value === MatchPhase.MATCH_END,
+  );
 
   function log(kind: string, text: string, ts?: string): void {
     messages.value.unshift({ ts: ts ?? clock(), kind, text });
@@ -491,6 +495,7 @@ export const useDirectorStore = defineStore("director", () => {
       | "config_update",
     payload?: Record<string, unknown>,
   ): boolean {
+    if (matchEnded.value) return false;
     // 同步本地状态（config_update 无需：发送方本地已保存，后端广播排除发送者）
     if (action === "switch_scene") {
       currentSceneCmd.value = (payload?.scene as string) ?? null;
@@ -598,6 +603,7 @@ export const useDirectorStore = defineStore("director", () => {
     liveTimeB,
     // 派生 / 动作
     isMulti,
+    matchEnded,
     stageUrl,
     scenePageUrl,
     // 导演指令（WS 广播 → 舞台）

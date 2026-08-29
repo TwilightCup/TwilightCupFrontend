@@ -245,6 +245,7 @@ const messages: MessageSchema = {
 
   // ── matchView ────────────────────────────────────────────────────────
   "matchView.coldAlert": "Match metadata is generated after the first round starts. Once in the prep phase, enter the first pick code manually in \"This round's pick\" (e.g. ML1).",
+  "matchView.endedReadonly": "This match has ended. Read-only: all referee controls are locked.",
 
   // ── matchHeader ──────────────────────────────────────────────────────
   "matchHeader.unnamed": "Unnamed match (awaiting start)",
@@ -347,6 +348,7 @@ const messages: MessageSchema = {
   "chat.placeholder": "Type a message, or use a ! command (!roll / !timer)",
   "chat.sendBtn": "Send",
   "chat.rollTooltip": "Roll 1-100",
+  "chat.readonlyHint": "This match has ended; chat is read-only.",
 
   // ── history ──────────────────────────────────────────────────────────
   "history.title": "Round data / match log",
@@ -481,6 +483,7 @@ const messages: MessageSchema = {
   // ── director view ────────────────────────────────────────────────────
   "directorView.brand": "Director",
   "directorView.readOnlyTag": "Read-only",
+  "directorView.endedReadonly": "This match has ended. Read-only: all director controls are locked.",
   "directorView.myMatchesBtn": "My matches",
   "directorView.currentRoundTitle": "Current round",
   "directorView.countdownLabel": "Countdown {n}s",

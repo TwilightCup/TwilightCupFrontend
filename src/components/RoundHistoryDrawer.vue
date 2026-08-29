@@ -20,7 +20,10 @@ import {
   verdictInfo,
 } from "@/utils/format";
 
-const props = defineProps<{ modelValue: boolean }>();
+const props = withDefaults(
+  defineProps<{ modelValue: boolean; readOnly?: boolean }>(),
+  { readOnly: false },
+);
 const emit = defineEmits<{ (e: "update:modelValue", v: boolean): void }>();
 
 const { t } = useI18n();
@@ -204,7 +207,7 @@ function p2(n: number): string {
           </template>
         </div>
 
-        <div v-if="r.verdict != null" class="edit-row">
+        <div v-if="r.verdict != null && !props.readOnly" class="edit-row">
           <span class="dim">{{ $t('history.editVerdictLabel') }}</span>
           <el-select
             :model-value="r.verdict"

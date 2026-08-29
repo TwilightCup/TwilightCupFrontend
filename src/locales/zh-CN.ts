@@ -249,6 +249,7 @@ const messages = {
 
   // ── MatchView ────────────────────────────────────────────────────────
   "matchView.coldAlert": "比赛元数据将在首个回合开始后生成。进入准备阶段后，请在「本回合选图」中手动输入首个选图编号（如 ML1）。",
+  "matchView.endedReadonly": "比赛已结束。当前为只读查看，所有裁判操作均已锁定。",
 
   // ── MatchHeader ──────────────────────────────────────────────────────
   "matchHeader.unnamed": "未命名比赛（等待开始）",
@@ -351,6 +352,7 @@ const messages = {
   "chat.placeholder": "输入消息，或使用 ! 命令（!roll / !timer）",
   "chat.sendBtn": "发送",
   "chat.rollTooltip": "掷骰 1-100",
+  "chat.readonlyHint": "比赛已结束，聊天为只读。",
 
   // ── RoundHistoryDrawer ───────────────────────────────────────────────
   "history.title": "回合数据 / 比赛日志",
@@ -485,6 +487,7 @@ const messages = {
   // ── 导播控制台（DirectorView） ───────────────────────────────────────
   "directorView.brand": "导播端",
   "directorView.readOnlyTag": "只读",
+  "directorView.endedReadonly": "比赛已结束。当前为只读查看，所有导播操作均已锁定。",
   "directorView.myMatchesBtn": "我的比赛",
   "directorView.currentRoundTitle": "当前回合",
   "directorView.countdownLabel": "倒计时 {n}s",

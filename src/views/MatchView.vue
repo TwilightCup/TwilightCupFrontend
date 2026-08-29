@@ -25,6 +25,9 @@ const router = useRouter();
 
 const historyOpen = ref(false);
 
+/** 已结束比赛：只读查看，隐藏全部裁判操作面板。 */
+const readOnly = computed(() => match.matchEnded);
+
 const inDraftPhase = computed(
   () => match.canMarkPrep || match.phase === MatchPhase.PREP,
 );
@@ -135,12 +138,12 @@ onUnmounted(() => {
           show-icon
           class="ended-alert"
         >
-          {{ $t('matchEndBanner.endedAlert') }}
+          {{ $t('matchView.endedReadonly') }}
         </el-alert>
 
-        <BanPickPanel v-if="showBanPick" />
-        <PrepPanel v-if="showPrepFallback" />
-        <VerdictPanel v-if="showVerdict" />
+        <BanPickPanel v-if="showBanPick && !readOnly" />
+        <PrepPanel v-if="showPrepFallback && !readOnly" />
+        <VerdictPanel v-if="showVerdict && !readOnly" />
 
         <div class="players">
           <PlayerStatusCard side="A" />
@@ -149,12 +152,12 @@ onUnmounted(() => {
       </div>
 
       <div class="col-right">
-        <CounterWidget />
-        <ChatPanel />
+        <CounterWidget v-if="!readOnly" />
+        <ChatPanel :read-only="readOnly" />
       </div>
     </main>
 
-    <RoundHistoryDrawer v-model="historyOpen" />
+    <RoundHistoryDrawer v-model="historyOpen" :read-only="readOnly" />
 
     <!-- 鉴权失败遮罩（无活动比赛时可不登出，返回主页 / 切换端） -->
     <Transition name="fade">

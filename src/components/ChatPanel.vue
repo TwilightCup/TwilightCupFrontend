@@ -7,6 +7,10 @@ import type { ChatLine } from "@/stores/match";
 const match = useMatchStore();
 const listEl = ref<HTMLElement | null>(null);
 
+const props = withDefaults(defineProps<{ readOnly?: boolean }>(), {
+  readOnly: false,
+});
+
 /**
  * 名字着色类（与管理端比赛详情-聊天保持一致）：
  * - 系统 / 导播等：灰色（sys 兜底）
@@ -61,7 +65,7 @@ watch(
         <span class="cl-text">{{ line.text }}</span>
       </div>
     </div>
-    <div class="composer">
+    <div v-if="!props.readOnly" class="composer">
       <el-input
         v-model="match.chatInput"
         :placeholder="$t('chat.placeholder')"
@@ -70,6 +74,7 @@ watch(
       <el-button type="primary" @click="send">{{ $t('chat.sendBtn') }}</el-button>
       <el-button :title="$t('chat.rollTooltip')" @click="roll">🎲 !roll</el-button>
     </div>
+    <div v-else class="readonly-hint">{{ $t('chat.readonlyHint') }}</div>
   </section>
 </template>
 
@@ -157,5 +162,12 @@ watch(
   gap: 6px;
   padding: 10px;
   border-top: 1px solid var(--tc-border);
+}
+.readonly-hint {
+  padding: 8px 10px;
+  border-top: 1px solid var(--tc-border);
+  color: var(--tc-text-dim);
+  font-size: 12px;
+  text-align: center;
 }
 </style>
