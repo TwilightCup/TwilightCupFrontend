@@ -844,7 +844,6 @@ onUnmounted(() => {
             :label="$t('directorView.sceneCfgPlayerA')"
             :disabled="!director.matchId || readOnly"
           />
-          <code class="theme-hex">{{ sceneThemeA }}</code>
         </div>
         <div class="theme-row">
           <span class="theme-label">{{ $t("directorView.sceneCfgPlayerB") }}</span>
@@ -853,9 +852,7 @@ onUnmounted(() => {
             :label="$t('directorView.sceneCfgPlayerB')"
             :disabled="!director.matchId || readOnly"
           />
-          <code class="theme-hex">{{ sceneThemeB }}</code>
         </div>
-        <p class="hint">{{ $t("directorView.sceneCfgOpacityHint") }}</p>
       </div>
       <template #footer>
         <el-button @click="sceneCfgVisible = false">{{ $t("common.cancel") }}</el-button>
@@ -1111,12 +1108,6 @@ onUnmounted(() => {
   font-size: 13px;
   font-weight: 600;
   color: var(--tc-text);
-}
-.theme-hex {
-  font-family: "JetBrains Mono Variable", monospace;
-  font-size: 12px;
-  color: var(--tc-text-dim);
-  text-transform: uppercase;
 }
 .cfg-ctl {
   display: flex;

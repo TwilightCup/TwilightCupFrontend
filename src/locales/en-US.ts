@@ -511,7 +511,6 @@ const messages: MessageSchema = {
   "directorView.sceneCfgThemeTitle": "Player theme color",
   "directorView.sceneCfgPlayerA": "Player A",
   "directorView.sceneCfgPlayerB": "Player B",
-  "directorView.sceneCfgOpacityHint": "Colors have no alpha; they are always fully opaque after saving.",
   "directorView.sceneCfgSaved": "Scene appearance saved",
   "directorView.cfgRefresh": "Reload",
   "directorView.refreshSpeedrun": "Refresh speedrun",

@@ -515,7 +515,6 @@ const messages = {
   "directorView.sceneCfgThemeTitle": "选手主题色",
   "directorView.sceneCfgPlayerA": "选手A",
   "directorView.sceneCfgPlayerB": "选手B",
-  "directorView.sceneCfgOpacityHint": "颜色不包含透明度，保存后将以完全不透明显示。",
   "directorView.sceneCfgSaved": "场景外观已保存",
   "directorView.cfgRefresh": "重拉流",
   "directorView.refreshSpeedrun": "重拉Speedrun",
