@@ -20,9 +20,12 @@ import { AttemptStatus, type Attempt, type LevelTime } from "@/api/types";
 export interface SideTiming {
   /** 主计时器：多关 = live_time 实时走表（回退最近完成关卡累计）；单关 = 后端成绩 */
   mainMs: number | null;
-  /** 副计时器：多关 = 最近完成关卡的单段耗时；单关 = 上一次尝试（最近一次已上报）
-   *  的用时；当前尝试实时分段时间由上层 liveSeg 单独提供 */
+  /** 副计时器：多关 = 最近完成关卡的单段耗时；单关 = 上一次尝试（最近一条已上报，
+   *  可为 null = 跳过/未完成，由上层显示 N/A）；当前尝试实时分段时间由上层
+   *  liveSeg 单独提供 */
   subMs: number | null;
+  /** 是否存在下行（多关：已有完成关卡；单关：已有至少一条尝试记录） */
+  hasSubMs: boolean;
 }
 
 /** 计时数据源（scene 层把 director store / mock 折算成这几个 getter） */
@@ -51,13 +54,12 @@ function lastLevel(levels: LevelTime[]): { idx: number; cum: number; seg: number
   return { idx, cum: hit.total_ms ?? sum, seg: hit.time_ms };
 }
 
-/** 单关上一次尝试：取最近一条带用时的尝试（跳过/未完成无成绩不计入） */
+/** 单关上一次尝试：取最近一条尝试（下标最大）的原始用时；跳过/未完成为 null，
+ *  上层据此显示 N/A，而不是回退到更早的成绩 */
 function lastAttemptMs(attempts: Attempt[]): number | null {
-  const withTime = attempts
-    .filter((a) => a.time_ms != null)
-    .sort((a, b) => a.index - b.index);
-  const last = withTime[withTime.length - 1];
-  return last?.time_ms ?? null;
+  if (!attempts.length) return null;
+  const last = [...attempts].sort((a, b) => a.index - b.index)[attempts.length - 1]!;
+  return last.time_ms ?? null;
 }
 
 /** 单关成绩：FASTEST = 最快有效尝试；AVERAGE = 有效尝试平均（口径对齐后端计分制） */
@@ -92,13 +94,17 @@ export function useMatchTiming(src: MatchTimingSource): {
       // 实时走表优先；无 live_time（插件未升级 / 回合外）回退离线累计口径
       mainMs: src.liveOf(side) ?? (last ? last.cum : 0),
       subMs: last ? last.seg : null,
+      hasSubMs: last != null,
     };
   }
   function singleSide(side: "A" | "B"): SideTiming {
+    const attempts = src.attemptsOf(side);
     return {
-      mainMs: src.scoreOf(side) ?? attemptScore(src.attemptsOf(side), method.value),
-      // 当前尝试的实时分段时间由上层 liveSeg 提供；这里给下行“上一次尝试”用时
-      subMs: lastAttemptMs(src.attemptsOf(side)),
+      mainMs: src.scoreOf(side) ?? attemptScore(attempts, method.value),
+      // 当前尝试的实时分段时间由上层 liveSeg 提供；这里给下行“上一次尝试”用时，
+      // 跳过/未完成保留 null，由上层显示 N/A
+      subMs: lastAttemptMs(attempts),
+      hasSubMs: attempts.length > 0,
     };
   }
   const sideA = computed(() => (src.isMulti() ? multiSide("A", lastA.value) : singleSide("A")));

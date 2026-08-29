@@ -6,9 +6,9 @@
  *   顶部：信息栏 TopBar（选手名/比分指示器/赛事·比赛标题，需求见顶栏文档）
  *   中部：双 4:3 选手画面满宽无缝并列（16:9 推流裁左右）
  *   下部：多关偏差条（单关隐藏）→ 双方计时器（主大字 + 副计时两行：多关
- *         上行当前关卡名 + 实时单段，下行上一关名 + 单段用时；单关两行均
- *         为「当前次数/总次数」，上行当前尝试实时分段时间，下行上一次尝试
- *         用时），屏幕中轴对称
+ *         上行当前关卡名 + 实时单段，下行上一关名 + 单段用时；单关第一行为
+ *         「当前次数/总次数」+ 当前尝试实时分段时间，第二行为「上一次次数/总次数」
+ *         + 上一次尝试用时（跳过显示 N/A）），屏幕中轴对称
  *   左下角：当前选图角标卡（裁判宣布选图后常驻，PickCornerCard）
  *   底部：WR/PB 背景板（neon-panel 同款，横向铺满画面、垫在全部计时器与
  *         角标卡之下）+ PB 卡内容（当前项目 WR + 双方 PB，PbCornerCard，
@@ -162,11 +162,11 @@ function currentLevelName(side: "A" | "B"): string | null {
   const name = levelNames.value[idx];
   return name ? (officialDisplayName(name) ?? name) : null;
 }
-const levelA = computed(() => (isMulti.value ? currentLevelName("A") : attemptProgressLabel("A")));
-const levelB = computed(() => (isMulti.value ? currentLevelName("B") : attemptProgressLabel("B")));
+const levelA = computed(() => (isMulti.value ? currentLevelName("A") : currentAttemptLabel("A")));
+const levelB = computed(() => (isMulti.value ? currentLevelName("B") : currentAttemptLabel("B")));
 
 // ---- 多关下行：上一关（最近完成）名 × 单段用时（上行内容过关后沉到这里） ----
-// 单关下行同样显示“当前次数/总次数”，右侧为上一次尝试的离线用时（subMs）。
+// 单关下行：上一尝试序号/总次数 + 上一次尝试用时（跳过/未完成显示 N/A）。
 function prevLevelName(side: "A" | "B"): string | null {
   if (!isMulti.value) return null;
   const levels = liveReady.value
@@ -179,20 +179,20 @@ function prevLevelName(side: "A" | "B"): string | null {
   const name = levelNames.value[idx];
   return name ? (officialDisplayName(name) ?? name) : null;
 }
-const prevLevelA = computed(() => (isMulti.value ? prevLevelName("A") : attemptProgressLabel("A")));
-const prevLevelB = computed(() => (isMulti.value ? prevLevelName("B") : attemptProgressLabel("B")));
+const prevLevelA = computed(() => (isMulti.value ? prevLevelName("A") : previousAttemptLabel("A")));
+const prevLevelB = computed(() => (isMulti.value ? prevLevelName("B") : previousAttemptLabel("B")));
 
 const mainA = computed(() => formatMs(sideA.value.mainMs));
 const mainB = computed(() => formatMs(sideB.value.mainMs));
 /** 上行：当前关/当前尝试实时分段时间（live_time segment 外推；无实时数据时隐藏） */
 const segA = computed(() => (liveSegA.value == null ? null : formatMs(liveSegA.value)));
 const segB = computed(() => (liveSegB.value == null ? null : formatMs(liveSegB.value)));
-/** 下行：多关 = 上一关单段用时；单关 = 上一次尝试用时（离线权威口径，subMs） */
+/** 下行：多关 = 上一关单段用时；单关 = 上一次尝试用时；有记录但无成绩（跳过）显示 N/A */
 const prevSegA = computed(() =>
-  sideA.value.subMs == null ? null : formatMs(sideA.value.subMs),
+  sideA.value.hasSubMs ? formatMs(sideA.value.subMs) : null,
 );
 const prevSegB = computed(() =>
-  sideB.value.subMs == null ? null : formatMs(sideB.value.subMs),
+  sideB.value.hasSubMs ? formatMs(sideB.value.subMs) : null,
 );
 
 // ---- 计时显示延迟回放（useDelayedRef）：选手画面常有数秒延迟而计时近实时，
@@ -259,20 +259,49 @@ const pickRetry = computed(() =>
   currentPick.value ? retryOf(draftStatus.value, currentPick.value) : null,
 );
 
-/** 单关“当前次数/总次数”：当前在尝试第几关（已上报尝试数 + 1）÷ 总重试次数 */
-function attemptProgressLabel(side: "A" | "B"): string | null {
-  if (isMulti.value) return null;
-  const total = pickRetry.value;
-  if (total == null || total <= 0) return null;
+/** 单关某侧已上报尝试（含跳过/未完成）的最高 0 基序号；无记录返回 -1 */
+function latestAttemptIndex(side: "A" | "B"): number {
   const attempts = liveReady.value
     ? director.playerOf(side).attempts
     : side === "A"
       ? MOCK_MATCH.attemptsA
       : MOCK_MATCH.attemptsB;
+  return attempts.reduce((m, a) => Math.max(m, a.index), -1);
+}
+
+/** 单关总重试次数；不可得时为 null */
+function attemptTotal(): number | null {
+  const total = pickRetry.value;
+  return total != null && total > 0 ? total : null;
+}
+
+/**
+ * 单关第一行“当前次数/总次数”：只在回合进行中、该选手在线且仍在游戏内时显示；
+ * 未开始 / 未连接 / 已完赛不占第一行。
+ */
+function currentAttemptLabel(side: "A" | "B"): string | null {
+  if (isMulti.value) return null;
+  if (liveReady.value) {
+    if (director.phase !== MatchPhase.IN_ROUND) return null;
+    if (!(side === "A" ? director.aOnline : director.bOnline)) return null;
+    if (director.playerOf(side).status !== PlayerStatus.IN_GAME) return null;
+  }
+  const total = attemptTotal();
+  if (total == null) return null;
   // 0 基已上报序号的最大值 + 2 = 当前（进行中）尝试的 1 基序号；空列表 = 第 1 次
-  const maxIndex = attempts.reduce((m, a) => Math.max(m, a.index), -1);
-  const current = Math.min(maxIndex + 2, total);
+  const current = Math.min(latestAttemptIndex(side) + 2, total);
   return `${current}/${total}`;
+}
+
+/** 单关第二行“上一次尝试序号/总次数”：有至少一条已上报尝试才显示 */
+function previousAttemptLabel(side: "A" | "B"): string | null {
+  if (isMulti.value) return null;
+  const total = attemptTotal();
+  if (total == null) return null;
+  const maxIndex = latestAttemptIndex(side);
+  if (maxIndex < 0) return null;
+  const previous = Math.min(maxIndex + 1, total);
+  return `${previous}/${total}`;
 }
 
 // ---- 右下角 PB 角标卡（speedrun.com 数据与 categoryinfo 场景同源共享） ----
@@ -460,9 +489,10 @@ onUnmounted(() => {
         <div v-if="pbCardVisible" class="pb-backdrop neon-panel" :style="pbBackStyle" />
 
         <!-- 双方计时器：屏幕中轴对称，A 左 B 右，沉底；多关副计时两行（上行
-             当前关 + 实时单段，下行上一关 + 单段用时（淡紫））；单关两行标签
-             均为「当前次数/总次数」，上行当前尝试实时单段、下行上一次尝试
-             用时。timerA/V 为按导播配置回放后的显示值（对齐各侧画面延迟） -->
+             当前关 + 实时单段，下行上一关 + 单段用时（淡紫））；单关第一行
+             为「当前次数/总次数」+ 当前尝试实时单段，第二行为「上一次次数/
+             总次数」+ 上一次尝试用时（跳过显示 N/A）。timerA/V 为按导播配置
+             回放后的显示值（对齐各侧画面延迟） -->
         <section ref="timersEl" class="timers">
           <PlayerTimer
             side="A"
