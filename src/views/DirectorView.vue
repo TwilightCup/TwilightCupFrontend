@@ -842,6 +842,7 @@ onUnmounted(() => {
           <ColorField
             v-model="sceneThemeA"
             :label="$t('directorView.sceneCfgPlayerA')"
+            :default-value="DEFAULT_THEME_A"
             :disabled="!director.matchId || readOnly"
           />
         </div>
@@ -850,6 +851,7 @@ onUnmounted(() => {
           <ColorField
             v-model="sceneThemeB"
             :label="$t('directorView.sceneCfgPlayerB')"
+            :default-value="DEFAULT_THEME_B"
             :disabled="!director.matchId || readOnly"
           />
         </div>
