@@ -12,8 +12,7 @@ const { t } = useI18n();
 
 /**
  * 裁判「我的比赛」列表（多场切换入口）。
- * - 仅 1 个非结束比赛 → 自动进入（保持单场裁判的顺滑体验）；
- * - 否则列出全部，点击进入 `/referee/:matchId`（链接为锚点，⌘/Ctrl 点击可新标签多开）。
+ * 始终列出全部比赛，不自动跳转；点击进入 `/referee/:matchId`（链接为锚点，⌘/Ctrl 点击可新标签多开）。
  */
 const auth = useAuthStore();
 const router = useRouter();
@@ -26,18 +25,10 @@ async function load(): Promise<void> {
   loading.value = true;
   try {
     matches.value = await api.listMyMatches(auth.token);
-    maybeAutoEnter();
   } catch (e) {
     ElMessage.error(e instanceof ApiError ? e.message : t("referee.loadError"));
   } finally {
     loading.value = false;
-  }
-}
-
-function maybeAutoEnter(): void {
-  const active = matches.value.filter((s) => s.status !== MatchStatus.ENDED);
-  if (active.length === 1) {
-    router.replace(`/referee/${active[0].id}`);
   }
 }
 
