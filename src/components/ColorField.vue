@@ -63,7 +63,7 @@ function confirm(): void {
     placement="bottom-start"
     :width="330"
     :disabled="disabled"
-    :teleported="true"
+    :teleported="false"
   >
     <template #reference>
       <button
