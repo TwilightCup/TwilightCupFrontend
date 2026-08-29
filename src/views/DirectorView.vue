@@ -99,8 +99,19 @@ const { config: cfgConfig, load: loadCfg, save: saveCfg } = useDirectorConfig();
 /** 场景配置下拉的本地副本：打开时从当前配置回填，保存才写 cfgForm / localStorage */
 const sceneThemeA = ref(DEFAULT_THEME_A);
 const sceneThemeB = ref(DEFAULT_THEME_B);
+/** 是否有颜色选择器覆盖层打开（用于临时撑高下拉，保证覆盖层完整显示） */
+const sceneCfgPickerOpen = ref(false);
+let sceneCfgOpenCount = 0;
+function onColorPickerOpenChange(open: boolean): void {
+  sceneCfgOpenCount += open ? 1 : -1;
+  sceneCfgPickerOpen.value = sceneCfgOpenCount > 0;
+}
 function onSceneCfgVisibleChange(visible: boolean): void {
-  if (!visible) return;
+  if (!visible) {
+    sceneCfgOpenCount = 0;
+    sceneCfgPickerOpen.value = false;
+    return;
+  }
   sceneThemeA.value = cfgForm.themeA || cfgConfig.themeA || DEFAULT_THEME_A;
   sceneThemeB.value = cfgForm.themeB || cfgConfig.themeB || DEFAULT_THEME_B;
 }
@@ -446,12 +457,13 @@ onUnmounted(() => {
           trigger="click"
           placement="bottom-end"
           :disabled="readOnly"
+          :persistent="false"
           @visible-change="onSceneCfgVisibleChange"
         >
           <el-button size="small" :disabled="readOnly">{{ $t("directorView.sceneCfgTitle") }}</el-button>
           <template #dropdown>
             <el-dropdown-menu>
-              <div class="scene-cfg-dd">
+              <div class="scene-cfg-dd" :class="{ 'has-open-picker': sceneCfgPickerOpen }">
                 <div class="cfg-section-title">{{ $t("directorView.sceneCfgThemeTitle") }}</div>
                 <div class="theme-row">
                   <span class="theme-label">{{ $t("directorView.sceneCfgPlayerA") }}</span>
@@ -460,6 +472,7 @@ onUnmounted(() => {
                     :label="$t('directorView.sceneCfgPlayerA')"
                     :default-value="DEFAULT_THEME_A"
                     :disabled="!director.matchId || readOnly"
+                    @open-change="onColorPickerOpenChange"
                   />
                 </div>
                 <div class="theme-row">
@@ -469,6 +482,7 @@ onUnmounted(() => {
                     :label="$t('directorView.sceneCfgPlayerB')"
                     :default-value="DEFAULT_THEME_B"
                     :disabled="!director.matchId || readOnly"
+                    @open-change="onColorPickerOpenChange"
                   />
                 </div>
                 <div class="cfg-foot">
@@ -1087,12 +1101,16 @@ onUnmounted(() => {
 }
 /* 场景配置下拉：主题色配置项（与导播配置下拉同构图） */
 .scene-cfg-dd {
+  position: relative;
   width: 340px;
   padding: 10px 12px;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+.scene-cfg-dd.has-open-picker {
+  min-height: 300px;
 }
 .cfg-section-title {
   font-size: 13px;
@@ -1101,7 +1119,6 @@ onUnmounted(() => {
   letter-spacing: 0.5px;
 }
 .theme-row {
-  position: relative;
   display: flex;
   align-items: center;
   gap: 12px;

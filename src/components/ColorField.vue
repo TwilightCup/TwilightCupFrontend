@@ -21,6 +21,7 @@ const props = withDefaults(
 );
 const emit = defineEmits<{
   (e: "update:modelValue", value: string): void;
+  (e: "open-change", value: boolean): void;
 }>();
 
 const { t } = useI18n();
@@ -35,6 +36,7 @@ watch(
 );
 watch(open, (v) => {
   if (v) draft.value = props.modelValue;
+  emit("open-change", v);
 });
 
 function onPanelUpdate(value: string | null): void {
@@ -68,29 +70,31 @@ function confirm(): void {
       @click="open = !open"
     ></button>
 
-    <div v-if="open" class="color-panel">
-      <el-color-picker-panel
-        :model-value="draft"
-        :show-alpha="false"
-        :color-format="'hex'"
-        :border="false"
-        :disabled="disabled"
-        @update:model-value="onPanelUpdate"
-      >
-        <template #footer>
-          <div class="color-footer">
-            <el-button size="small" :disabled="disabled" @click="reset">
-              {{ t("directorView.sceneCfgReset") }}
-            </el-button>
-            <el-button size="small" :disabled="disabled" @click="cancel">
-              {{ t("directorView.sceneCfgCancel") }}
-            </el-button>
-            <el-button size="small" type="primary" :disabled="disabled" @click="confirm">
-              {{ t("directorView.sceneCfgOk") }}
-            </el-button>
-          </div>
-        </template>
-      </el-color-picker-panel>
+    <div v-if="open" class="color-overlay">
+      <div class="color-panel">
+        <el-color-picker-panel
+          :model-value="draft"
+          :show-alpha="false"
+          :color-format="'hex'"
+          :border="false"
+          :disabled="disabled"
+          @update:model-value="onPanelUpdate"
+        >
+          <template #footer>
+            <div class="color-footer">
+              <el-button size="small" :disabled="disabled" @click="reset">
+                {{ t("directorView.sceneCfgReset") }}
+              </el-button>
+              <el-button size="small" :disabled="disabled" @click="cancel">
+                {{ t("directorView.sceneCfgCancel") }}
+              </el-button>
+              <el-button size="small" type="primary" :disabled="disabled" @click="confirm">
+                {{ t("directorView.sceneCfgOk") }}
+              </el-button>
+            </div>
+          </template>
+        </el-color-picker-panel>
+      </div>
     </div>
   </div>
 </template>
@@ -125,12 +129,20 @@ function confirm(): void {
   opacity: 0.55;
 }
 
-/* 颜色选择器面板：相对于所在行绝对定位，在下拉菜单内部居中且不超宽 */
-.color-panel {
+/* 覆盖层：在下拉菜单内部横向/纵向居中，覆盖原有配置项 */
+.color-overlay {
   position: absolute;
-  left: 0;
-  right: 0;
-  top: calc(100% + 8px);
+  inset: 6px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--tc-bg-soft, #1a0633);
+  border-radius: 8px;
+}
+.color-panel {
+  width: 100%;
+  max-width: calc(100% - 16px);
   display: flex;
   justify-content: center;
 }
