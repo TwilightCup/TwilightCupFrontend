@@ -96,15 +96,13 @@ function refreshSpeedrun(): void {
 
 // ---- 导播配置（HLS/嵌入）：控制台集中编辑，保存后写入舞台链接 ----
 const { config: cfgConfig, load: loadCfg, save: saveCfg } = useDirectorConfig();
-/** 场景配置弹层显隐 */
-const sceneCfgVisible = ref(false);
-/** 场景配置弹层的本地副本：取消不落库，保存才写 cfgForm / localStorage */
+/** 场景配置下拉的本地副本：打开时从当前配置回填，保存才写 cfgForm / localStorage */
 const sceneThemeA = ref(DEFAULT_THEME_A);
 const sceneThemeB = ref(DEFAULT_THEME_B);
-function openSceneCfg(): void {
+function onSceneCfgVisibleChange(visible: boolean): void {
+  if (!visible) return;
   sceneThemeA.value = cfgForm.themeA || cfgConfig.themeA || DEFAULT_THEME_A;
   sceneThemeB.value = cfgForm.themeB || cfgConfig.themeB || DEFAULT_THEME_B;
-  sceneCfgVisible.value = true;
 }
 /** 表单本地副本：编辑中不落库，点保存才写 localStorage + 更新舞台链接 */
 const cfgForm = reactive<DirectorConfig>({
@@ -155,7 +153,6 @@ function saveSceneCfg(): void {
   saveCfg(director.matchId, patch);
   director.sendDirectorCommand("config_update", { config: patch });
   ElMessage.success(t("directorView.sceneCfgSaved"));
-  sceneCfgVisible.value = false;
 }
 
 /** 直播画面实时控制：改动即时保存并广播（不等「保存」按钮） */
@@ -444,10 +441,50 @@ onUnmounted(() => {
           <span class="conn">{{ director.connStatus }}</span>
         </div>
 
-        <!-- 场景配置：调整场景外观（当前为选手主题色），保存后经 WS 实时下发 -->
-        <el-button size="small" :disabled="readOnly" @click="openSceneCfg">
-          {{ $t("directorView.sceneCfgTitle") }}
-        </el-button>
+        <!-- 场景配置下拉：调整场景外观（当前为选手主题色），保存后经 WS 实时下发 -->
+        <el-dropdown
+          trigger="click"
+          placement="bottom-end"
+          :disabled="readOnly"
+          @visible-change="onSceneCfgVisibleChange"
+        >
+          <el-button size="small" :disabled="readOnly">{{ $t("directorView.sceneCfgTitle") }}</el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <div class="scene-cfg-dd">
+                <div class="cfg-section-title">{{ $t("directorView.sceneCfgThemeTitle") }}</div>
+                <div class="theme-row">
+                  <span class="theme-label">{{ $t("directorView.sceneCfgPlayerA") }}</span>
+                  <ColorField
+                    v-model="sceneThemeA"
+                    :label="$t('directorView.sceneCfgPlayerA')"
+                    :default-value="DEFAULT_THEME_A"
+                    :disabled="!director.matchId || readOnly"
+                  />
+                </div>
+                <div class="theme-row">
+                  <span class="theme-label">{{ $t("directorView.sceneCfgPlayerB") }}</span>
+                  <ColorField
+                    v-model="sceneThemeB"
+                    :label="$t('directorView.sceneCfgPlayerB')"
+                    :default-value="DEFAULT_THEME_B"
+                    :disabled="!director.matchId || readOnly"
+                  />
+                </div>
+                <div class="cfg-foot">
+                  <el-button
+                    size="small"
+                    type="primary"
+                    :disabled="!director.matchId || readOnly"
+                    @click="saveSceneCfg"
+                  >
+                    {{ $t("common.save") }}
+                  </el-button>
+                </div>
+              </div>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
 
         <!-- 导播配置下拉：HLS/嵌入链接填写 + 保存（WS 实时推送到已打开的舞台，并写入舞台链接） -->
         <el-dropdown trigger="click" placement="bottom-end" :disabled="readOnly">
@@ -828,46 +865,6 @@ onUnmounted(() => {
       </aside>
     </main>
 
-    <!-- 场景配置：调整场景外观。第一个配置项为选手主题色（A/B 各一个控制组件）。 -->
-    <el-dialog
-      v-model="sceneCfgVisible"
-      :title="$t('directorView.sceneCfgTitle')"
-      width="440px"
-      append-to-body
-    >
-      <div class="scene-cfg-panel">
-        <div class="cfg-section-title">{{ $t("directorView.sceneCfgThemeTitle") }}</div>
-        <div class="theme-row">
-          <span class="theme-label">{{ $t("directorView.sceneCfgPlayerA") }}</span>
-          <ColorField
-            v-model="sceneThemeA"
-            :label="$t('directorView.sceneCfgPlayerA')"
-            :default-value="DEFAULT_THEME_A"
-            :disabled="!director.matchId || readOnly"
-          />
-        </div>
-        <div class="theme-row">
-          <span class="theme-label">{{ $t("directorView.sceneCfgPlayerB") }}</span>
-          <ColorField
-            v-model="sceneThemeB"
-            :label="$t('directorView.sceneCfgPlayerB')"
-            :default-value="DEFAULT_THEME_B"
-            :disabled="!director.matchId || readOnly"
-          />
-        </div>
-      </div>
-      <template #footer>
-        <el-button @click="sceneCfgVisible = false">{{ $t("common.cancel") }}</el-button>
-        <el-button
-          type="primary"
-          :disabled="!director.matchId || readOnly"
-          @click="saveSceneCfg"
-        >
-          {{ $t("common.save") }}
-        </el-button>
-      </template>
-    </el-dialog>
-
     <Transition name="fade">
       <AuthFailMask v-if="director.authError" :message="director.authError" />
     </Transition>
@@ -1088,11 +1085,14 @@ onUnmounted(() => {
   padding: 10px 12px;
   box-sizing: border-box;
 }
-/* 场景配置弹层：主题色配置项 */
-.scene-cfg-panel {
+/* 场景配置下拉：主题色配置项（与导播配置下拉同构图） */
+.scene-cfg-dd {
+  width: 340px;
+  padding: 10px 12px;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 }
 .cfg-section-title {
   font-size: 13px;
