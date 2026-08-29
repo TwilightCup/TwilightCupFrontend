@@ -208,11 +208,11 @@ const pipCount = computed(() => {
 /* 选手主题色（角色胶囊与点亮方块共用；辉光 rgba 对同 MapCard） */
 .side.a {
   --pc: var(--syn-a);
-  --pc-glow: rgba(61, 139, 255, 0.55);
+  --pc-glow: var(--syn-a-glow, rgba(61, 139, 255, 0.55));
 }
 .side.b {
   --pc: var(--syn-b);
-  --pc-glow: rgba(255, 107, 74, 0.55);
+  --pc-glow: var(--syn-b-glow, rgba(255, 107, 74, 0.55));
 }
 /* 角色标识胶囊：纯色底 + 纯白文本，收紧内边距贴合文本 */
 .role-tag {

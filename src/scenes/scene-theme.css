@@ -19,9 +19,13 @@
 @import "@fontsource-variable/jetbrains-mono";
 
 :root {
-  /* 对阵色（与 global.css 同值，固定常量） */
+  /* 对阵色（与 global.css 同值，固定常量；运行时可由「场景配置」覆盖） */
   --syn-a: #3d8bff;
   --syn-b: #ff6b4a;
+  --syn-a-glow: rgba(61, 139, 255, 0.55);
+  --syn-b-glow: rgba(255, 107, 74, 0.55);
+  --syn-a-glow-soft: rgba(61, 139, 255, 0.25);
+  --syn-b-glow-soft: rgba(255, 107, 74, 0.25);
   --syn-win: #ffd166;
 
   /* 合成器浪潮主色 */

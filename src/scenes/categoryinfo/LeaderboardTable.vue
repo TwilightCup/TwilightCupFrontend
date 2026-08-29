@@ -121,11 +121,11 @@ function shortDate(iso: string | null): string {
 /* 本场选手高亮：名称着选手色 + 轻微辉光 */
 .hl-A .lb-td.player {
   color: var(--syn-a);
-  text-shadow: 0 0 9px rgba(61, 139, 255, 0.55);
+  text-shadow: 0 0 9px var(--syn-a-glow, rgba(61, 139, 255, 0.55));
 }
 .hl-B .lb-td.player {
   color: var(--syn-b);
-  text-shadow: 0 0 9px rgba(255, 107, 74, 0.55);
+  text-shadow: 0 0 9px var(--syn-b-glow, rgba(255, 107, 74, 0.55));
 }
 
 /* 榜上有本场选手时：非选手行的名称与成绩整体弱化为灰色（名次色不变）；

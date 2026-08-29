@@ -340,10 +340,10 @@ iframe.video {
   pointer-events: none;
 }
 .frame.A .placeholder {
-  box-shadow: inset 0 0 0 3px var(--syn-a), inset 0 0 24px rgba(61, 139, 255, 0.25);
+  box-shadow: inset 0 0 0 3px var(--syn-a), inset 0 0 24px var(--syn-a-glow-soft, rgba(61, 139, 255, 0.25));
 }
 .frame.B .placeholder {
-  box-shadow: inset 0 0 0 3px var(--syn-b), inset 0 0 24px rgba(255, 107, 74, 0.25);
+  box-shadow: inset 0 0 0 3px var(--syn-b), inset 0 0 24px var(--syn-b-glow-soft, rgba(255, 107, 74, 0.25));
 }
 .live {
   font-size: clamp(12px, 1.4vw, 20px);

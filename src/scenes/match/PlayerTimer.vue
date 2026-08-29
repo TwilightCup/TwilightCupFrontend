@@ -189,11 +189,11 @@ watch(
 }
 .timer.A .rule {
   background: var(--syn-a);
-  box-shadow: 0 0 10px rgba(61, 139, 255, 0.55);
+  box-shadow: 0 0 10px var(--syn-a-glow, rgba(61, 139, 255, 0.55));
 }
 .timer.B .rule {
   background: var(--syn-b);
-  box-shadow: 0 0 10px rgba(255, 107, 74, 0.55);
+  box-shadow: 0 0 10px var(--syn-b-glow, rgba(255, 107, 74, 0.55));
 }
 /* 副计时器两行容器 */
 .subs {

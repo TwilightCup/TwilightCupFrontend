@@ -9,6 +9,7 @@ import { createApp } from "vue";
 import { createPinia } from "pinia";
 import { i18n } from "@/locales";
 import "@/scenes/scene-theme.css";
+import "@/scenes/composables/sceneAppearanceInit";
 import StageScene from "./StageScene.vue";
 
 createApp(StageScene).use(createPinia()).use(i18n).mount("#stage-app");

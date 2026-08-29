@@ -116,11 +116,11 @@ function maskId(tg: string): string {
 }
 .pcard.by-a {
   --pc: var(--syn-a);
-  --pc-glow: rgba(61, 139, 255, 0.55);
+  --pc-glow: var(--syn-a-glow, rgba(61, 139, 255, 0.55));
 }
 .pcard.by-b {
   --pc: var(--syn-b);
-  --pc-glow: rgba(255, 107, 74, 0.55);
+  --pc-glow: var(--syn-b-glow, rgba(255, 107, 74, 0.55));
 }
 /* 内边框：沿卡片边缘向内描 4px，不占卡片外尺寸、盖在内容之上（同图池卡口径） */
 .pcard::after {

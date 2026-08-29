@@ -30,7 +30,15 @@ export interface DirectorConfig {
   delayB: number;
   /** 偏差条显示延迟（秒），同上（通常对齐较慢一侧的画面） */
   delayDiff: number;
+  /** 选手 A 场景主题色（完全不透明 HEX，#rrggbb） */
+  themeA: string;
+  /** 选手 B 场景主题色（完全不透明 HEX，#rrggbb） */
+  themeB: string;
 }
+
+/** 与 scene-theme.css 保持一致的默认主题色 */
+export const DEFAULT_THEME_A = "#3d8bff";
+export const DEFAULT_THEME_B = "#ff6b4a";
 
 const EMPTY: DirectorConfig = {
   hlsA: "",
@@ -44,6 +52,8 @@ const EMPTY: DirectorConfig = {
   delayA: 0,
   delayB: 0,
   delayDiff: 0,
+  themeA: DEFAULT_THEME_A,
+  themeB: DEFAULT_THEME_B,
 };
 
 const PREFIX = "twc-director-cfg";
@@ -71,6 +81,50 @@ function write(matchId: string, cfg: DirectorConfig): void {
   }
 }
 
+/** 规范化 HEX：支持 #RGB / #RRGGBB / 无 # 输入，统一为 #rrggbb（不含透明度）。 */
+export function normalizeHex(value: string): string {
+  const raw = value.trim().replace(/^#/, "");
+  if (/^[0-9a-f]{3}$/i.test(raw)) {
+    return `#${raw[0]}${raw[0]}${raw[1]}${raw[1]}${raw[2]}${raw[2]}`.toLowerCase();
+  }
+  if (/^[0-9a-f]{6}$/i.test(raw)) return `#${raw.toLowerCase()}`;
+  return "";
+}
+
+/** HEX → rgba()，alpha ∈ [0,1]；非法输入回退默认色。 */
+function hexToRgba(hex: string, alpha: number): string {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex);
+  if (!m) {
+    return `rgba(61, 139, 255, ${alpha})`;
+  }
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i + 1, i + 3), 16));
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+/**
+ * 把场景外观（选手主题色）写入 :root CSS 变量。
+ * 同时派发 `scene-appearance-change` 事件，供 JS 缓存主题色的组件（如 DiffBar）重读。
+ */
+export function applySceneAppearance(
+  cfg: Partial<Pick<DirectorConfig, "themeA" | "themeB">>,
+): void {
+  const a = normalizeHex(cfg.themeA ?? "") || DEFAULT_THEME_A;
+  const b = normalizeHex(cfg.themeB ?? "") || DEFAULT_THEME_B;
+  const root = document.documentElement;
+  root.style.setProperty("--syn-a", a);
+  root.style.setProperty("--syn-b", b);
+  root.style.setProperty("--syn-a-glow", hexToRgba(a, 0.55));
+  root.style.setProperty("--syn-b-glow", hexToRgba(b, 0.55));
+  root.style.setProperty("--syn-a-glow-soft", hexToRgba(a, 0.25));
+  root.style.setProperty("--syn-b-glow-soft", hexToRgba(b, 0.25));
+  window.dispatchEvent(new CustomEvent("scene-appearance-change"));
+}
+
+/** 从 localStorage 读取并应用某场已保存的场景外观（场景页初始化用）。 */
+export function applyStoredAppearance(matchId: string): void {
+  applySceneAppearance(read(matchId));
+}
+
 /**
  * 合并写入某场比赛的配置（非组件上下文用）：WS 收到 config_update 广播时由
  * director store 调——舞台此刻可能不在比赛场景（MatchScene 未挂载读不到），
@@ -82,6 +136,7 @@ export function mergeStoredConfig(
 ): DirectorConfig {
   const merged = { ...read(matchId), ...patch };
   write(matchId, merged);
+  applySceneAppearance(merged);
   return merged;
 }
 
@@ -107,13 +162,17 @@ export function useDirectorConfig() {
       delayA: stored.delayA,
       delayB: stored.delayB,
       delayDiff: stored.delayDiff,
+      themeA: url.themeA || stored.themeA,
+      themeB: url.themeB || stored.themeB,
     };
     Object.assign(config, merged);
+    applySceneAppearance(merged);
     write(matchId, merged);
   }
 
   function save(matchId: string, patch: Partial<DirectorConfig>): void {
     Object.assign(config, patch);
+    applySceneAppearance(config);
     write(matchId, { ...config });
   }
 

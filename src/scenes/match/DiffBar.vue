@@ -236,13 +236,17 @@ function frame(now: number): void {
   particles = alive;
 }
 
-onMounted(() => {
-  // 主题色从画布元素继承的 :root 变量读取（scene-theme.css 固定常量）
+/** 从 :root 重读主题色并刷新 canvas 粒子缓存（场景配置实时变更时触发） */
+function readThemeColors(): void {
   const cs = getComputedStyle(canvasEl.value ?? document.documentElement);
   colorA = cs.getPropertyValue("--syn-a").trim() || colorA;
   colorB = cs.getPropertyValue("--syn-b").trim() || colorB;
   coreA = brighten(colorA, 0.55);
   coreB = brighten(colorB, 0.55);
+}
+
+onMounted(() => {
+  readThemeColors();
   resizeCanvas();
   ro = new ResizeObserver((entries) => {
     for (const ent of entries) {
@@ -256,10 +260,12 @@ onMounted(() => {
   if (valueEl.value) ro.observe(valueEl.value);
   if (canvasEl.value) ro.observe(canvasEl.value);
   rafId = requestAnimationFrame(frame);
+  window.addEventListener("scene-appearance-change", readThemeColors);
 });
 onBeforeUnmount(() => {
   cancelAnimationFrame(rafId);
   ro?.disconnect();
+  window.removeEventListener("scene-appearance-change", readThemeColors);
 });
 </script>
 

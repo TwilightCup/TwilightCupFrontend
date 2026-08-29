@@ -20,6 +20,10 @@ export interface SceneParams {
   embedA: string;
   /** 选手 B 外部直播嵌入地址 */
   embedB: string;
+  /** 选手 A 场景主题色（HEX） */
+  themeA: string;
+  /** 选手 B 场景主题色（HEX） */
+  themeB: string;
   /** 编辑态（=1 唤出导播配置面板） */
   editMode: boolean;
   /** 偏差条满偏对应的计时差（毫秒），默认 60000 */
@@ -41,6 +45,8 @@ export function useSceneParams(): SceneParams {
     hlsB: get("hls_b"),
     embedA: get("embed_a"),
     embedB: get("embed_b"),
+    themeA: get("theme_a"),
+    themeB: get("theme_b"),
     editMode: p.get("edit") === "1",
     gapMs: parseGap(get("gap")),
   };

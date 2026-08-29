@@ -146,11 +146,11 @@ const timeCol = computed(() => {
 }
 .row.side-a .tag {
   color: var(--syn-a);
-  text-shadow: 0 0 9px rgba(61, 139, 255, 0.55);
+  text-shadow: 0 0 9px var(--syn-a-glow, rgba(61, 139, 255, 0.55));
 }
 .row.side-b .tag {
   color: var(--syn-b);
-  text-shadow: 0 0 9px rgba(255, 107, 74, 0.55);
+  text-shadow: 0 0 9px var(--syn-b-glow, rgba(255, 107, 74, 0.55));
 }
 /* 时间与名称统一弱化色（榜单 4 名外名次色），无辉光 */
 .time,

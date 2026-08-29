@@ -8,6 +8,7 @@ import { createApp } from "vue";
 import { createPinia } from "pinia";
 import { i18n } from "@/locales";
 import "@/scenes/scene-theme.css";
+import "@/scenes/composables/sceneAppearanceInit";
 import CategoryInfoScene from "./CategoryInfoScene.vue";
 
 createApp(CategoryInfoScene).use(createPinia()).use(i18n).mount("#categoryinfo-app");
