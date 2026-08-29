@@ -285,6 +285,8 @@ export const useDraftStore = defineStore("draft", () => {
     try {
       // 成员可见的比赛详情（含结构化图池 + ban/protect 配置），裁判无需管理员权限
       const s = await api.getMyMatch(sid, token);
+      // 切换比赛期间可能已经换了场：迟到的上一场响应直接丢弃，防止图池/配置串场
+      if (match.matchId !== sid) return;
       setMappool(normalizeMappool(s.mappool), "session");
       banCount.value = s.ban_count ?? 1;
       protectCount.value = s.protect_count ?? 1;
@@ -292,6 +294,7 @@ export const useDraftStore = defineStore("draft", () => {
       matchStatus.value = s.status;
       afterMappoolLoaded(sid);
     } catch (e) {
+      if (match.matchId !== sid) return;
       loadError.value = (e as Error)?.message ?? tr("toast.draftLoadMappoolFail");
       state.stage = "LOAD";
     }
@@ -608,10 +611,13 @@ export const useDraftStore = defineStore("draft", () => {
   /** 裁判「开始比赛」：激活 CREATED → RUNNING（选手随后可连入摇点）。单场冲突由后端拒绝。 */
   async function startMatch(): Promise<void> {
     if (!match.matchId || !auth.token) return;
+    const sid = match.matchId;
     try {
-      const s = await api.startMatch(match.matchId, auth.token);
+      const s = await api.startMatch(sid, auth.token);
+      if (match.matchId !== sid) return;
       matchStatus.value = s.status;
     } catch (e) {
+      if (match.matchId !== sid) return;
       ElMessage.error(e instanceof ApiError ? e.message : tr("toast.draftStartMatchFail"));
     }
   }
@@ -619,10 +625,13 @@ export const useDraftStore = defineStore("draft", () => {
   /** 裁判「暂停比赛」：RUNNING → PAUSED，保留进度并释放选手占用（可分配到其他比赛）。 */
   async function pauseMatch(): Promise<void> {
     if (!match.matchId || !auth.token) return;
+    const sid = match.matchId;
     try {
-      const s = await api.pauseMatch(match.matchId, auth.token);
+      const s = await api.pauseMatch(sid, auth.token);
+      if (match.matchId !== sid) return;
       matchStatus.value = s.status;
     } catch (e) {
+      if (match.matchId !== sid) return;
       ElMessage.error(e instanceof ApiError ? e.message : tr("toast.draftPauseMatchFail"));
     }
   }
@@ -630,10 +639,13 @@ export const useDraftStore = defineStore("draft", () => {
   /** 裁判「恢复比赛」：PAUSED → RUNNING；后端校验选手不在其他进行中比赛，冲突则原样展示后端错误。 */
   async function resumeMatch(): Promise<void> {
     if (!match.matchId || !auth.token) return;
+    const sid = match.matchId;
     try {
-      const s = await api.resumeMatch(match.matchId, auth.token);
+      const s = await api.resumeMatch(sid, auth.token);
+      if (match.matchId !== sid) return;
       matchStatus.value = s.status;
     } catch (e) {
+      if (match.matchId !== sid) return;
       ElMessage.error(e instanceof ApiError ? e.message : tr("toast.draftResumeMatchFail"));
     }
   }

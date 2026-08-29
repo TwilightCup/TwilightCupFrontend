@@ -96,6 +96,17 @@ let liveSeq = 0;
 export const useMatchStore = defineStore("match", () => {
   const auth = useAuthStore();
 
+  /**
+   * 连接/加载世代号。每次切场或重置都会递增；所有异步 REST 重建（match detail、
+   * match_log、回合明细、聊天）都在写回前校验世代号 + 当前 matchId，避免上一场
+   * 的迟到响应把当前场数据覆盖成错乱。
+   */
+  let loadEpoch = 0;
+
+  function isCurrentSession(epoch: number, sid: string): boolean {
+    return epoch === loadEpoch && matchId.value === sid;
+  }
+
   // --- 连接 ---
   const connStatus = ref<ConnStatus>("idle");
   const matchId = ref<string | null>(null);
@@ -214,8 +225,16 @@ export const useMatchStore = defineStore("match", () => {
   // 连接生命周期
   // =========================================================================
 
-  function connect(matchId?: string): void {
+  function connect(requestedMatchId?: string): void {
     if (!auth.token) return;
+    // 每次建立连接都视为一个全新会话：让上一连接尚未完成的 REST 回填全部失效。
+    loadEpoch += 1;
+    const target = requestedMatchId ?? null;
+    // 切到另一场比赛（或从已清空状态重新建立连接）前先清掉上一场残留数据，
+    // 避免旧数据在 auth_ok/REST 回来前短暂显示，也避免旧异步请求写回新场。
+    if (target !== matchId.value) {
+      $reset();
+    }
     authErrorMessage.value = "";
     if (!socket) {
       socket = new MatchSocket();
@@ -227,7 +246,7 @@ export const useMatchStore = defineStore("match", () => {
       };
     }
     // exclusive：独占裁判身份（账号+比赛）——本窗口顶掉旧窗口，也接受被新窗口顶掉
-    socket.connect(auth.token, "REFEREE", matchId, true);
+    socket.connect(auth.token, "REFEREE", requestedMatchId, true);
   }
 
   /** 当前执裁比赛 id：优先 auth_ok 回填的 matchId，兜底连接时传入的选场参数 */
@@ -520,8 +539,11 @@ export const useMatchStore = defineStore("match", () => {
    */
   async function loadMatchDetail(): Promise<void> {
     if (!matchId.value || !auth.token) return;
+    const epoch = loadEpoch;
+    const sid = matchId.value;
     try {
-      const m = await api.getMyMatch(matchId.value, auth.token);
+      const m = await api.getMyMatch(sid, auth.token);
+      if (!isCurrentSession(epoch, sid)) return;
       if (m.player_a_id) players.A.accountId = m.player_a_id;
       if (m.player_b_id) players.B.accountId = m.player_b_id;
       if (m.player_a_username) playerNames.A = m.player_a_username;
@@ -535,19 +557,22 @@ export const useMatchStore = defineStore("match", () => {
 
   async function loadHistory(): Promise<void> {
     if (!matchId.value || !auth.token) return;
-    historyLoading.value = true;
+    const epoch = loadEpoch;
     const sid = matchId.value;
+    historyLoading.value = true;
     try {
       // match_log + 全部回合明细 + 比分 + 图池元数据
       await refreshRounds();
+      if (!isCurrentSession(epoch, sid)) return;
       try {
         const chat = await api.getChatLog(sid, auth.token);
+        if (!isCurrentSession(epoch, sid)) return;
         ingestChatLog(chat);
       } catch {
         // 聊天日志拉取失败不阻断
       }
     } finally {
-      historyLoading.value = false;
+      if (isCurrentSession(epoch, sid)) historyLoading.value = false;
     }
   }
 
@@ -570,10 +595,13 @@ export const useMatchStore = defineStore("match", () => {
   /** 拉取全部回合明细，重建比分/图池信息/历史缓存 */
   async function refreshRounds(): Promise<void> {
     if (!matchId.value || !auth.token) return;
+    const epoch = loadEpoch;
+    const sid = matchId.value;
     // 先取 match_log：拿到 initial_info（元数据/图池编号）与回合总数
     let count = roundsCache.value.length;
     try {
-      const log = await api.getMatchLog(matchId.value, auth.token);
+      const log = await api.getMatchLog(sid, auth.token);
+      if (!isCurrentSession(epoch, sid)) return;
       applyInitialInfo(log);
       count = Math.max(count, log.round_ids.length);
       if (log.final_result?.winner) {
@@ -582,16 +610,18 @@ export const useMatchStore = defineStore("match", () => {
     } catch {
       // 首回合开始前日志尚不存在（404）：保持已有缓存，无回合可拉
     }
-    if (count === 0) return;
+    if (!isCurrentSession(epoch, sid) || count === 0) return;
     const list: RoundRecord[] = [];
     for (let i = 1; i <= count; i++) {
       try {
-        list.push(await api.getRoundDetail(matchId.value, i, auth.token));
+        const r = await api.getRoundDetail(sid, i, auth.token);
+        if (!isCurrentSession(epoch, sid)) return;
+        list.push(r);
       } catch {
         break; // 回合不存在即到边界
       }
     }
-    if (list.length === 0) return;
+    if (!isCurrentSession(epoch, sid) || list.length === 0) return;
     list.sort((a, b) => a.round_no - b.round_no);
     roundsCache.value = list;
     // 丰富图池展示信息
@@ -678,6 +708,7 @@ export const useMatchStore = defineStore("match", () => {
   // =========================================================================
 
   function $reset(): void {
+    loadEpoch += 1;
     disconnect();
     socket = null;
     connStatus.value = "idle";
@@ -708,6 +739,7 @@ export const useMatchStore = defineStore("match", () => {
     winsB.value = 0;
     matchWinner.value = null;
     roundsCache.value = [];
+    historyLoading.value = false;
     messages.value = [];
     knownIds.clear();
     chatInput.value = "";

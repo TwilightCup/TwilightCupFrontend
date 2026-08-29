@@ -47,6 +47,14 @@ function logout(): void {
   router.replace("/login");
 }
 
+/** 进入一场比赛：先清掉上一场（/上一次登录）残留的 match + draft，再建立新连接。 */
+function openMatch(sid: string): void {
+  historyOpen.value = false;
+  match.$reset();
+  draft.$reset();
+  match.connect(sid);
+}
+
 /** 比赛就绪后拉取结构化图池（admin-as-referee 成功；纯裁判 403 → 回退手动）。 */
 watch(
   () => match.matchId,
@@ -58,21 +66,34 @@ watch(
   { immediate: true },
 );
 
+// 同一 MatchView 实例在 /referee/:matchId 间跳转时会被 Vue Router 复用，
+// 必须监听路由参数变化主动切场，不能只依赖 onMounted 的一次 connect。
+watch(
+  () => route.params.matchId,
+  (sid) => {
+    if (!auth.isLoggedIn) {
+      router.replace("/login");
+      return;
+    }
+    const s = String(sid ?? "");
+    if (!s) {
+      router.replace("/referee");
+      return;
+    }
+    openMatch(s);
+  },
+  { immediate: true },
+);
+
 onMounted(() => {
   if (!auth.isLoggedIn) {
     router.replace("/login");
-    return;
   }
-  const sid = String(route.params.matchId ?? "");
-  if (!sid) {
-    router.replace("/referee");
-    return;
-  }
-  match.connect(sid);
 });
 
 onUnmounted(() => {
-  match.disconnect();
+  match.$reset();
+  draft.$reset();
 });
 </script>
 
@@ -91,7 +112,7 @@ onUnmounted(() => {
       {{ $t('conn.connectingBanner', { action: $t(match.connStatus === 'reconnecting' ? 'conn.action.reconnect' : 'conn.action.connect') }) }}
     </div>
 
-    <main class="main">
+    <main :key="String(route.params.matchId)" class="main">
       <div class="col-center">
         <el-alert
           v-if="!match.metaReady"
