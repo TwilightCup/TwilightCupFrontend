@@ -168,7 +168,8 @@ function starStyle(s: Star): Record<string, string> {
       <div class="grid" />
     </div>
 
-    <div class="horizon-glow" />
+    <!-- 合成器浪潮水面版不画中线：山脉底部直接贴网格起始点 -->
+    <div v-if="background !== 'synthwave'" class="horizon-glow" />
 
     <!-- 顶部/底部压暗，贴近参考图的暗角 -->
     <div v-if="background === 'synthwave'" class="vignette" />
@@ -349,7 +350,7 @@ function starStyle(s: Star): Record<string, string> {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: calc(49.8% + 3px);
+  bottom: 49.8%;
   height: 13%;
   width: 100%;
   opacity: 0.92;
@@ -498,16 +499,6 @@ function starStyle(s: Star): Record<string, string> {
   inset: 0;
   background:
     linear-gradient(to bottom, rgba(10, 1, 24, 0.03) 0%, rgba(10, 1, 24, 0.2) 32%, rgba(10, 1, 24, 0.55) 100%);
-}
-
-/* 新背景的地平线辉光：品红为主，贴近参考图的暖色水天线 */
-.synthwave-bg[data-background="synthwave"] .horizon-glow {
-  bottom: 49.8%;
-  height: 3px;
-  background: linear-gradient(90deg, transparent, rgba(255, 46, 136, 0.9) 30%, rgba(255, 169, 238, 0.95) 50%, rgba(255, 46, 136, 0.9) 70%, transparent);
-  box-shadow:
-    0 0 18px 2px rgba(255, 46, 136, 0.55),
-    0 0 70px 16px rgba(255, 46, 136, 0.28);
 }
 
 /* 顶部/底部四角压暗，模拟参考图边缘更深 */
