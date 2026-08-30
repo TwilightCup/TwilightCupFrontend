@@ -19,15 +19,10 @@ const { t } = useI18n();
 /**
  * 图池编辑器：左侧类别侧栏 → 右侧当前类别选图。
  *
- * 类别名即文档固定 kind（ML/IL/CP/CT/EX/TB），故用下拉而非自由文本；每个 kind 至多一个类别，
+ * 类别名即文档固定 kind（ML/IL/CP/CT/EX/TB），创建后不可更改；每个 kind 至多一个类别，
  * TB 类别限定 1 个选图。直接 mutate 父级传入的 reactive mappool 引用。
  */
 const props = defineProps<{ mappool: Mappool }>();
-
-const kindOptions = CATEGORY_KINDS.map((k) => {
-  const info = categoryKindInfo(k);
-  return { value: k, short: info?.short ?? k, label: info?.label ?? k };
-});
 
 /** 当前选中的类别下标；-1 表示未选择（无类别）。 */
 const selectedIndex = ref(-1);
@@ -63,7 +58,7 @@ function selectCategory(ci: number): void {
   }
 }
 
-/** 各类别已用 kind（用于下拉禁用）。 */
+/** 各类别已用 kind（用于新增类别时避免重复）。 */
 function usedKinds(excludeIndex: number): Set<string> {
   const s = new Set<string>();
   props.mappool.categories.forEach((c, i) => {
@@ -87,15 +82,6 @@ function addCategory(): void {
     picks: [],
   });
   selectedIndex.value = props.mappool.categories.length - 1;
-}
-
-function onKindChange(ci: number): void {
-  const cat = props.mappool.categories[ci];
-  // 切到 TB 时收敛到 1 个选图
-  if (categoryKindOf(cat.name) === CategoryKind.TB && cat.picks.length > 1) {
-    cat.picks = cat.picks.slice(0, 1);
-  }
-  renumberCategory(cat);
 }
 
 /** 按类别 + 序号自动分配编号：ML→ML1/ML2…、TB→TB；未知类别保持原值。 */
@@ -172,18 +158,27 @@ const canAddCategory = computed(() => props.mappool.categories.length < CATEGORY
           {{ $t("mappoolEditor.emptySidebar") }}
         </div>
 
-        <button
+        <div
           v-for="(cat, ci) in mappool.categories"
           :key="ci"
-          type="button"
-          class="category-item"
+          class="category-row"
           :class="{ active: ci === selectedIndex }"
-          @click="selectCategory(ci)"
         >
-          <span class="cat-short">{{ categoryKindInfo(cat.name)?.short ?? cat.name }}</span>
-          <span class="cat-label-main">{{ categoryKindInfo(cat.name)?.label ?? cat.name }}</span>
-          <span class="cat-count">{{ cat.picks.length }}</span>
-        </button>
+          <button type="button" class="category-item" @click="selectCategory(ci)">
+            <span class="cat-short">{{ categoryKindInfo(cat.name)?.short ?? cat.name }}</span>
+            <span class="cat-label-main">{{ categoryKindInfo(cat.name)?.label ?? cat.name }}</span>
+            <span class="cat-count">{{ cat.picks.length }}</span>
+          </button>
+          <el-button
+            link
+            type="danger"
+            class="cat-delete"
+            :title="$t('mappoolEditor.deleteCategoryBtn')"
+            @click="removeCategory(ci)"
+          >
+            {{ $t("mappoolEditor.deleteCategoryBtn") }}
+          </el-button>
+        </div>
 
         <el-button class="add-cat" type="primary" plain :disabled="!canAddCategory" @click="addCategory">
           {{ canAddCategory ? $t("mappoolEditor.addCategoryBtn") : $t("mappoolEditor.maxCategories") }}
@@ -199,30 +194,6 @@ const canAddCategory = computed(() => props.mappool.categories.length < CATEGORY
         </div>
 
         <template v-else>
-          <div class="cat-head">
-            <div class="cat-name-wrap">
-              <span class="cat-label">{{ $t("mappoolEditor.labelCategory") }}</span>
-              <el-select
-                v-model="selectedCategory.name"
-                class="cat-name-input"
-                :placeholder="$t('mappoolEditor.categoryPlaceholder')"
-                @change="onKindChange(selectedIndex)"
-              >
-                <el-option
-                  v-for="o in kindOptions"
-                  :key="o.value"
-                  :value="o.value"
-                  :label="`${o.short} · ${o.label.split(' · ')[0]}`"
-                  :disabled="usedKinds(selectedIndex).has(o.value)"
-                />
-              </el-select>
-              <span class="cat-desc">{{ categoryKindInfo(selectedCategory.name)?.label }}</span>
-            </div>
-            <el-button link type="danger" @click="removeCategory(selectedIndex)">
-              {{ $t("mappoolEditor.deleteCategoryBtn") }}
-            </el-button>
-          </div>
-
           <div class="picks">
             <MappoolPickEditor
               v-for="(pick, pi) in selectedCategory.picks"
@@ -296,29 +267,47 @@ const canAddCategory = computed(() => props.mappool.categories.length < CATEGORY
   border: 1px dashed var(--tc-border);
   border-radius: 8px;
 }
+.category-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  transition: background 0.15s, border-color 0.15s;
+}
+.category-row:hover {
+  background: var(--tc-hover);
+}
+.category-row.active {
+  background: var(--tc-bg-soft);
+  border-color: var(--tc-border);
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--el-color-primary);
+}
 .category-item {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 100%;
   padding: 8px 10px;
-  border: 1px solid transparent;
+  border: none;
   border-radius: 8px;
   background: transparent;
   color: var(--tc-text);
   cursor: pointer;
   font-size: 13px;
   text-align: left;
-  transition: background 0.15s, border-color 0.15s;
 }
-.category-item:hover {
-  background: var(--tc-hover);
+.category-item:focus-visible {
+  outline: 2px solid var(--el-color-primary);
+  outline-offset: -2px;
 }
-.category-item.active {
-  background: var(--tc-bg-soft);
-  border-color: var(--tc-border);
-  font-weight: 600;
-  box-shadow: inset 2px 0 0 var(--el-color-primary);
+.cat-delete {
+  flex-shrink: 0;
+  padding: 4px 6px;
+  margin-right: 4px;
+  font-size: 12px;
 }
 .cat-short {
   width: 30px;
@@ -370,29 +359,6 @@ const canAddCategory = computed(() => props.mappool.categories.length < CATEGORY
 }
 .main-empty p {
   margin: 0;
-}
-.cat-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
-.cat-name-wrap {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.cat-label {
-  font-size: 12px;
-  color: var(--tc-text-dim);
-}
-.cat-name-input {
-  width: 200px;
-}
-.cat-desc {
-  font-size: 12px;
-  color: var(--tc-text-dim);
 }
 .picks {
   display: flex;

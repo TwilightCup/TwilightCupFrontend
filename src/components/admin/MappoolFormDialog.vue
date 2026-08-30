@@ -93,11 +93,12 @@ async function onSubmit(): Promise<void> {
     :model-value="modelValue"
     :title="editingId ? $t('mappoolForm.titleEdit') : $t('mappoolForm.titleCreate')"
     width="900px"
+    class="mappool-dialog"
     :close-on-click-modal="false"
-    top="6vh"
+    top="0"
     @update:model-value="emit('update:modelValue', $event)"
   >
-    <el-form :model="form" label-width="90px" label-position="right">
+    <el-form :model="form" label-position="top">
       <el-form-item :label="$t('mappoolForm.labelName')" required>
         <el-input v-model="form.name" :placeholder="$t('mappoolForm.namePlaceholder')" />
       </el-form-item>
@@ -126,5 +127,24 @@ async function onSubmit(): Promise<void> {
   font-size: 12px;
   color: var(--tc-text-dim);
   margin-top: 6px;
+}
+</style>
+
+<style>
+.mappool-dialog {
+  height: 100vh;
+  margin-top: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.mappool-dialog .el-dialog__header,
+.mappool-dialog .el-dialog__footer {
+  flex-shrink: 0;
+}
+.mappool-dialog .el-dialog__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 </style>
