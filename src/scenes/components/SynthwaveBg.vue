@@ -9,7 +9,7 @@
  * 组件自身读取 localStorage / URL 并监听 WS config_update 与跨标签 storage，
  * 因此 standalone 与 sharedBg 两种模式都能保持同一套切换逻辑。
  */
-import { computed, onMounted, onUnmounted, useId, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, useId, watch } from "vue";
 import { useDirectorStore } from "@/stores/director";
 import { useSceneContext } from "@/scenes/composables/useSceneContext";
 import { normalizeSceneBackground } from "@/scenes/composables/useSceneBackgrounds";
@@ -40,6 +40,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener("storage", onStorage);
+  stopRipple();
 });
 
 // WS config_update 广播：舞台/独立场景即使不在导播控制台所在文档，也能实时切换背景。
@@ -91,6 +92,65 @@ function starStyle(s: Star): Record<string, string> {
     "--star-max": String(s.maxOpacity),
   };
 }
+
+// ---- 水波置换动画 ----
+// SVG feTurbulence 的 baseFrequency 无法用 CSS 动画驱动，这里用 rAF 低速
+// 更新（约 20fps），让反射与水下网格的折射场本身持续缓慢流动，静态倒影
+// 和静态竖线也能看到波纹在动。
+const reflTurbulence = ref<Element | null>(null);
+const gridTurbulence = ref<Element | null>(null);
+let rippleRaf = 0;
+let rippleLast = 0;
+let rippleElapsed = 0;
+
+function setTurbulenceBaseFrequency(el: Element | null, x: number, y: number): void {
+  el?.setAttribute("baseFrequency", `${x.toFixed(4)} ${y.toFixed(4)}`);
+}
+
+function rippleFrame(now: number): void {
+  rippleRaf = requestAnimationFrame(rippleFrame);
+  if (!rippleLast) {
+    rippleLast = now;
+    return;
+  }
+  if (now - rippleLast < 50) return; // 20fps，水波低频流动足够平滑
+  rippleElapsed += (now - rippleLast) / 1000;
+  rippleLast = now;
+  const t = rippleElapsed;
+
+  setTurbulenceBaseFrequency(
+    reflTurbulence.value,
+    0.007 + Math.sin(t * 0.9) * 0.002,
+    0.017 + Math.cos(t * 0.7) * 0.004,
+  );
+  setTurbulenceBaseFrequency(
+    gridTurbulence.value,
+    0.012 + Math.sin(t * 1.05 + 2.1) * 0.003,
+    0.027 + Math.cos(t * 0.8 + 1.3) * 0.005,
+  );
+}
+
+function startRipple(): void {
+  if (rippleRaf) return;
+  rippleLast = 0;
+  rippleElapsed = 0;
+  rippleRaf = requestAnimationFrame(rippleFrame);
+}
+
+function stopRipple(): void {
+  if (!rippleRaf) return;
+  cancelAnimationFrame(rippleRaf);
+  rippleRaf = 0;
+}
+
+watch(
+  background,
+  (v) => {
+    if (v === "synthwave") startRipple();
+    else stopRipple();
+  },
+  { immediate: true, flush: "post" },
+);
 </script>
 
 <template>
@@ -165,37 +225,57 @@ function starStyle(s: Star): Record<string, string> {
       <!-- 水波置换滤镜：给水面反射与水下网格做像素级波纹折射（无颜色覆盖） -->
       <svg class="water-filter-defs" aria-hidden="true">
         <defs>
-          <filter :id="waterRippleId" x="-12%" y="-12%" width="124%" height="124%">
+          <filter
+            :id="waterRippleId"
+            x="-12%"
+            y="-12%"
+            width="124%"
+            height="124%"
+            color-interpolation-filters="sRGB"
+          >
             <feTurbulence
+              ref="reflTurbulence"
               type="fractalNoise"
-              baseFrequency="0.008 0.02"
-              numOctaves="3"
+              baseFrequency="0.007 0.017"
+              numOctaves="4"
               seed="7"
               result="noise"
             />
             <feDisplacementMap
               in="SourceGraphic"
               in2="noise"
-              scale="12"
+              scale="10"
               xChannelSelector="R"
               yChannelSelector="G"
+              result="displaced"
             />
+            <feGaussianBlur in="displaced" stdDeviation="0.6" />
           </filter>
-          <filter :id="waterRippleGridId" x="-12%" y="-12%" width="124%" height="124%">
+          <filter
+            :id="waterRippleGridId"
+            x="-12%"
+            y="-12%"
+            width="124%"
+            height="124%"
+            color-interpolation-filters="sRGB"
+          >
             <feTurbulence
+              ref="gridTurbulence"
               type="fractalNoise"
-              baseFrequency="0.014 0.03"
-              numOctaves="2"
+              baseFrequency="0.012 0.027"
+              numOctaves="3"
               seed="11"
               result="noise"
             />
             <feDisplacementMap
               in="SourceGraphic"
               in2="noise"
-              scale="7"
+              scale="5"
               xChannelSelector="R"
               yChannelSelector="G"
+              result="displaced"
             />
+            <feGaussianBlur in="displaced" stdDeviation="0.35" />
           </filter>
         </defs>
       </svg>
@@ -620,20 +700,11 @@ function starStyle(s: Star): Record<string, string> {
   right: 0;
   top: -100.8032%;
   height: 200.8032%;
+  /* 只做地平线翻转，不做位移/偏斜动画：任何 translateY 都会让倒影与
+     实物在水平线处拉开缝隙。水波纹动感由 feTurbulence 置换场本身流动提供。 */
   transform: scaleY(-1);
   transform-origin: 50% 50.2%;
   opacity: 0.52;
-  animation: waterReflectionBob 5.2s ease-in-out infinite;
-}
-
-@keyframes waterReflectionBob {
-  0%,
-  100% {
-    transform: scaleY(-1) translateY(0) skewX(0deg);
-  }
-  50% {
-    transform: scaleY(-1) translateY(-7px) skewX(0.7deg);
-  }
 }
 
 /* 反射用天空：与上方 .sky 同一渐变，按整屏坐标系摆放 */
@@ -660,25 +731,28 @@ function starStyle(s: Star): Record<string, string> {
   opacity: 0.9;
 }
 
-/* 波光：透明底上的高光细纹，经 SVG 置换后随水波扭动；无颜色覆盖 */
+/* 波光：透明底上的柔和高光带，经 SVG 置换后随水波扭动；无颜色覆盖。
+   渐变起点/终点都是 transparent，避免硬边在置换后出现像素锯齿。 */
 .synthwave-bg[data-background="synthwave"] .water-glints {
   position: absolute;
   inset: -6% 0;
   pointer-events: none;
-  opacity: 0.3;
+  opacity: 0.22;
   mix-blend-mode: screen;
   background-image:
     repeating-linear-gradient(
       112deg,
-      transparent 0 30px,
-      rgba(255, 255, 255, 0.09) 30px 32px,
-      transparent 32px 58px
+      transparent 0 18px,
+      rgba(255, 255, 255, 0.07) 30px,
+      rgba(255, 255, 255, 0) 44px,
+      transparent 62px
     ),
     repeating-linear-gradient(
       68deg,
-      transparent 0 44px,
-      rgba(190, 235, 255, 0.07) 44px 46px,
-      transparent 46px 70px
+      transparent 0 28px,
+      rgba(190, 235, 255, 0.05) 44px,
+      rgba(190, 235, 255, 0) 58px,
+      transparent 78px
     );
   background-size:
     140% 140%,
