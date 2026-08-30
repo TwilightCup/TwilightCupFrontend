@@ -782,7 +782,11 @@ const messages = {
   "matchDetail.draftStageTitle": "禁用阶段",
 
   // ── 图池编辑器（MappoolEditor） ──────────────────────────────────────
-  "mappoolEditor.empty": "图池为空，点击下方「+ 添加类别」开始（建议依次添加 ML/IL/CP/CT/EX/TB）。",
+  "mappoolEditor.empty": "图池为空，点击左侧或下方「+ 添加类别」开始（建议依次添加 ML/IL/CP/CT/EX/TB）。",
+  "mappoolEditor.sidebarTitle": "类别侧栏",
+  "mappoolEditor.sidebarHint": "选择或新建类别",
+  "mappoolEditor.emptySidebar": "暂无类别，请新建",
+  "mappoolEditor.selectCategoryHint": "请先在左侧选择或新建类别，右侧将显示该类别下的选图。",
   "mappoolEditor.labelCategory": "类别",
   "mappoolEditor.categoryPlaceholder": "选择类别",
   "mappoolEditor.deleteCategoryBtn": "删除类别",
@@ -811,6 +815,8 @@ const messages = {
   "pickEditor.deleteConfirmTitle": "删除选图",
   "pickEditor.deleteConfirmMsg": "删除选图「{code}」？",
   "pickEditor.pickNumber": "选图 {index}",
+  "pickEditor.collapsePickBtn": "折叠",
+  "pickEditor.expandPickBtn": "展开",
   "pickEditor.deletePickBtn": "删除选图",
   "pickEditor.labelCode": "编号",
   "pickEditor.codeAuto": "自动",

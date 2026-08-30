@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import { ElMessageBox } from "element-plus";
 import { useI18n } from "vue-i18n";
 import {
@@ -17,7 +17,7 @@ import MappoolPickEditor from "./MappoolPickEditor.vue";
 const { t } = useI18n();
 
 /**
- * 图池编辑器：类别（kind）→ 选图。
+ * 图池编辑器：左侧类别侧栏 → 右侧当前类别选图。
  *
  * 类别名即文档固定 kind（ML/IL/CP/CT/EX/TB），故用下拉而非自由文本；每个 kind 至多一个类别，
  * TB 类别限定 1 个选图。直接 mutate 父级传入的 reactive mappool 引用。
@@ -28,6 +28,40 @@ const kindOptions = CATEGORY_KINDS.map((k) => {
   const info = categoryKindInfo(k);
   return { value: k, short: info?.short ?? k, label: info?.label ?? k };
 });
+
+/** 当前选中的类别下标；-1 表示未选择（无类别）。 */
+const selectedIndex = ref(-1);
+
+const selectedCategory = computed(() =>
+  selectedIndex.value >= 0 && selectedIndex.value < props.mappool.categories.length
+    ? props.mappool.categories[selectedIndex.value]
+    : null,
+);
+
+watch(
+  () => props.mappool,
+  () => {
+    selectedIndex.value = props.mappool.categories.length > 0 ? 0 : -1;
+  },
+  { immediate: true },
+);
+
+watch(
+  () => props.mappool.categories.length,
+  () => {
+    if (selectedIndex.value < 0) {
+      selectedIndex.value = props.mappool.categories.length > 0 ? 0 : -1;
+    } else if (selectedIndex.value >= props.mappool.categories.length) {
+      selectedIndex.value = props.mappool.categories.length > 0 ? props.mappool.categories.length - 1 : -1;
+    }
+  },
+);
+
+function selectCategory(ci: number): void {
+  if (ci >= 0 && ci < props.mappool.categories.length) {
+    selectedIndex.value = ci;
+  }
+}
 
 /** 各类别已用 kind（用于下拉禁用）。 */
 function usedKinds(excludeIndex: number): Set<string> {
@@ -52,6 +86,7 @@ function addCategory(): void {
     name: firstUnusedKind(),
     picks: [],
   });
+  selectedIndex.value = props.mappool.categories.length - 1;
 }
 
 function onKindChange(ci: number): void {
@@ -85,6 +120,9 @@ async function removeCategory(ci: number): Promise<void> {
     return;
   }
   props.mappool.categories.splice(ci, 1);
+  if (selectedIndex.value >= props.mappool.categories.length) {
+    selectedIndex.value = props.mappool.categories.length > 0 ? props.mappool.categories.length - 1 : -1;
+  }
 }
 
 function addPick(ci: number): void {
@@ -123,90 +161,215 @@ const canAddCategory = computed(() => props.mappool.categories.length < CATEGORY
 
 <template>
   <div class="mappool-editor">
-    <div v-if="mappool.categories.length === 0" class="empty">
-      {{ $t("mappoolEditor.empty") }}
-    </div>
-
-    <div
-      v-for="(cat, ci) in mappool.categories"
-      :key="ci"
-      class="category-card"
-    >
-      <div class="cat-head">
-        <div class="cat-name-wrap">
-          <span class="cat-label">{{ $t("mappoolEditor.labelCategory") }}</span>
-          <el-select
-            v-model="cat.name"
-            class="cat-name-input"
-            :placeholder="$t('mappoolEditor.categoryPlaceholder')"
-            @change="onKindChange(ci)"
-          >
-            <el-option
-              v-for="o in kindOptions"
-              :key="o.value"
-              :value="o.value"
-              :label="`${o.short} · ${o.label.split(' · ')[0]}`"
-              :disabled="usedKinds(ci).has(o.value)"
-            />
-          </el-select>
-          <span class="cat-desc">{{ categoryKindInfo(cat.name)?.label }}</span>
+    <div class="editor-layout">
+      <aside class="category-sidebar">
+        <div class="sidebar-header">
+          <span class="sidebar-title">{{ $t("mappoolEditor.sidebarTitle") }}</span>
+          <span class="sidebar-hint">{{ $t("mappoolEditor.sidebarHint") }}</span>
         </div>
-        <el-button link type="danger" @click="removeCategory(ci)">
-          {{ $t("mappoolEditor.deleteCategoryBtn") }}
+
+        <div v-if="mappool.categories.length === 0" class="sidebar-empty">
+          {{ $t("mappoolEditor.emptySidebar") }}
+        </div>
+
+        <button
+          v-for="(cat, ci) in mappool.categories"
+          :key="ci"
+          type="button"
+          class="category-item"
+          :class="{ active: ci === selectedIndex }"
+          @click="selectCategory(ci)"
+        >
+          <span class="cat-short">{{ categoryKindInfo(cat.name)?.short ?? cat.name }}</span>
+          <span class="cat-label-main">{{ categoryKindInfo(cat.name)?.label ?? cat.name }}</span>
+          <span class="cat-count">{{ cat.picks.length }}</span>
+        </button>
+
+        <el-button class="add-cat" type="primary" plain :disabled="!canAddCategory" @click="addCategory">
+          {{ canAddCategory ? $t("mappoolEditor.addCategoryBtn") : $t("mappoolEditor.maxCategories") }}
         </el-button>
-      </div>
+      </aside>
 
-      <div class="picks">
-        <MappoolPickEditor
-          v-for="(pick, pi) in cat.picks"
-          :key="pi"
-          :pick="pick"
-          :index="pi"
-          :category-name="cat.name"
-          @remove="removePick(ci, pi)"
-        />
-      </div>
+      <section class="category-main">
+        <div v-if="!selectedCategory" class="main-empty">
+          <p>{{ $t("mappoolEditor.selectCategoryHint") }}</p>
+          <el-button v-if="canAddCategory" type="primary" plain @click="addCategory">
+            {{ $t("mappoolEditor.addCategoryBtn") }}
+          </el-button>
+        </div>
 
-      <el-button
-        class="add-pick"
-        plain
-        size="small"
-        :disabled="categoryKindOf(cat.name) === CategoryKind.TB && cat.picks.length >= 1"
-        @click="addPick(ci)"
-      >
-        {{
-          categoryKindOf(cat.name) === CategoryKind.TB && cat.picks.length >= 1
-            ? $t("mappoolEditor.tbOnlyOne")
-            : $t("mappoolEditor.addPickBtn")
-        }}
-      </el-button>
+        <template v-else>
+          <div class="cat-head">
+            <div class="cat-name-wrap">
+              <span class="cat-label">{{ $t("mappoolEditor.labelCategory") }}</span>
+              <el-select
+                v-model="selectedCategory.name"
+                class="cat-name-input"
+                :placeholder="$t('mappoolEditor.categoryPlaceholder')"
+                @change="onKindChange(selectedIndex)"
+              >
+                <el-option
+                  v-for="o in kindOptions"
+                  :key="o.value"
+                  :value="o.value"
+                  :label="`${o.short} · ${o.label.split(' · ')[0]}`"
+                  :disabled="usedKinds(selectedIndex).has(o.value)"
+                />
+              </el-select>
+              <span class="cat-desc">{{ categoryKindInfo(selectedCategory.name)?.label }}</span>
+            </div>
+            <el-button link type="danger" @click="removeCategory(selectedIndex)">
+              {{ $t("mappoolEditor.deleteCategoryBtn") }}
+            </el-button>
+          </div>
+
+          <div class="picks">
+            <MappoolPickEditor
+              v-for="(pick, pi) in selectedCategory.picks"
+              :key="pi"
+              :pick="pick"
+              :index="pi"
+              :category-name="selectedCategory.name"
+              @remove="removePick(selectedIndex, pi)"
+            />
+          </div>
+
+          <el-button
+            class="add-pick"
+            plain
+            size="small"
+            :disabled="categoryKindOf(selectedCategory.name) === CategoryKind.TB && selectedCategory.picks.length >= 1"
+            @click="addPick(selectedIndex)"
+          >
+            {{
+              categoryKindOf(selectedCategory.name) === CategoryKind.TB && selectedCategory.picks.length >= 1
+                ? $t("mappoolEditor.tbOnlyOne")
+                : $t("mappoolEditor.addPickBtn")
+            }}
+          </el-button>
+        </template>
+      </section>
     </div>
-
-    <el-button class="add-cat" type="primary" plain :disabled="!canAddCategory" @click="addCategory">
-      {{ canAddCategory ? $t("mappoolEditor.addCategoryBtn") : $t("mappoolEditor.maxCategories") }}
-    </el-button>
   </div>
 </template>
 
 <style scoped>
 .mappool-editor {
+  width: 100%;
+}
+.editor-layout {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+  min-height: 320px;
+}
+.category-sidebar {
+  width: 190px;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
+  padding: 12px;
+  background: var(--tc-bg-soft);
+  border: 1px solid var(--tc-border);
+  border-radius: 10px;
 }
-.empty {
-  color: var(--tc-text-dim);
+.sidebar-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sidebar-title {
   font-size: 13px;
-  padding: 16px;
+  font-weight: 600;
+  color: var(--tc-text);
+}
+.sidebar-hint {
+  font-size: 11px;
+  color: var(--tc-text-dim);
+}
+.sidebar-empty {
+  font-size: 12px;
+  color: var(--tc-text-dim);
+  padding: 8px 4px;
   text-align: center;
   border: 1px dashed var(--tc-border);
   border-radius: 8px;
 }
-.category-card {
+.category-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--tc-text);
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s;
+}
+.category-item:hover {
+  background: var(--tc-hover);
+}
+.category-item.active {
+  background: var(--tc-bg-soft);
+  border-color: var(--tc-border);
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--el-color-primary);
+}
+.cat-short {
+  width: 30px;
+  flex-shrink: 0;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+.cat-label-main {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.cat-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--tc-text-dim);
+  background: var(--tc-hover);
+  border-radius: 10px;
+  padding: 1px 7px;
+}
+.add-cat {
+  width: 100%;
+  margin-top: auto;
+}
+.category-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   background: var(--tc-bg-soft);
   border: 1px solid var(--tc-border);
   border-radius: 10px;
   padding: 12px;
+}
+.main-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--tc-text-dim);
+  font-size: 13px;
+  text-align: center;
+}
+.main-empty p {
+  margin: 0;
 }
 .cat-head {
   display: flex;
@@ -238,9 +401,6 @@ const canAddCategory = computed(() => props.mappool.categories.length < CATEGORY
   margin-bottom: 10px;
 }
 .add-pick {
-  width: 100%;
-}
-.add-cat {
   width: 100%;
 }
 </style>

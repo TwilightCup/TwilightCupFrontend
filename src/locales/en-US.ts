@@ -778,7 +778,11 @@ const messages: MessageSchema = {
   "matchDetail.draftStageTitle": "Ban Phase",
 
   // ── mappool editor ───────────────────────────────────────────────────
-  "mappoolEditor.empty": "Mappool is empty — click \"+ Add category\" below to start (suggested order: ML/IL/CP/CT/EX/TB).",
+  "mappoolEditor.empty": "Mappool is empty — click \"+ Add category\" on the left or below to start (suggested order: ML/IL/CP/CT/EX/TB).",
+  "mappoolEditor.sidebarTitle": "Category sidebar",
+  "mappoolEditor.sidebarHint": "Select or create a category",
+  "mappoolEditor.emptySidebar": "No categories yet — create one",
+  "mappoolEditor.selectCategoryHint": "Select or create a category on the left; the right panel shows its picks.",
   "mappoolEditor.labelCategory": "Category",
   "mappoolEditor.categoryPlaceholder": "Select a category",
   "mappoolEditor.deleteCategoryBtn": "Delete category",
@@ -807,6 +811,8 @@ const messages: MessageSchema = {
   "pickEditor.deleteConfirmTitle": "Delete pick",
   "pickEditor.deleteConfirmMsg": "Delete pick \"{code}\"?",
   "pickEditor.pickNumber": "Pick {index}",
+  "pickEditor.collapsePickBtn": "Collapse",
+  "pickEditor.expandPickBtn": "Expand",
   "pickEditor.deletePickBtn": "Delete pick",
   "pickEditor.labelCode": "Code",
   "pickEditor.codeAuto": "Auto",

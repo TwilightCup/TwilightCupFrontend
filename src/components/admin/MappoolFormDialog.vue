@@ -92,7 +92,7 @@ async function onSubmit(): Promise<void> {
   <el-dialog
     :model-value="modelValue"
     :title="editingId ? $t('mappoolForm.titleEdit') : $t('mappoolForm.titleCreate')"
-    width="760px"
+    width="900px"
     :close-on-click-modal="false"
     top="6vh"
     @update:model-value="emit('update:modelValue', $event)"

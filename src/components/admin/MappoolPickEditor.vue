@@ -34,6 +34,7 @@ const { t } = useI18n();
 const auth = useAuthStore();
 
 const logoUploading = ref(false);
+const collapsed = ref(false);
 const ACCEPT = ".png,.jpg,.jpeg,.webp,.gif";
 const MAX_BYTES = 5 * 1024 * 1024;
 
@@ -338,182 +339,195 @@ async function onRemove(): Promise<void> {
 </script>
 
 <template>
-  <div class="pick-card">
+  <div class="pick-card" :class="{ 'is-collapsed': collapsed }">
     <div class="pick-head">
-      <span class="pick-no">{{ $t("pickEditor.pickNumber", { index: index + 1 }) }}</span>
+      <div class="pick-head-left">
+        <el-button
+          link
+          class="collapse-btn"
+          :title="collapsed ? $t('pickEditor.expandPickBtn') : $t('pickEditor.collapsePickBtn')"
+          @click="collapsed = !collapsed"
+        >
+          <span class="collapse-icon">{{ collapsed ? "▸" : "▾" }}</span>
+          <span class="collapse-text">{{ collapsed ? $t("pickEditor.expandPickBtn") : $t("pickEditor.collapsePickBtn") }}</span>
+        </el-button>
+        <span class="pick-no">{{ $t("pickEditor.pickNumber", { index: index + 1 }) }}</span>
+      </div>
       <el-button link type="danger" @click="onRemove">{{ $t("pickEditor.deletePickBtn") }}</el-button>
     </div>
 
-    <div class="grid">
-      <el-form-item :label="$t('pickEditor.labelCode')" class="col">
-        <span class="code">{{ props.pick.code || $t("pickEditor.codeAuto") }}</span>
-      </el-form-item>
-      <el-form-item :label="$t('pickEditor.labelPickName')" class="col">
-        <el-input v-model="props.pick.name" :placeholder="$t('pickEditor.pickNamePlaceholder')" />
-      </el-form-item>
-    </div>
-
-    <!-- logo 展示图：上传到 MinIO，key 随选图保存 -->
-    <el-form-item :label="$t('pickEditor.labelLogo')">
-      <div class="logo-row">
-        <div v-if="logoPreview" class="logo-preview">
-          <img :src="logoPreview" :alt="props.pick.name" />
-          <el-button link type="danger" :disabled="logoUploading" @click="onRemoveLogo">
-            {{ $t("pickEditor.logoRemoveBtn") }}
-          </el-button>
-        </div>
-        <el-upload
-          :show-file-list="false"
-          :accept="ACCEPT"
-          :http-request="onUpload"
-          :disabled="logoUploading"
-        >
-          <el-button :loading="logoUploading">{{ $t("pickEditor.logoUploadBtn") }}</el-button>
-        </el-upload>
-        <span class="logo-hint">{{ $t("pickEditor.logoHint") }}</span>
+    <div v-show="!collapsed" class="pick-body">
+      <div class="grid">
+        <el-form-item :label="$t('pickEditor.labelCode')" class="col">
+          <span class="code">{{ props.pick.code || $t("pickEditor.codeAuto") }}</span>
+        </el-form-item>
+        <el-form-item :label="$t('pickEditor.labelPickName')" class="col">
+          <el-input v-model="props.pick.name" :placeholder="$t('pickEditor.pickNamePlaceholder')" />
+        </el-form-item>
       </div>
-    </el-form-item>
 
-    <div class="grid">
-      <el-form-item :label="$t('pickEditor.labelType')" class="col">
-        <el-select v-model="props.pick.type">
-          <el-option
-            v-for="o in typeOptions"
-            :key="o.value"
-            :value="o.value"
-            :label="o.label"
-          />
-        </el-select>
-      </el-form-item>
-
-      <!-- 多关：项目下拉，选完整预设自动按主线顺序填关卡 id 序列；合集名即项目名。
-           预设按关卡名约定解析，缺关则禁用；无任何完整预设时整体隐藏。 -->
-      <el-form-item
-        v-if="props.pick.type === PickType.MULTI && hasCompletePreset"
-        :label="$t('pickEditor.labelProject')"
-        class="col"
-      >
-        <el-select
-          v-model="projectSel"
-          filterable
-          default-first-option
-          clearable
-          :placeholder="$t('pickEditor.projectPlaceholder')"
-          @change="onProjectChange"
-        >
-          <el-option
-            v-for="p in resolvedPresets"
-            :key="p.name"
-            :value="p.name"
-            :label="p.missing.length ? `${p.name}（缺 ${p.missing.length} 关）` : p.name"
-            :disabled="p.missing.length > 0"
-          />
-        </el-select>
-      </el-form-item>
-
-      <!-- 单关：关卡（可输入）下拉，选关卡或输入工坊 ID（数字） -->
-      <el-form-item v-else :label="$t('pickEditor.labelLevel')" class="col">
-        <el-select
-          v-model="singleLevel"
-          filterable
-          allow-create
-          default-first-option
-          clearable
-          :placeholder="$t('pickEditor.levelPlaceholder')"
-          @change="onSingleLevelChange"
-        >
-          <el-option
-            v-for="l in singleOptions"
-            :key="l.value"
-            :value="l.value"
-            :label="l.label"
+      <!-- logo 展示图：上传到 MinIO，key 随选图保存 -->
+      <el-form-item :label="$t('pickEditor.labelLogo')">
+        <div class="logo-row">
+          <div v-if="logoPreview" class="logo-preview">
+            <img :src="logoPreview" :alt="props.pick.name" />
+            <el-button link type="danger" :disabled="logoUploading" @click="onRemoveLogo">
+              {{ $t("pickEditor.logoRemoveBtn") }}
+            </el-button>
+          </div>
+          <el-upload
+            :show-file-list="false"
+            :accept="ACCEPT"
+            :http-request="onUpload"
+            :disabled="logoUploading"
           >
-            <el-tag
-              v-if="l.status !== 'ok'"
-              size="small"
-              :type="l.status === 'workshop' ? 'info' : 'warning'"
-              effect="plain"
-            >
-              {{ $t(l.status === 'legacy' ? 'pickEditor.legacyTag' : l.status === 'unknown' ? 'pickEditor.unknownTag' : 'pickEditor.workshopTag') }}
-            </el-tag>
-          </el-option>
-        </el-select>
+            <el-button :loading="logoUploading">{{ $t("pickEditor.logoUploadBtn") }}</el-button>
+          </el-upload>
+          <span class="logo-hint">{{ $t("pickEditor.logoHint") }}</span>
+        </div>
       </el-form-item>
-    </div>
 
-    <div class="grid">
-      <el-form-item v-if="props.pick.type === PickType.SINGLE && showRetryCount" :label="$t('pickEditor.labelRetryCount')" class="col">
-        <el-input-number
-          v-model="props.pick.retry_count"
-          :min="0"
-          controls-position="right"
-          style="width: 100%"
-        />
-      </el-form-item>
-    </div>
-
-    <!-- 多关：关卡列表（可手动增删 / 排序）；每行选关卡（value=id, label=展示名） -->
-    <el-form-item v-if="props.pick.type === PickType.MULTI" :label="$t('pickEditor.labelLevelList')">
-      <div class="levels">
-        <div v-for="(lvl, i) in colLevels" :key="i" class="lvl-row">
-          <span class="lvl-no">{{ i + 1 }}</span>
-          <el-select
-            :model-value="lvl"
-            filterable
-            default-first-option
-            clearable
-            :placeholder="$t('pickEditor.levelIdPlaceholder')"
-            class="lvl-input"
-            @update:model-value="(v: string) => (colLevels[i] = v)"
-          >
+      <div class="grid">
+        <el-form-item :label="$t('pickEditor.labelType')" class="col">
+          <el-select v-model="props.pick.type">
             <el-option
-              v-for="o in optionsFor(lvl)"
+              v-for="o in typeOptions"
               :key="o.value"
               :value="o.value"
               :label="o.label"
+            />
+          </el-select>
+        </el-form-item>
+
+        <!-- 多关：项目下拉，选完整预设自动按主线顺序填关卡 id 序列；合集名即项目名。
+             预设按关卡名约定解析，缺关则禁用；无任何完整预设时整体隐藏。 -->
+        <el-form-item
+          v-if="props.pick.type === PickType.MULTI && hasCompletePreset"
+          :label="$t('pickEditor.labelProject')"
+          class="col"
+        >
+          <el-select
+            v-model="projectSel"
+            filterable
+            default-first-option
+            clearable
+            :placeholder="$t('pickEditor.projectPlaceholder')"
+            @change="onProjectChange"
+          >
+            <el-option
+              v-for="p in resolvedPresets"
+              :key="p.name"
+              :value="p.name"
+              :label="p.missing.length ? `${p.name}（缺 ${p.missing.length} 关）` : p.name"
+              :disabled="p.missing.length > 0"
+            />
+          </el-select>
+        </el-form-item>
+
+        <!-- 单关：关卡（可输入）下拉，选关卡或输入工坊 ID（数字） -->
+        <el-form-item v-else :label="$t('pickEditor.labelLevel')" class="col">
+          <el-select
+            v-model="singleLevel"
+            filterable
+            allow-create
+            default-first-option
+            clearable
+            :placeholder="$t('pickEditor.levelPlaceholder')"
+            @change="onSingleLevelChange"
+          >
+            <el-option
+              v-for="l in singleOptions"
+              :key="l.value"
+              :value="l.value"
+              :label="l.label"
             >
               <el-tag
-                v-if="o.status !== 'ok'"
+                v-if="l.status !== 'ok'"
                 size="small"
-                :type="o.status === 'workshop' ? 'info' : 'warning'"
+                :type="l.status === 'workshop' ? 'info' : 'warning'"
                 effect="plain"
               >
-                {{ $t(o.status === 'legacy' ? 'pickEditor.legacyTag' : o.status === 'unknown' ? 'pickEditor.unknownTag' : 'pickEditor.workshopTag') }}
+                {{ $t(l.status === 'legacy' ? 'pickEditor.legacyTag' : l.status === 'unknown' ? 'pickEditor.unknownTag' : 'pickEditor.workshopTag') }}
               </el-tag>
             </el-option>
           </el-select>
-          <el-button-group class="lvl-ops">
-            <el-button link :disabled="i === 0" @click="moveLevel(i, -1)">↑</el-button>
-            <el-button link :disabled="i === colLevels.length - 1" @click="moveLevel(i, 1)">↓</el-button>
-            <el-button link type="danger" @click="removeLevel(i)">✕</el-button>
-          </el-button-group>
+        </el-form-item>
+      </div>
+
+      <div class="grid">
+        <el-form-item v-if="props.pick.type === PickType.SINGLE && showRetryCount" :label="$t('pickEditor.labelRetryCount')" class="col">
+          <el-input-number
+            v-model="props.pick.retry_count"
+            :min="0"
+            controls-position="right"
+            style="width: 100%"
+          />
+        </el-form-item>
+      </div>
+
+      <!-- 多关：关卡列表（可手动增删 / 排序）；每行选关卡（value=id, label=展示名） -->
+      <el-form-item v-if="props.pick.type === PickType.MULTI" :label="$t('pickEditor.labelLevelList')">
+        <div class="levels">
+          <div v-for="(lvl, i) in colLevels" :key="i" class="lvl-row">
+            <span class="lvl-no">{{ i + 1 }}</span>
+            <el-select
+              :model-value="lvl"
+              filterable
+              default-first-option
+              clearable
+              :placeholder="$t('pickEditor.levelIdPlaceholder')"
+              class="lvl-input"
+              @update:model-value="(v: string) => (colLevels[i] = v)"
+            >
+              <el-option
+                v-for="o in optionsFor(lvl)"
+                :key="o.value"
+                :value="o.value"
+                :label="o.label"
+              >
+                <el-tag
+                  v-if="o.status !== 'ok'"
+                  size="small"
+                  :type="o.status === 'workshop' ? 'info' : 'warning'"
+                  effect="plain"
+                >
+                  {{ $t(o.status === 'legacy' ? 'pickEditor.legacyTag' : o.status === 'unknown' ? 'pickEditor.unknownTag' : 'pickEditor.workshopTag') }}
+                </el-tag>
+              </el-option>
+            </el-select>
+            <el-button-group class="lvl-ops">
+              <el-button link :disabled="i === 0" @click="moveLevel(i, -1)">↑</el-button>
+              <el-button link :disabled="i === colLevels.length - 1" @click="moveLevel(i, 1)">↓</el-button>
+              <el-button link type="danger" @click="removeLevel(i)">✕</el-button>
+            </el-button-group>
+          </div>
+          <el-button size="small" @click="addLevel">{{ $t("pickEditor.addLevelBtn") }}</el-button>
+          <div v-if="admin.levels.length === 0" class="lvl-hint">
+            {{ $t("pickEditor.levelsEmptyHint") }}
+          </div>
+          <div v-if="levelsError" class="lvl-err">{{ levelsError }}</div>
+          <div v-if="levelsWarn" class="lvl-warn">{{ levelsWarn }}</div>
+          <div class="lvl-hint">
+            {{ $t("pickEditor.multiHint") }}
+          </div>
         </div>
-        <el-button size="small" @click="addLevel">{{ $t("pickEditor.addLevelBtn") }}</el-button>
+      </el-form-item>
+
+      <!-- 单关：自动生成合集，无需编辑关卡列表 -->
+      <div v-else class="single-hint">
         <div v-if="admin.levels.length === 0" class="lvl-hint">
           {{ $t("pickEditor.levelsEmptyHint") }}
         </div>
+        <div class="lvl-hint">
+          {{ $t("pickEditor.singleHint") }}
+        </div>
         <div v-if="levelsError" class="lvl-err">{{ levelsError }}</div>
         <div v-if="levelsWarn" class="lvl-warn">{{ levelsWarn }}</div>
-        <div class="lvl-hint">
-          {{ $t("pickEditor.multiHint") }}
-        </div>
       </div>
-    </el-form-item>
 
-    <!-- 单关：自动生成合集，无需编辑关卡列表 -->
-    <div v-else class="single-hint">
-      <div v-if="admin.levels.length === 0" class="lvl-hint">
-        {{ $t("pickEditor.levelsEmptyHint") }}
-      </div>
-      <div class="lvl-hint">
-        {{ $t("pickEditor.singleHint") }}
-      </div>
-      <div v-if="levelsError" class="lvl-err">{{ levelsError }}</div>
-      <div v-if="levelsWarn" class="lvl-warn">{{ levelsWarn }}</div>
+      <!-- speedrun.com 排行榜映射（导播 categoryinfo 场景拉榜依据） -->
+      <SpeedrunMappingEditor :pick="props.pick" />
     </div>
-
-    <!-- speedrun.com 排行榜映射（导播 categoryinfo 场景拉榜依据） -->
-    <SpeedrunMappingEditor :pick="props.pick" />
   </div>
 </template>
 
@@ -528,7 +542,27 @@ async function onRemove(): Promise<void> {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   margin-bottom: 6px;
+}
+.pick-head-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.collapse-btn {
+  padding: 0 4px;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.collapse-icon {
+  display: inline-block;
+  width: 14px;
+  text-align: center;
+}
+.collapse-text {
+  font-size: 12px;
 }
 .pick-no {
   font-size: 12px;
