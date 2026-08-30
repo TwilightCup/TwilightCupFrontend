@@ -444,11 +444,11 @@ function starStyle(s: Star): Record<string, string> {
   background-size: 8vmin 8vmin;
   background-repeat: repeat;
   filter:
-    brightness(1.35)
-    saturate(1.2)
-    drop-shadow(0 0 3px rgba(255, 255, 255, 0.55))
-    drop-shadow(0 0 7px rgba(255, 46, 136, 0.9))
-    drop-shadow(0 0 20px rgba(255, 46, 136, 0.4));
+    brightness(1.3)
+    saturate(1.15)
+    drop-shadow(0 0 3px rgba(255, 255, 255, 0.5))
+    drop-shadow(0 0 4px rgba(255, 46, 136, 0.6))
+    drop-shadow(0 0 12px rgba(255, 46, 136, 0.25));
   -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.6) 4%, #000 10%, #000 100%);
   mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.6) 4%, #000 10%, #000 100%);
   animation: gridWater 4.2s ease-in-out infinite;
@@ -460,15 +460,15 @@ function starStyle(s: Star): Record<string, string> {
   background-size: 8vmin 8vmin;
   background-repeat: repeat;
   filter:
-    brightness(1.35)
-    saturate(1.2)
-    drop-shadow(0 0 3px rgba(255, 255, 255, 0.55))
-    drop-shadow(0 0 8px rgba(255, 46, 136, 0.9))
-    drop-shadow(0 0 22px rgba(255, 46, 136, 0.4));
+    brightness(1.3)
+    saturate(1.15)
+    drop-shadow(0 0 3px rgba(255, 255, 255, 0.5))
+    drop-shadow(0 0 5px rgba(255, 46, 136, 0.6))
+    drop-shadow(0 0 14px rgba(255, 46, 136, 0.25));
   -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.6) 4%, #000 10%, #000 100%);
   mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.6) 4%, #000 10%, #000 100%);
   animation:
-    synthwaveGridScroll 2.4s linear infinite,
+    synthwaveGridScroll 3s linear infinite,
     gridWater 4.2s ease-in-out infinite;
 }
 
