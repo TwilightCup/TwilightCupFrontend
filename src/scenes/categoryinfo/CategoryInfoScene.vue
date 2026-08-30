@@ -18,6 +18,7 @@
  */
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
+import type { Pick } from "@/api/types";
 import { useDirectorStore } from "@/stores/director";
 import { useSceneContext } from "@/scenes/composables/useSceneContext";
 import SynthwaveBg from "@/scenes/components/SynthwaveBg.vue";
@@ -85,7 +86,7 @@ const thumbUrl = computed(() => {
 const projectTitle = computed(() => {
   if (isMock.value) return "Any%";
   const d = boardDisplay.value;
-  if (!d) return currentPick.value?.name ?? "";
+  if (!d) return fallbackProjectTitle(currentPick.value);
   // 扩展子游戏分类（No Checkpoint% / Jumpless%）：项目本身在子分类值里，
   // 标题 = 「项目% · 词条 · 其余子分类」，如 "Any% No Checkpoint"
   const extMatch = d.categoryName.match(/^(No Checkpoint|Jumpless)%$/i);
@@ -129,6 +130,21 @@ const projectTitle = computed(() => {
   }
   return parts.join(" ");
 });
+
+/** 无榜单展示时的标题兜底：项目名后带上选图词条，避免单关 + Jumpless /
+ *  No Checkpoint 等无榜单项目标题丢失词条。 */
+function fallbackProjectTitle(pick: Pick | null): string {
+  if (!pick) return "";
+  const name = (pick.name ?? "").trim();
+  const tags = (pick.tags?.length
+    ? pick.tags
+    : (pick.tag ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+  ).filter((t) => t && !name.toLowerCase().includes(t.toLowerCase()));
+  return [name, ...tags].filter(Boolean).join(" ");
+}
 
 function normEq(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase();

@@ -13,7 +13,9 @@
  *   pick.collection 本体仍是关卡库 UUID，别读它）→ 经 officialLevels 的官方
  *   展示名对照（= speedrun.com 的英文本地化关卡名）匹配 IL 关卡；分类固定
  *   per-level 的 PC。存档点信号的单关（CP 类或 Checkpoint 词条）IL 子分类
- *   取 Checkpoint%，其余默认 Any%。工坊数字 ID 无对应榜单，解析失败回退占位卡。
+ *   取 Checkpoint%，其余默认 Any%。**No Checkpoint / Jumpless 词条的单关在
+ *   speedrun.com 无对应榜单，直接按无榜单处理，不回退普通模式**。工坊数字 ID
+ *   无对应榜单，解析失败回退占位卡。
  * - 子分类：黄昏杯全部项目都是 Solo（全游戏子分类默认 Solo）；其余子项目中
  *   Glitchless 从选图标题解析，Checkpoint / Pinch / No EC 等从 CT 词条解析
  *   （词条即 speedrun.com 子分类值名；"No EC" 对应 "No Extended Climb"）。
@@ -121,6 +123,17 @@ function subcategoryTokens(pick: Pick): string[] {
   if (/glitchless/i.test(pick.name ?? "")) tokens.push("Glitchless");
   tokens.push(...(pick.tags ?? []));
   return tokens;
+}
+
+/** 取 No Checkpoint / Jumpless 扩展词条（优先结构化 tags，回退遗留 tag 串）。 */
+function extTagOf(pick: Pick): string | null {
+  const tags = (pick.tags ?? []).length
+    ? pick.tags!
+    : (pick.tag ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+  return tags.find((t) => t === "No Checkpoint" || t === "Jumpless") ?? null;
 }
 
 /** 词条/标题别名（speedrun.com 上的正式值名）。 */
@@ -234,15 +247,18 @@ export async function resolveSpeedrunBoard(
   pick: Pick,
   collection?: CollectionConfig | null,
 ): Promise<ResolvedSpeedrunBoard | null> {
-  const meta = await fetchHffMeta();
   const tokens = subcategoryTokens(pick);
   const levels = collectionLevels(pick, collection);
+  const extTag = extTagOf(pick);
+
+  // 单关 + Jumpless / No Checkpoint：speedrun.com 上不存在这类项目榜单，
+  // 不回落普通模式 IL 榜，直接按未映射处理（场景显示“暂无榜单”）。
+  if (pick.type === PickType.SINGLE && extTag) return null;
+
+  const meta = await fetchHffMeta();
 
   if (pick.type === PickType.MULTI) {
     // 词条路由：No Checkpoint / Jumpless 多关项目在 Category Extensions 子游戏上
-    const extTag = (pick.tags ?? []).find(
-      (t) => t === "No Checkpoint" || t === "Jumpless",
-    );
     if (extTag) return resolveExtBoard(pick, extTag, levels, tokens);
 
     const cat = resolveMultiCategory(pick, meta.categories, levels, tokens);
