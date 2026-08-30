@@ -55,6 +55,10 @@ watch(
 const bgSuffix = useId();
 const sunGradId = `sun-grad-${bgSuffix}`;
 const sunMaskId = `sun-mask-${bgSuffix}`;
+const sunGradReflId = `sun-grad-refl-${bgSuffix}`;
+const sunMaskReflId = `sun-mask-refl-${bgSuffix}`;
+const waterRippleId = `water-ripple-${bgSuffix}`;
+const waterRippleGridId = `water-ripple-grid-${bgSuffix}`;
 
 /** 顶部天空随机星星：仅合成器浪潮水面版需要，位置/闪烁参数在挂载时随机固定。 */
 interface Star {
@@ -156,12 +160,121 @@ function starStyle(s: Star): Record<string, string> {
     </svg>
     <div v-else class="sun" />
 
-    <!-- 水面：包含向镜头滚动的发光网格、水波反射和动态涟漪 -->
+    <!-- 水面：网格之上叠加真实水面反射/波纹/折射；网格被水波置换后像沉在水下 -->
     <div v-if="background === 'synthwave'" class="water">
-      <div class="floor">
+      <!-- 水波置换滤镜：给水面反射与水下网格做像素级波纹折射（无颜色覆盖） -->
+      <svg class="water-filter-defs" aria-hidden="true">
+        <defs>
+          <filter :id="waterRippleId" x="-12%" y="-12%" width="124%" height="124%">
+            <feTurbulence
+              type="fractalNoise"
+              baseFrequency="0.008 0.02"
+              numOctaves="3"
+              seed="7"
+              result="noise"
+            />
+            <feDisplacementMap
+              in="SourceGraphic"
+              in2="noise"
+              scale="12"
+              xChannelSelector="R"
+              yChannelSelector="G"
+            />
+          </filter>
+          <filter :id="waterRippleGridId" x="-12%" y="-12%" width="124%" height="124%">
+            <feTurbulence
+              type="fractalNoise"
+              baseFrequency="0.014 0.03"
+              numOctaves="2"
+              seed="11"
+              result="noise"
+            />
+            <feDisplacementMap
+              in="SourceGraphic"
+              in2="noise"
+              scale="7"
+              xChannelSelector="R"
+              yChannelSelector="G"
+            />
+          </filter>
+        </defs>
+      </svg>
+
+      <!-- 网格层：向镜头滚动，并叠加 SVG 水波位移模拟透过水面看到的折射 -->
+      <div
+        class="floor"
+        :style="{ filter: `url(#${waterRippleGridId})`, WebkitFilter: `url(#${waterRippleGridId})` }"
+      >
         <div class="grid-vertical" />
         <div class="grid-horizontal" />
       </div>
+
+      <!-- 水面层：位于网格上方，只做反射/波纹/波光，不添加任何颜色覆盖 -->
+      <div
+        class="water-surface"
+        :style="{ filter: `url(#${waterRippleId})`, WebkitFilter: `url(#${waterRippleId})` }"
+      >
+        <!-- 上方场景（天空/星星/远山/太阳）关于地平线的翻转反射 -->
+        <div class="water-reflection">
+          <div class="refl-sky" />
+          <div class="stars refl-stars">
+            <i v-for="s in stars" :key="`refl-star-${s.id}`" class="star" :style="starStyle(s)" />
+          </div>
+          <svg
+            class="mountains refl-mountains"
+            viewBox="0 0 1920 260"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            <path
+              fill="#5a1773"
+              d="M0 190 L70 132 L118 170 L190 90 L248 150 L330 120 L400 178 L470 102 L560 162 L650 96 L720 158 L800 128 L880 178 L960 90 L1040 162 L1120 122 L1200 182 L1290 104 L1380 160 L1460 120 L1540 180 L1640 100 L1730 160 L1810 124 L1920 184 L1920 260 L0 260 Z"
+            />
+            <path
+              fill="#380b5c"
+              d="M0 210 L100 158 L190 206 L280 142 L360 202 L470 150 L560 210 L660 154 L760 208 L860 148 L960 204 L1080 152 L1180 214 L1280 158 L1380 210 L1480 146 L1580 214 L1690 160 L1780 208 L1920 176 L1920 260 L0 260 Z"
+            />
+            <path
+              fill="#23083d"
+              d="M0 238 L120 190 L240 236 L360 186 L480 238 L600 194 L720 240 L840 188 L960 236 L1080 192 L1200 240 L1320 190 L1440 238 L1560 194 L1680 240 L1800 194 L1920 228 L1920 260 L0 260 Z"
+            />
+          </svg>
+          <svg class="sun-svg refl-sun" viewBox="0 0 200 200" aria-hidden="true">
+            <defs>
+              <linearGradient :id="sunGradReflId" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#fff3af" />
+                <stop offset="0.42" stop-color="#ffd166" />
+                <stop offset="0.72" stop-color="#ff8a3d" />
+                <stop offset="1" stop-color="#ff2e88" />
+              </linearGradient>
+              <mask :id="sunMaskReflId" maskUnits="userSpaceOnUse" x="0" y="0" width="200" height="200">
+                <circle cx="100" cy="100" r="98" fill="#fff" />
+                <g fill="#000">
+                  <rect x="0" y="112" width="200" height="3" />
+                  <rect x="0" y="122" width="200" height="3" />
+                  <rect x="0" y="132" width="200" height="3" />
+                  <rect x="0" y="142" width="200" height="4" />
+                  <rect x="0" y="153" width="200" height="4" />
+                  <rect x="0" y="164" width="200" height="4" />
+                  <rect x="0" y="176" width="200" height="5" />
+                  <rect x="0" y="188" width="200" height="6" />
+                </g>
+              </mask>
+            </defs>
+            <circle
+              cx="100"
+              cy="100"
+              r="98"
+              :fill="`url(#${sunGradReflId})`"
+              :mask="`url(#${sunMaskReflId})`"
+            />
+          </svg>
+        </div>
+
+        <!-- 波光：透明底上的高光细纹，随水波缓慢漂移 -->
+        <div class="water-glints" />
+      </div>
+
       <div class="water-shade" />
     </div>
     <!-- default：原有透视网格地板 -->
@@ -399,6 +512,7 @@ function starStyle(s: Star): Record<string, string> {
   height: 100%;
   perspective: 26vmin;
   perspective-origin: 50% 0;
+  z-index: 1;
 }
 .synthwave-bg[data-background="synthwave"] .grid-vertical,
 .synthwave-bg[data-background="synthwave"] .grid-horizontal {
@@ -462,10 +576,134 @@ function starStyle(s: Star): Record<string, string> {
   }
 }
 
+/* 水面滤镜定义：仅提供 feTurbulence/feDisplacementMap 置换源，本身不渲染像素 */
+.synthwave-bg[data-background="synthwave"] .water-filter-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* 水面层：覆盖在网格上方，透明底 + 深度遮罩淡出，只做反射/波纹/波光 */
+.synthwave-bg[data-background="synthwave"] .water-surface {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: hidden;
+  pointer-events: none;
+  background: transparent;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.9) 0%,
+    rgba(0, 0, 0, 0.45) 30%,
+    rgba(0, 0, 0, 0.15) 62%,
+    transparent 96%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.9) 0%,
+    rgba(0, 0, 0, 0.45) 30%,
+    rgba(0, 0, 0, 0.15) 62%,
+    transparent 96%
+  );
+}
+
+/*
+ * 反射层：内部坐标系与整屏一致（top:-100.8032% + height:200.8032% 刚好铺满
+ * 整屏），再以地平线（transform-origin 50% 50.2%）为轴垂直翻转。这样上方天空、
+ * 星星、远山、太阳会以地平线为对称轴映射到水面区域，且越靠近镜头越淡出。
+ */
+.synthwave-bg[data-background="synthwave"] .water-reflection {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -100.8032%;
+  height: 200.8032%;
+  transform: scaleY(-1);
+  transform-origin: 50% 50.2%;
+  opacity: 0.52;
+  animation: waterReflectionBob 5.2s ease-in-out infinite;
+}
+
+@keyframes waterReflectionBob {
+  0%,
+  100% {
+    transform: scaleY(-1) translateY(0) skewX(0deg);
+  }
+  50% {
+    transform: scaleY(-1) translateY(-7px) skewX(0.7deg);
+  }
+}
+
+/* 反射用天空：与上方 .sky 同一渐变，按整屏坐标系摆放 */
+.synthwave-bg[data-background="synthwave"] .refl-sky {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 55%;
+  background: linear-gradient(
+    180deg,
+    #08010f 0%,
+    #100224 24%,
+    #2a0a4c 44%,
+    #6b1565 56%,
+    #c32280 66%,
+    #ff4d9b 76%,
+    #ff2e88 100%
+  );
+}
+
+/* 反射层里的星星容器：沿用 .stars/.star 样式，按整屏坐标摆放后随反射翻转 */
+.synthwave-bg[data-background="synthwave"] .refl-stars {
+  opacity: 0.9;
+}
+
+/* 波光：透明底上的高光细纹，经 SVG 置换后随水波扭动；无颜色覆盖 */
+.synthwave-bg[data-background="synthwave"] .water-glints {
+  position: absolute;
+  inset: -6% 0;
+  pointer-events: none;
+  opacity: 0.3;
+  mix-blend-mode: screen;
+  background-image:
+    repeating-linear-gradient(
+      112deg,
+      transparent 0 30px,
+      rgba(255, 255, 255, 0.09) 30px 32px,
+      transparent 32px 58px
+    ),
+    repeating-linear-gradient(
+      68deg,
+      transparent 0 44px,
+      rgba(190, 235, 255, 0.07) 44px 46px,
+      transparent 46px 70px
+    );
+  background-size:
+    140% 140%,
+    160% 160%;
+  animation: waterGlintsDrift 7s linear infinite;
+}
+
+@keyframes waterGlintsDrift {
+  from {
+    background-position:
+      0 0,
+      0 0;
+  }
+  to {
+    background-position:
+      46px 20px,
+      -54px 30px;
+  }
+}
+
 /* 水面整体压暗，保证底部深、不抢前景内容 */
 .synthwave-bg[data-background="synthwave"] .water-shade {
   position: absolute;
   inset: 0;
+  z-index: 3;
   background:
     linear-gradient(to bottom, rgba(10, 1, 24, 0.03) 0%, rgba(10, 1, 24, 0.2) 32%, rgba(10, 1, 24, 0.55) 100%);
 }
