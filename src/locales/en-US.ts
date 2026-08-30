@@ -508,6 +508,7 @@ const messages: MessageSchema = {
   "directorView.cfgTitle": "Director config",
   "directorView.cfgSaved": "Saved — embedded into the stage link",
   "directorView.sceneCfgTitle": "Scene config",
+  "directorView.sceneCfgBackgroundTitle": "Background switch",
   "directorView.sceneCfgThemeTitle": "Player theme color",
   "directorView.sceneCfgPlayerA": "Player A",
   "directorView.sceneCfgPlayerB": "Player B",
@@ -1042,6 +1043,7 @@ const messages: MessageSchema = {
 
   // ── director broadcast scenes (scenes.html MPE entries) ─────────────
   "scenes.noToken": "Missing token: add ?token=<director JWT> to the URL",
+  "scenes.backgrounds.default": "Default",
   "scenes.conn.connecting": "Connecting",
   "scenes.conn.reconnecting": "Reconnecting",
   "scenes.conn.closed": "Disconnected (check network/token)",

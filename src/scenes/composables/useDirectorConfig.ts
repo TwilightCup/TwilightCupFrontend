@@ -9,6 +9,11 @@
  */
 import { reactive } from "vue";
 import type { SceneParams } from "./useSceneParams";
+import {
+  DEFAULT_SCENE_BACKGROUND,
+  normalizeSceneBackground,
+  type SceneBackgroundKey,
+} from "./useSceneBackgrounds";
 
 /** 单场导播配置（每场一份，按 matchId 隔离） */
 export interface DirectorConfig {
@@ -34,6 +39,8 @@ export interface DirectorConfig {
   themeA: string;
   /** 选手 B 场景主题色（完全不透明 HEX，#rrggbb） */
   themeB: string;
+  /** 场景背景样式（见 useSceneBackgrounds 注册表） */
+  background: SceneBackgroundKey;
 }
 
 /** 与 scene-theme.css 保持一致的默认主题色 */
@@ -54,6 +61,7 @@ const EMPTY: DirectorConfig = {
   delayDiff: 0,
   themeA: DEFAULT_THEME_A,
   themeB: DEFAULT_THEME_B,
+  background: DEFAULT_SCENE_BACKGROUND,
 };
 
 const PREFIX = "twc-director-cfg";
@@ -67,7 +75,11 @@ function read(matchId: string): DirectorConfig {
     const raw = localStorage.getItem(key(matchId));
     if (!raw) return { ...EMPTY };
     const obj = JSON.parse(raw) as Partial<DirectorConfig>;
-    return { ...EMPTY, ...obj };
+    return {
+      ...EMPTY,
+      ...obj,
+      background: normalizeSceneBackground(obj.background),
+    };
   } catch {
     return { ...EMPTY };
   }
@@ -134,7 +146,11 @@ export function mergeStoredConfig(
   matchId: string,
   patch: Partial<DirectorConfig>,
 ): DirectorConfig {
-  const merged = { ...read(matchId), ...patch };
+  const normalizedPatch: Partial<DirectorConfig> = { ...patch };
+  if ("background" in normalizedPatch) {
+    normalizedPatch.background = normalizeSceneBackground(normalizedPatch.background);
+  }
+  const merged = { ...read(matchId), ...normalizedPatch };
   write(matchId, merged);
   applySceneAppearance(merged);
   return merged;
@@ -164,6 +180,7 @@ export function useDirectorConfig() {
       delayDiff: stored.delayDiff,
       themeA: url.themeA || stored.themeA,
       themeB: url.themeB || stored.themeB,
+      background: normalizeSceneBackground(url.background || stored.background),
     };
     Object.assign(config, merged);
     applySceneAppearance(merged);
@@ -171,7 +188,11 @@ export function useDirectorConfig() {
   }
 
   function save(matchId: string, patch: Partial<DirectorConfig>): void {
-    Object.assign(config, patch);
+    const normalizedPatch: Partial<DirectorConfig> = { ...patch };
+    if ("background" in normalizedPatch) {
+      normalizedPatch.background = normalizeSceneBackground(normalizedPatch.background);
+    }
+    Object.assign(config, normalizedPatch);
     applySceneAppearance(config);
     write(matchId, { ...config });
   }

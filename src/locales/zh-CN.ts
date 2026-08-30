@@ -512,6 +512,7 @@ const messages = {
   "directorView.cfgTitle": "导播配置",
   "directorView.cfgSaved": "已保存，已写入舞台链接",
   "directorView.sceneCfgTitle": "场景配置",
+  "directorView.sceneCfgBackgroundTitle": "背景切换",
   "directorView.sceneCfgThemeTitle": "选手主题色",
   "directorView.sceneCfgPlayerA": "选手A",
   "directorView.sceneCfgPlayerB": "选手B",
@@ -1046,6 +1047,7 @@ const messages = {
 
   // ── 导播场景页（scenes.html 多入口）─────────────────────────────────
   "scenes.noToken": "缺少 token：请在 URL 上带 ?token=<导播 JWT>",
+  "scenes.backgrounds.default": "默认",
   "scenes.conn.connecting": "连接中",
   "scenes.conn.reconnecting": "重连中",
   "scenes.conn.closed": "已断开（检查网络/令牌）",

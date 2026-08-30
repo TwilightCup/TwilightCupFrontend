@@ -4,11 +4,53 @@
  *
  * 纯 CSS/SVG，无外部资源（OBS 浏览器源离线缓存可靠）。固定在最底层（z-index:0），
  * 场景内容相对定位在其上。背景不透明，因此 .html 的 body 也是深紫底（见 scene-theme.css）。
+ *
+ * 背景样式由导播配置的 background 字段驱动（注册表见 useSceneBackgrounds）。
+ * 组件自身读取 localStorage / URL 并监听 WS config_update 与跨标签 storage，
+ * 因此 standalone 与 sharedBg 两种模式都能保持同一套切换逻辑。
  */
+import { computed, onMounted, onUnmounted, watch } from "vue";
+import { useDirectorStore } from "@/stores/director";
+import { useSceneContext } from "@/scenes/composables/useSceneContext";
+import { normalizeSceneBackground } from "@/scenes/composables/useSceneBackgrounds";
+import { useDirectorConfig } from "@/scenes/composables/useDirectorConfig";
+
+const { params } = useSceneContext();
+const director = useDirectorStore();
+const { config, load, save } = useDirectorConfig();
+
+const background = computed(() => normalizeSceneBackground(config.background));
+
+function configStorageKey(): string {
+  return `twc-director-cfg:${params.matchId || "_global_"}`;
+}
+
+function onStorage(e: StorageEvent): void {
+  if (e.key === configStorageKey()) {
+    load(params.matchId, params);
+  }
+}
+
+onMounted(() => {
+  load(params.matchId, params);
+  window.addEventListener("storage", onStorage);
+});
+
+onUnmounted(() => {
+  window.removeEventListener("storage", onStorage);
+});
+
+// WS config_update 广播：舞台/独立场景即使不在导播控制台所在文档，也能实时切换背景。
+watch(
+  () => director.remoteConfig,
+  (c) => {
+    if (c) save(params.matchId, c);
+  },
+);
 </script>
 
 <template>
-  <div class="synthwave-bg" aria-hidden="true">
+  <div class="synthwave-bg" :data-background="background" aria-hidden="true">
     <!-- 天空渐变 -->
     <div class="sky" />
 
@@ -26,6 +68,8 @@
 </template>
 
 <style scoped>
+/* 当前默认背景 = 下方整套合成器浪潮样式；新增背景样式时在 base 之上按
+   [data-background="key"] 追加覆盖层即可，组件渲染/选项配置已在注册表统一处理。 */
 .synthwave-bg {
   position: fixed;
   inset: 0;

@@ -26,6 +26,12 @@ import {
   useDirectorConfig,
   type DirectorConfig,
 } from "@/scenes/composables/useDirectorConfig";
+import {
+  DEFAULT_SCENE_BACKGROUND,
+  SCENE_BACKGROUND_OPTIONS,
+  normalizeSceneBackground,
+  type SceneBackgroundKey,
+} from "@/scenes/composables/useSceneBackgrounds";
 
 const { t } = useI18n();
 const auth = useAuthStore();
@@ -99,6 +105,8 @@ const { config: cfgConfig, load: loadCfg, save: saveCfg } = useDirectorConfig();
 /** 场景配置下拉的本地副本：打开时从当前配置回填，保存才写 cfgForm / localStorage */
 const sceneThemeA = ref(DEFAULT_THEME_A);
 const sceneThemeB = ref(DEFAULT_THEME_B);
+/** 背景切换下拉的本地副本：打开时从当前配置回填，保存才写 cfgForm / localStorage */
+const sceneBackground = ref<SceneBackgroundKey>(DEFAULT_SCENE_BACKGROUND);
 /** 是否有颜色选择器覆盖层打开（用于临时撑高下拉，保证覆盖层完整显示） */
 const sceneCfgPickerOpen = ref(false);
 let sceneCfgOpenCount = 0;
@@ -114,6 +122,9 @@ function onSceneCfgVisibleChange(visible: boolean): void {
   }
   sceneThemeA.value = cfgForm.themeA || cfgConfig.themeA || DEFAULT_THEME_A;
   sceneThemeB.value = cfgForm.themeB || cfgConfig.themeB || DEFAULT_THEME_B;
+  sceneBackground.value = normalizeSceneBackground(
+    cfgForm.background || cfgConfig.background || DEFAULT_SCENE_BACKGROUND,
+  );
 }
 /** 表单本地副本：编辑中不落库，点保存才写 localStorage + 更新舞台链接 */
 const cfgForm = reactive<DirectorConfig>({
@@ -130,6 +141,7 @@ const cfgForm = reactive<DirectorConfig>({
   delayDiff: 0,
   themeA: DEFAULT_THEME_A,
   themeB: DEFAULT_THEME_B,
+  background: DEFAULT_SCENE_BACKGROUND,
 });
 const cfgFields: { key: keyof DirectorConfig; label: string }[] = [
   { key: "hlsA", label: "scenes.edit.hlsA" },
@@ -156,10 +168,14 @@ function saveConfig(): void {
   ElMessage.success(t("directorView.cfgSaved"));
 }
 
-/** 保存场景外观（当前仅选手主题色）：落库 + WS 实时下发已打开的舞台/预览 */
+/** 保存场景外观（选手主题色 + 背景样式）：落库 + WS 实时下发已打开的舞台/预览 */
 function saveSceneCfg(): void {
   if (!director.matchId) return;
-  const patch = { themeA: sceneThemeA.value, themeB: sceneThemeB.value };
+  const patch = {
+    themeA: sceneThemeA.value,
+    themeB: sceneThemeB.value,
+    background: normalizeSceneBackground(sceneBackground.value),
+  };
   Object.assign(cfgForm, patch);
   saveCfg(director.matchId, patch);
   director.sendDirectorCommand("config_update", { config: patch });
@@ -224,6 +240,7 @@ const CFG_URL_KEYS: Partial<Record<keyof DirectorConfig, string>> = {
   embedB: "embed_b",
   themeA: "theme_a",
   themeB: "theme_b",
+  background: "background",
 };
 const stageUrl = computed(() => withCfgParams(directorPageUrl("stage.html")));
 
@@ -464,7 +481,21 @@ onUnmounted(() => {
           <template #dropdown>
             <el-dropdown-menu>
               <div class="scene-cfg-dd" :class="{ 'has-open-picker': sceneCfgPickerOpen }">
-                <div class="cfg-section-title">{{ $t("directorView.sceneCfgThemeTitle") }}</div>
+                <div class="cfg-section-title">{{ $t("directorView.sceneCfgBackgroundTitle") }}</div>
+                <el-select
+                  v-model="sceneBackground"
+                  size="small"
+                  class="bg-select"
+                  :disabled="!director.matchId || readOnly"
+                >
+                  <el-option
+                    v-for="opt in SCENE_BACKGROUND_OPTIONS"
+                    :key="opt.key"
+                    :value="opt.key"
+                    :label="$t(opt.labelKey)"
+                  />
+                </el-select>
+                <div class="cfg-section-title theme-title">{{ $t("directorView.sceneCfgThemeTitle") }}</div>
                 <div class="theme-row">
                   <span class="theme-label">{{ $t("directorView.sceneCfgPlayerA") }}</span>
                   <ColorField
@@ -1115,6 +1146,12 @@ onUnmounted(() => {
   font-weight: 700;
   color: var(--tc-text);
   letter-spacing: 0.5px;
+}
+.cfg-section-title.theme-title {
+  margin-top: 4px;
+}
+.bg-select {
+  width: 100%;
 }
 .theme-row {
   display: flex;

@@ -24,6 +24,8 @@ export interface SceneParams {
   themeA: string;
   /** 选手 B 场景主题色（HEX） */
   themeB: string;
+  /** 场景背景样式 key（URL 覆盖，供跨浏览器舞台链接下发） */
+  background: string;
   /** 编辑态（=1 唤出导播配置面板） */
   editMode: boolean;
   /** 偏差条满偏对应的计时差（毫秒），默认 60000 */
@@ -47,6 +49,7 @@ export function useSceneParams(): SceneParams {
     embedB: get("embed_b"),
     themeA: get("theme_a"),
     themeB: get("theme_b"),
+    background: get("background"),
     editMode: p.get("edit") === "1",
     gapMs: parseGap(get("gap")),
   };
