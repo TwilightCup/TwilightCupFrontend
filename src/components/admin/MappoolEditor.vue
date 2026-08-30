@@ -39,6 +39,9 @@ function pickKey(pick: object): number {
 /** 当前选中的类别下标；-1 表示未选择（无类别）。 */
 const selectedIndex = ref(-1);
 
+/** 新增类别时待选用的 kind；为空时不可提交。 */
+const newCategoryKind = ref("");
+
 const selectedCategory = computed(() =>
   selectedIndex.value >= 0 && selectedIndex.value < props.mappool.categories.length
     ? props.mappool.categories[selectedIndex.value]
@@ -49,6 +52,7 @@ watch(
   () => props.mappool,
   () => {
     selectedIndex.value = props.mappool.categories.length > 0 ? 0 : -1;
+    newCategoryKind.value = "";
   },
   { immediate: true },
 );
@@ -70,6 +74,14 @@ function selectCategory(ci: number): void {
   }
 }
 
+/** 尚未使用的类别选项（新增类别时可选）。 */
+const freeKindOptions = computed(() =>
+  CATEGORY_KINDS.filter((k) => !usedKinds(-1).has(k)).map((k) => {
+    const info = categoryKindInfo(k);
+    return { value: k, label: `${info?.short ?? k} · ${info?.label ?? k}` };
+  }),
+);
+
 /** 各类别已用 kind（用于新增类别时避免重复）。 */
 function usedKinds(excludeIndex: number): Set<string> {
   const s = new Set<string>();
@@ -89,11 +101,14 @@ function firstUnusedKind(): string {
 }
 
 function addCategory(): void {
+  const name = newCategoryKind.value || firstUnusedKind();
+  if (!name || usedKinds(-1).has(name)) return;
   props.mappool.categories.push({
-    name: firstUnusedKind(),
+    name,
     picks: [],
   });
   selectedIndex.value = props.mappool.categories.length - 1;
+  newCategoryKind.value = "";
 }
 
 /** 按类别 + 序号自动分配编号：ML→ML1/ML2…、TB→TB；未知类别保持原值。 */
@@ -192,7 +207,26 @@ const canAddCategory = computed(() => props.mappool.categories.length < CATEGORY
           </el-button>
         </div>
 
-        <el-button class="add-cat" type="primary" plain :disabled="!canAddCategory" @click="addCategory">
+        <el-select
+          v-model="newCategoryKind"
+          :placeholder="$t('mappoolEditor.categoryPlaceholder')"
+          class="new-cat-select"
+          :disabled="!canAddCategory"
+        >
+          <el-option
+            v-for="o in freeKindOptions"
+            :key="o.value"
+            :value="o.value"
+            :label="o.label"
+          />
+        </el-select>
+        <el-button
+          class="add-cat"
+          type="primary"
+          plain
+          :disabled="!canAddCategory || !newCategoryKind"
+          @click="addCategory"
+        >
           {{ canAddCategory ? $t("mappoolEditor.addCategoryBtn") : $t("mappoolEditor.maxCategories") }}
         </el-button>
       </aside>
@@ -200,9 +234,6 @@ const canAddCategory = computed(() => props.mappool.categories.length < CATEGORY
       <section class="category-main">
         <div v-if="!selectedCategory" class="main-empty">
           <p>{{ $t("mappoolEditor.selectCategoryHint") }}</p>
-          <el-button v-if="canAddCategory" type="primary" plain @click="addCategory">
-            {{ $t("mappoolEditor.addCategoryBtn") }}
-          </el-button>
         </div>
 
         <template v-else>
@@ -340,9 +371,13 @@ const canAddCategory = computed(() => props.mappool.categories.length < CATEGORY
   border-radius: 10px;
   padding: 1px 7px;
 }
-.add-cat {
+.new-cat-select {
   width: 100%;
   margin-top: auto;
+}
+.add-cat {
+  width: 100%;
+  margin-top: 8px;
 }
 .category-main {
   flex: 1;
