@@ -272,6 +272,18 @@ function syncCollection(): void {
   recomputeMessages();
 }
 
+// 若父级直接换绑到另一个 pick（防御性处理，正常 key 已保证编辑器不会跨选图复用），
+// 重置本地编辑状态，避免把上一个选图的关卡/项目带到新选图上。
+watch(
+  () => props.pick,
+  () => {
+    colLevels.value = readLevels();
+    singleLevel.value = colLevels.value[0] ?? "";
+    projectSel.value = inferProject(colLevels.value);
+    syncCollection();
+  },
+);
+
 // 多关：选「项目」时，命中完整预设则按其关卡 id 序列填充（合集名即项目名）
 function onProjectChange(v: string | number | boolean | object): void {
   const name = String(v ?? "");

@@ -25,6 +25,17 @@ const { t } = useI18n();
  */
 const props = defineProps<{ mappool: Mappool }>();
 
+/** 为每个选图对象分配稳定的就地 key，避免不同类别/不同图池间复用同一编辑器实例。 */
+let pickIdSeed = 0;
+const pickIdMap = new WeakMap<object, number>();
+function pickKey(pick: object): number {
+  const existed = pickIdMap.get(pick);
+  if (existed !== undefined) return existed;
+  const id = ++pickIdSeed;
+  pickIdMap.set(pick, id);
+  return id;
+}
+
 /** 当前选中的类别下标；-1 表示未选择（无类别）。 */
 const selectedIndex = ref(-1);
 
@@ -198,7 +209,7 @@ const canAddCategory = computed(() => props.mappool.categories.length < CATEGORY
           <div class="picks">
             <MappoolPickEditor
               v-for="(pick, pi) in selectedCategory.picks"
-              :key="pi"
+              :key="pickKey(pick)"
               :pick="pick"
               :index="pi"
               :category-name="selectedCategory.name"
