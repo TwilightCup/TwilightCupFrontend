@@ -158,9 +158,9 @@ function starStyle(s: Star): Record<string, string> {
     <div v-if="background === 'synthwave'" class="water">
       <div class="water-glow" />
       <div class="floor">
-        <div class="grid" />
+        <div class="grid-vertical" />
+        <div class="grid-horizontal" />
       </div>
-      <div class="ripples" />
       <div class="water-shade" />
     </div>
     <!-- default：原有透视网格地板 -->
@@ -421,25 +421,44 @@ function starStyle(s: Star): Record<string, string> {
   opacity: 0.95;
 }
 
-/* 水面版网格：更接近参考图——透视更平缓、密集成网，整个网格向镜头连续滚动 */
+/* 水面版网格：拆成两层。
+   层1 grid-vertical：透视纵线从地平线一路延伸到画面底部，负责“网格延伸得更远”；
+   层2 grid-horizontal：横线持续向镜头滚动；整层填满水面，让网格从地平线
+   一路延伸到画面底部。 */
 .synthwave-bg[data-background="synthwave"] .floor {
-  height: 54%;
+  height: 100%;
   perspective: 26vmin;
   perspective-origin: 50% 0;
 }
-.synthwave-bg[data-background="synthwave"] .grid {
+.synthwave-bg[data-background="synthwave"] .grid-vertical,
+.synthwave-bg[data-background="synthwave"] .grid-horizontal {
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 0;
+}
+.synthwave-bg[data-background="synthwave"] .grid-vertical {
+  transform: rotateX(67deg);
   background-image:
-    linear-gradient(90deg, rgba(255, 46, 136, 0.95) 0 3px, transparent 3px),
+    linear-gradient(90deg, rgba(255, 46, 136, 0.9) 0 4px, transparent 4px);
+  background-size: 12vmin 12vmin;
+  background-repeat: repeat;
+  filter:
+    brightness(1.25)
+    drop-shadow(0 0 5px rgba(255, 46, 136, 0.5));
+  animation: gridWater 4.2s ease-in-out infinite;
+}
+.synthwave-bg[data-background="synthwave"] .grid-horizontal {
+  transform: rotateX(67deg);
+  background-image:
     linear-gradient(to bottom, rgba(255, 46, 136, 0.72) 0 3px, transparent 3px);
-  background-size:
-    12vmin 12vmin,
-    12vmin 12vmin;
-  animation:
-    synthwaveGridScroll 1.8s linear infinite,
-    gridWater 4.2s ease-in-out infinite;
+  background-size: 12vmin 12vmin;
+  background-repeat: repeat;
   filter:
     brightness(1.45)
     drop-shadow(0 0 6px rgba(255, 46, 136, 0.55));
+  animation:
+    synthwaveGridScroll 1.8s linear infinite,
+    gridWater 4.2s ease-in-out infinite;
 }
 
 /* 水面版专用滚动：background-size 为 12vmin，必须平移正好一个完整 tile，
@@ -464,39 +483,6 @@ function starStyle(s: Star): Record<string, string> {
   }
   50% {
     transform: rotateX(67deg) translateY(-6px) skewX(0.8deg);
-  }
-}
-
-/* 动态水面：两层细斜纹交错移动 + 轻微上下摆动，形成波光 */
-.synthwave-bg[data-background="synthwave"] .ripples {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background-image:
-    repeating-linear-gradient(
-      174deg,
-      transparent 0 5px,
-      rgba(255, 46, 136, 0.14) 5px 6px,
-      transparent 6px 12px,
-      rgba(255, 46, 136, 0.08) 12px 13px,
-      transparent 13px 22px
-    ),
-    repeating-linear-gradient(
-      186deg,
-      transparent 0 8px,
-      rgba(255, 169, 238, 0.1) 8px 10px,
-      transparent 10px 18px
-    );
-  mix-blend-mode: screen;
-  opacity: 0.8;
-  animation: waterRipple 6s linear infinite;
-}
-@keyframes waterRipple {
-  from {
-    transform: translateY(0) skewX(1.5deg);
-  }
-  to {
-    transform: translateY(26px) skewX(-1.5deg);
   }
 }
 
