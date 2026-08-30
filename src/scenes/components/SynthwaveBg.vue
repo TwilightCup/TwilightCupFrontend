@@ -107,6 +107,16 @@ function setTurbulenceBaseFrequency(el: Element | null, x: number, y: number): v
   el?.setAttribute("baseFrequency", `${x.toFixed(4)} ${y.toFixed(4)}`);
 }
 
+/**
+ * 三角波 0→1→0（周期 period 秒，phase 为 0~1 的相位偏移）。
+ * 对时间求导为常量：baseFrequency 在两端点间来回匀速变化，避免正弦波
+ * 导数呈余弦造成的“快→慢→快→慢”呼吸感。
+ */
+function triangle01(t: number, period: number, phase = 0): number {
+  const p = (t / period + phase) % 1;
+  return p < 0.5 ? p * 2 : 2 - p * 2;
+}
+
 function rippleFrame(now: number): void {
   rippleRaf = requestAnimationFrame(rippleFrame);
   if (!rippleLast) {
@@ -118,15 +128,17 @@ function rippleFrame(now: number): void {
   rippleLast = now;
   const t = rippleElapsed;
 
+  const reflU = triangle01(t, 9);
+  const gridU = triangle01(t, 9, 0.25);
   setTurbulenceBaseFrequency(
     reflTurbulence.value,
-    0.007 + Math.sin(t * 0.7) * 0.002,
-    0.017 + Math.cos(t * 0.55) * 0.004,
+    0.007 + reflU * 0.002,
+    0.017 + reflU * 0.004,
   );
   setTurbulenceBaseFrequency(
     gridTurbulence.value,
-    0.012 + Math.sin(t * 0.85 + 2.1) * 0.003,
-    0.027 + Math.cos(t * 0.65 + 1.3) * 0.005,
+    0.012 + gridU * 0.003,
+    0.027 + gridU * 0.005,
   );
 }
 
