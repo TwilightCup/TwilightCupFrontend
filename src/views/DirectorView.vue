@@ -474,8 +474,6 @@ onUnmounted(() => {
                     :disabled="!director.matchId || readOnly"
                     @open-change="onColorPickerOpenChange"
                   />
-                </div>
-                <div class="theme-row">
                   <span class="theme-label">{{ $t("directorView.sceneCfgPlayerB") }}</span>
                   <ColorField
                     v-model="sceneThemeB"
@@ -1107,7 +1105,7 @@ onUnmounted(() => {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 .scene-cfg-dd.has-open-picker {
   min-height: 320px;
@@ -1121,10 +1119,11 @@ onUnmounted(() => {
 .theme-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: space-between;
+  gap: 6px;
 }
 .theme-label {
-  min-width: 56px;
+  min-width: 44px;
   font-size: 13px;
   font-weight: 600;
   color: var(--tc-text);

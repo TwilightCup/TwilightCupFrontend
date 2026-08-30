@@ -101,8 +101,7 @@ function confirm(): void {
 
 <style scoped>
 .color-field {
-  flex: 1;
-  min-width: 0;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
