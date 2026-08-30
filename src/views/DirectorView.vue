@@ -487,6 +487,7 @@ onUnmounted(() => {
                   size="small"
                   class="bg-select"
                   :disabled="!director.matchId || readOnly"
+                  :teleported="false"
                 >
                   <el-option
                     v-for="opt in SCENE_BACKGROUND_OPTIONS"
