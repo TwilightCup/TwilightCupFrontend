@@ -53,7 +53,6 @@ watch(
 const bgSuffix = useId();
 const sunGradId = `sun-grad-${bgSuffix}`;
 const sunMaskId = `sun-mask-${bgSuffix}`;
-const waterWarpId = `water-warp-${bgSuffix}`;
 
 /** 顶部天空随机星星：仅合成器浪潮水面版需要，位置/闪烁参数在挂载时随机固定。 */
 interface Star {
@@ -161,53 +160,6 @@ function starStyle(s: Star): Record<string, string> {
         <div class="grid-vertical" />
         <div class="grid-horizontal" />
       </div>
-
-      <!-- 真正的水面层：不使用底色，只用柔性高光斑 + 湍流位移模拟动态水面 -->
-      <svg
-        class="water-surface"
-        viewBox="0 0 1920 540"
-        preserveAspectRatio="none"
-        aria-hidden="true"
-      >
-        <defs>
-          <filter :id="waterWarpId" x="-20%" y="-20%" width="140%" height="140%">
-            <feTurbulence
-              type="fractalNoise"
-              baseFrequency="0.008 0.02"
-              numOctaves="2"
-              seed="7"
-              result="noise"
-            >
-              <animate
-                attributeName="baseFrequency"
-                dur="10s"
-                values="0.008 0.02;0.01 0.026;0.008 0.02"
-                repeatCount="indefinite"
-              />
-            </feTurbulence>
-            <feDisplacementMap
-              in="SourceGraphic"
-              in2="noise"
-              scale="24"
-              xChannelSelector="R"
-              yChannelSelector="G"
-            />
-            <feGaussianBlur stdDeviation="1.5" />
-          </filter>
-        </defs>
-        <g class="water-highlights" :filter="`url(#${waterWarpId})`">
-          <ellipse cx="300" cy="80" rx="360" ry="12" fill="rgba(255, 170, 220, 0.12)" />
-          <ellipse cx="900" cy="120" rx="420" ry="16" fill="rgba(255, 200, 230, 0.10)" />
-          <ellipse cx="1550" cy="90" rx="340" ry="11" fill="rgba(255, 170, 220, 0.10)" />
-          <ellipse cx="1200" cy="230" rx="440" ry="20" fill="rgba(255, 130, 200, 0.12)" />
-          <ellipse cx="600" cy="300" rx="500" ry="24" fill="rgba(255, 100, 190, 0.10)" />
-          <ellipse cx="1450" cy="350" rx="420" ry="18" fill="rgba(255, 130, 200, 0.08)" />
-          <ellipse cx="900" cy="440" rx="560" ry="26" fill="rgba(255, 80, 180, 0.08)" />
-          <ellipse cx="300" cy="500" rx="440" ry="22" fill="rgba(255, 100, 190, 0.06)" />
-          <ellipse cx="1620" cy="490" rx="430" ry="24" fill="rgba(255, 100, 190, 0.06)" />
-        </g>
-      </svg>
-
       <div class="water-shade" />
     </div>
     <!-- default：原有透视网格地板 -->
@@ -505,29 +457,6 @@ function starStyle(s: Star): Record<string, string> {
   }
   50% {
     transform: rotateX(67deg) translateY(-6px) skewX(0.8deg);
-  }
-}
-
-/* 真正的水面层：仅高光斑，不加底色；用湍流位移让高光像水波一样缓缓流动 */
-.synthwave-bg[data-background="synthwave"] .water-surface {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  overflow: visible;
-  mix-blend-mode: screen;
-  opacity: 0.55;
-}
-.synthwave-bg[data-background="synthwave"] .water-highlights {
-  animation: waterHighlightDrift 13s ease-in-out infinite alternate;
-}
-@keyframes waterHighlightDrift {
-  from {
-    transform: translateX(-24px) translateY(0);
-  }
-  to {
-    transform: translateX(24px) translateY(10px);
   }
 }
 
