@@ -1,12 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { ElMessage, ElMessageBox } from "element-plus";
+import { ElMessageBox } from "element-plus";
 import { Delete } from "@element-plus/icons-vue";
-import type { UploadRequestOptions } from "element-plus";
 import { useI18n } from "vue-i18n";
-import { api, ApiError } from "@/api/client";
 import { useAdminStore } from "@/stores/admin";
-import { useAuthStore } from "@/stores/auth";
 import { CategoryKind, PickType, type Level, type Pick } from "@/api/types";
 import { categoryKindOf } from "@/utils/mappool";
 import { officialDisplayName } from "@/utils/officialLevels";
@@ -25,61 +22,17 @@ import SpeedrunMappingEditor from "@/components/admin/SpeedrunMappingEditor.vue"
  * - 单关（SINGLE）：「关卡」下拉选库内关卡或输入工坊 ID（数字），自动生成
  *   「单关卡 + 重试次数」合集，无需手动编辑关卡列表。
  * - 合集 name 统一取选图「名称」(pick.name)；关卡合集写入 pick.collection.raw = { name, levels }（选手端按此消费）。
- * - logo：上传到 MinIO（POST /admin/uploads）→ 写 pick.logo（随整场图池一起保存）；
- *   pick.logo_url 仅本地预览用（后端持久化时忽略）。
+ * - logo 仅作只读展示；选图面板不再提供上传/移除入口（展示图不在编辑器中修改）。
  */
 const props = defineProps<{ pick: Pick; index: number; categoryName: string }>();
 const emit = defineEmits<{ (e: "remove"): void }>();
 
 const { t } = useI18n();
-const auth = useAuthStore();
 
-const logoUploading = ref(false);
 const collapsed = ref(false);
-const ACCEPT = ".png,.jpg,.jpeg,.webp,.gif";
-const MAX_BYTES = 5 * 1024 * 1024;
 
 /** 选图当前 logo 预览地址（本地预览用 logo_url；可能为空） */
 const logoPreview = computed(() => props.pick.logo_url || "");
-
-/** 自定义上传：校验大小 → 调 uploadLogo → 写 pick.logo + logo_url（本地预览） */
-async function onUpload(req: UploadRequestOptions): Promise<void> {
-  const file = req.file as File;
-  if (file.size > MAX_BYTES) {
-    ElMessage.error(t("pickEditor.logoTooLarge"));
-    return;
-  }
-  if (!auth.token) {
-    ElMessage.error(t("pickEditor.logoNeedLogin"));
-    return;
-  }
-  logoUploading.value = true;
-  try {
-    const res = await api.uploadLogo(file, auth.token);
-    props.pick.logo = res.key;
-    if (res.url) props.pick.logo_url = res.url;
-    ElMessage.success(t("pickEditor.logoUploaded"));
-  } catch (e) {
-    ElMessage.error(e instanceof ApiError ? e.message : t("pickEditor.logoUploadFail"));
-  } finally {
-    logoUploading.value = false;
-  }
-}
-
-/** 移除 logo：清空 key 与本地预览（图池保存后该 pick 不再带 logo） */
-async function onRemoveLogo(): Promise<void> {
-  try {
-    await ElMessageBox.confirm(
-      t("pickEditor.logoRemoveConfirm"),
-      t("pickEditor.logoRemoveTitle"),
-      { type: "warning", confirmButtonText: t("common.delete"), cancelButtonText: t("common.cancel") },
-    );
-  } catch {
-    return;
-  }
-  props.pick.logo = null;
-  props.pick.logo_url = null;
-}
 
 const typeOptions = computed<{ value: PickType; label: string }[]>(() => [
   { value: PickType.MULTI, label: t("pickEditor.typeMulti") },
@@ -387,24 +340,10 @@ async function onRemove(): Promise<void> {
         </el-form-item>
       </div>
 
-      <!-- logo 展示图：上传到 MinIO，key 随选图保存 -->
-      <el-form-item :label="$t('pickEditor.labelLogo')">
-        <div class="logo-row">
-          <div v-if="logoPreview" class="logo-preview">
-            <img :src="logoPreview" :alt="props.pick.name" />
-            <el-button link type="danger" :disabled="logoUploading" @click="onRemoveLogo">
-              {{ $t("pickEditor.logoRemoveBtn") }}
-            </el-button>
-          </div>
-          <el-upload
-            :show-file-list="false"
-            :accept="ACCEPT"
-            :http-request="onUpload"
-            :disabled="logoUploading"
-          >
-            <el-button :loading="logoUploading">{{ $t("pickEditor.logoUploadBtn") }}</el-button>
-          </el-upload>
-          <span class="logo-hint">{{ $t("pickEditor.logoHint") }}</span>
+      <!-- logo 展示图：仅只读展示，不可在选图面板中修改 -->
+      <el-form-item v-if="logoPreview" :label="$t('pickEditor.labelLogo')">
+        <div class="logo-preview">
+          <img :src="logoPreview" :alt="props.pick.name" />
         </div>
       </el-form-item>
 
@@ -641,12 +580,6 @@ async function onRemove(): Promise<void> {
 .single-hint {
   padding: 2px 0 4px;
 }
-.logo-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
 .logo-preview {
   display: flex;
   align-items: center;
@@ -659,9 +592,5 @@ async function onRemove(): Promise<void> {
   border-radius: 6px;
   border: 1px solid var(--tc-border);
   background: #000;
-}
-.logo-hint {
-  color: var(--tc-text-dim);
-  font-size: 12px;
 }
 </style>
