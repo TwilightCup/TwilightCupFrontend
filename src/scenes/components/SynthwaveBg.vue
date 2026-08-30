@@ -241,15 +241,16 @@ watch(
               seed="7"
               result="noise"
             />
+            <!-- 先对噪声做高斯平滑，再做置换：波纹边缘更柔，不会把反射画面整层弄糊，
+                 也能避免顶部边界被最终模糊拉出透明缝隙。 -->
+            <feGaussianBlur in="noise" stdDeviation="1.8" result="softNoise" />
             <feDisplacementMap
               in="SourceGraphic"
-              in2="noise"
-              scale="10"
+              in2="softNoise"
+              scale="9"
               xChannelSelector="R"
               yChannelSelector="G"
-              result="displaced"
             />
-            <feGaussianBlur in="displaced" stdDeviation="0.6" />
           </filter>
           <filter
             :id="waterRippleGridId"
@@ -267,15 +268,14 @@ watch(
               seed="11"
               result="noise"
             />
+            <feGaussianBlur in="noise" stdDeviation="1.2" result="softNoise" />
             <feDisplacementMap
               in="SourceGraphic"
-              in2="noise"
-              scale="5"
+              in2="softNoise"
+              scale="4.5"
               xChannelSelector="R"
               yChannelSelector="G"
-              result="displaced"
             />
-            <feGaussianBlur in="displaced" stdDeviation="0.35" />
           </filter>
         </defs>
       </svg>
@@ -675,16 +675,18 @@ watch(
   background: transparent;
   -webkit-mask-image: linear-gradient(
     to bottom,
-    rgba(0, 0, 0, 0.9) 0%,
-    rgba(0, 0, 0, 0.45) 30%,
-    rgba(0, 0, 0, 0.15) 62%,
+    rgba(0, 0, 0, 1) 0%,
+    rgba(0, 0, 0, 1) 3%,
+    rgba(0, 0, 0, 0.5) 30%,
+    rgba(0, 0, 0, 0.18) 62%,
     transparent 96%
   );
   mask-image: linear-gradient(
     to bottom,
-    rgba(0, 0, 0, 0.9) 0%,
-    rgba(0, 0, 0, 0.45) 30%,
-    rgba(0, 0, 0, 0.15) 62%,
+    rgba(0, 0, 0, 1) 0%,
+    rgba(0, 0, 0, 1) 3%,
+    rgba(0, 0, 0, 0.5) 30%,
+    rgba(0, 0, 0, 0.18) 62%,
     transparent 96%
   );
 }
@@ -698,7 +700,9 @@ watch(
   position: absolute;
   left: 0;
   right: 0;
-  top: -100.8032%;
+  /* top 额外上探 1px：让倒影地平线略微越过水面裁切线，抵消 CSS 百分比取整
+     造成的亚像素缝隙；overflow:hidden 会裁掉多出的部分。 */
+  top: calc(-100.8032% - 1px);
   height: 200.8032%;
   /* 只做地平线翻转，不做位移/偏斜动画：任何 translateY 都会让倒影与
      实物在水平线处拉开缝隙。水波纹动感由 feTurbulence 置换场本身流动提供。 */
