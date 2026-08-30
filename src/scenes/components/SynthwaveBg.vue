@@ -17,7 +17,7 @@ import { useDirectorConfig } from "@/scenes/composables/useDirectorConfig";
 
 const { params } = useSceneContext();
 const director = useDirectorStore();
-const { config, load, save } = useDirectorConfig();
+const { config, load, refresh, save } = useDirectorConfig();
 
 const background = computed(() => normalizeSceneBackground(config.background));
 
@@ -27,7 +27,9 @@ function configStorageKey(): string {
 
 function onStorage(e: StorageEvent): void {
   if (e.key === configStorageKey()) {
-    load(params.matchId, params);
+    // 只读刷新，不写回：避免多个预览/场景之间相互触发 localStorage 写入风暴，
+    // 也避免舞台 URL 中过期的 background 参数覆盖已经广播/保存的新背景。
+    refresh(params.matchId);
   }
 }
 

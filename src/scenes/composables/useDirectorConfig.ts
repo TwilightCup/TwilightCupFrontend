@@ -187,6 +187,17 @@ export function useDirectorConfig() {
     write(matchId, merged);
   }
 
+  /**
+   * 仅从 localStorage 刷新内存配置（不写回、不应用 URL 覆盖）。
+   * 用于跨标签 storage 事件：避免把已保存/已广播的新值又被过期 URL 参数覆盖，
+   * 也避免每次刷新都写 localStorage 造成跨标签反复互相触发。
+   */
+  function refresh(matchId: string): void {
+    const stored = read(matchId);
+    Object.assign(config, stored);
+    applySceneAppearance(stored);
+  }
+
   function save(matchId: string, patch: Partial<DirectorConfig>): void {
     const normalizedPatch: Partial<DirectorConfig> = { ...patch };
     if ("background" in normalizedPatch) {
@@ -197,5 +208,5 @@ export function useDirectorConfig() {
     write(matchId, { ...config });
   }
 
-  return { config, load, save };
+  return { config, load, refresh, save };
 }
