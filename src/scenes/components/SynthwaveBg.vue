@@ -439,38 +439,42 @@ function starStyle(s: Star): Record<string, string> {
 .synthwave-bg[data-background="synthwave"] .grid-vertical {
   transform: rotateX(67deg);
   background-image:
-    linear-gradient(90deg, rgba(255, 46, 136, 1) 0 2px, transparent 2px);
-  background-size: 10vmin 10vmin;
+    linear-gradient(90deg, rgba(255, 255, 255, 0.85) 0 0.75px, rgba(255, 94, 181, 1) 0.75px 1.75px, transparent 1.75px);
+  background-size: 8vmin 8vmin;
   background-repeat: repeat;
   filter:
-    brightness(1.3)
-    drop-shadow(0 0 6px rgba(255, 46, 136, 0.9))
-    drop-shadow(0 0 18px rgba(255, 46, 136, 0.35));
+    brightness(1.35)
+    saturate(1.2)
+    drop-shadow(0 0 3px rgba(255, 255, 255, 0.55))
+    drop-shadow(0 0 7px rgba(255, 46, 136, 0.9))
+    drop-shadow(0 0 20px rgba(255, 46, 136, 0.4));
   animation: gridWater 4.2s ease-in-out infinite;
 }
 .synthwave-bg[data-background="synthwave"] .grid-horizontal {
   transform: rotateX(67deg);
   background-image:
-    linear-gradient(to bottom, rgba(255, 46, 136, 1) 0 2px, transparent 2px);
-  background-size: 10vmin 10vmin;
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.85) 0 0.75px, rgba(255, 94, 181, 1) 0.75px 1.75px, transparent 1.75px);
+  background-size: 8vmin 8vmin;
   background-repeat: repeat;
   filter:
     brightness(1.35)
-    drop-shadow(0 0 7px rgba(255, 46, 136, 0.9))
-    drop-shadow(0 0 20px rgba(255, 46, 136, 0.35));
+    saturate(1.2)
+    drop-shadow(0 0 3px rgba(255, 255, 255, 0.55))
+    drop-shadow(0 0 8px rgba(255, 46, 136, 0.9))
+    drop-shadow(0 0 22px rgba(255, 46, 136, 0.4));
   animation:
     synthwaveGridScroll 2.4s linear infinite,
     gridWater 4.2s ease-in-out infinite;
 }
 
-/* 水面版专用滚动：background-size 为 10vmin，必须平移正好一个完整 tile，
+/* 水面版专用滚动：background-size 为 8vmin，必须平移正好一个完整 tile，
    才能保证逐帧连续、循环时无跳变 */
 @keyframes synthwaveGridScroll {
   from {
     background-position: 0 0;
   }
   to {
-    background-position: 0 10vmin;
+    background-position: 0 8vmin;
   }
 }
 
