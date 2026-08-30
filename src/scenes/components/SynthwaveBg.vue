@@ -349,7 +349,7 @@ function starStyle(s: Star): Record<string, string> {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 50%;
+  bottom: calc(49.8% + 3px);
   height: 13%;
   width: 100%;
   opacity: 0.92;
@@ -378,7 +378,7 @@ function starStyle(s: Star): Record<string, string> {
   left: 0;
   right: 0;
   bottom: 0;
-  height: 51%;
+  height: 49.8%;
   overflow: hidden;
   background: linear-gradient(
     180deg,
@@ -448,6 +448,8 @@ function starStyle(s: Star): Record<string, string> {
     drop-shadow(0 0 3px rgba(255, 255, 255, 0.55))
     drop-shadow(0 0 7px rgba(255, 46, 136, 0.9))
     drop-shadow(0 0 20px rgba(255, 46, 136, 0.4));
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.6) 4%, #000 10%, #000 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.6) 4%, #000 10%, #000 100%);
   animation: gridWater 4.2s ease-in-out infinite;
 }
 .synthwave-bg[data-background="synthwave"] .grid-horizontal {
@@ -462,6 +464,8 @@ function starStyle(s: Star): Record<string, string> {
     drop-shadow(0 0 3px rgba(255, 255, 255, 0.55))
     drop-shadow(0 0 8px rgba(255, 46, 136, 0.9))
     drop-shadow(0 0 22px rgba(255, 46, 136, 0.4));
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.6) 4%, #000 10%, #000 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.6) 4%, #000 10%, #000 100%);
   animation:
     synthwaveGridScroll 2.4s linear infinite,
     gridWater 4.2s ease-in-out infinite;
