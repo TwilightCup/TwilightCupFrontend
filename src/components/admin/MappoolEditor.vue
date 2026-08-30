@@ -167,7 +167,6 @@ const canAddCategory = computed(() => props.mappool.categories.length < CATEGORY
         >
           <button type="button" class="category-item" @click="selectCategory(ci)">
             <span class="cat-short">{{ categoryKindInfo(cat.name)?.short ?? cat.name }}</span>
-            <span class="cat-label-main">{{ categoryKindInfo(cat.name)?.label ?? cat.name }}</span>
             <span class="cat-count">{{ cat.picks.length }}</span>
           </button>
           <el-button
@@ -321,14 +320,6 @@ const canAddCategory = computed(() => props.mappool.categories.length < CATEGORY
   flex-shrink: 0;
   font-weight: 700;
   letter-spacing: 0.5px;
-}
-.cat-label-main {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
 }
 .cat-count {
   flex-shrink: 0;

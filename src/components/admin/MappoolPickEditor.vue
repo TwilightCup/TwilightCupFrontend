@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
+import { Delete } from "@element-plus/icons-vue";
 import type { UploadRequestOptions } from "element-plus";
 import { useI18n } from "vue-i18n";
 import { api, ApiError } from "@/api/client";
@@ -15,7 +16,7 @@ import SpeedrunMappingEditor from "@/components/admin/SpeedrunMappingEditor.vue"
  * 单个选图编辑器。直接 mutate 父级传入的 reactive pick 引用。
  *
  * - 编号由父 MappoolEditor 按「类别 + 序号」自动分配（只读展示）。
- * - 类别由父 Category 决定；本面板不再重复展示类别标签（父卡片头已含 kind 选择器）。
+ * - 类别由父 Category 决定；本面板不再重复展示类别标签（父级侧栏已含类别缩写）。
  * - **关卡来自关卡管理页维护的关卡表**（admin store /admin/levels）：下拉 value 存关卡 id（UUID）、
  *   label 显示「展示名（名）」；数字工坊 ID 可直通；遗留名字符串/已删 id 以伪选项
  *   展示（黄警告）并原样透传，绝不静默丢值。
@@ -353,7 +354,15 @@ async function onRemove(): Promise<void> {
         </el-button>
         <span class="pick-no">{{ $t("pickEditor.pickNumber", { index: index + 1 }) }}</span>
       </div>
-      <el-button link type="danger" @click="onRemove">{{ $t("pickEditor.deletePickBtn") }}</el-button>
+      <el-button
+        link
+        type="danger"
+        :title="$t('pickEditor.deletePickBtn')"
+        :aria-label="$t('pickEditor.deletePickBtn')"
+        @click="onRemove"
+      >
+        <el-icon><Delete /></el-icon>
+      </el-button>
     </div>
 
     <div v-show="!collapsed" class="pick-body">
