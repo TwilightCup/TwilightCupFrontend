@@ -421,33 +421,49 @@ function starStyle(s: Star): Record<string, string> {
   opacity: 0.95;
 }
 
-/* 水面版网格：颜色与滚动节奏贴近参考，比默认更细更密 */
+/* 水面版网格：更接近参考图——透视更平缓、密集成网，整个网格向镜头连续滚动 */
 .synthwave-bg[data-background="synthwave"] .floor {
-  height: 52%;
-  perspective: 8vmin;
+  height: 54%;
+  perspective: 26vmin;
+  perspective-origin: 50% 0;
 }
 .synthwave-bg[data-background="synthwave"] .grid {
   background-image:
-    linear-gradient(90deg, rgba(255, 46, 136, 0.95) 0 2px, transparent 2px),
-    linear-gradient(to bottom, rgba(34, 227, 255, 0.5) 0 2px, transparent 2px);
+    linear-gradient(90deg, rgba(255, 46, 136, 0.95) 0 3px, transparent 3px),
+    linear-gradient(to bottom, rgba(255, 46, 136, 0.72) 0 3px, transparent 3px);
   background-size:
     12vmin 12vmin,
     12vmin 12vmin;
   animation:
-    gridScroll 1.8s linear infinite,
-    gridWater 3.8s ease-in-out infinite;
+    synthwaveGridScroll 1.8s linear infinite,
+    gridWater 4.2s ease-in-out infinite;
   filter:
-    brightness(1.35)
-    drop-shadow(0 0 7px rgba(255, 46, 136, 0.6));
+    brightness(1.45)
+    drop-shadow(0 0 6px rgba(255, 46, 136, 0.55));
+}
+
+/* 水面版专用滚动：background-size 为 12vmin，必须平移正好一个完整 tile，
+   才能保证逐帧连续、循环时无跳变 */
+@keyframes synthwaveGridScroll {
+  from {
+    background-position:
+      0 0,
+      0 0;
+  }
+  to {
+    background-position:
+      0 0,
+      0 12vmin;
+  }
 }
 
 /* 水面折射：网格除持续向前滚动外，还随水面轻微摆动，体现被水波影响 */
 @keyframes gridWater {
   0%, 100% {
-    transform: rotateX(74deg) translateY(0) skewX(0deg);
+    transform: rotateX(67deg) translateY(0) skewX(0deg);
   }
   50% {
-    transform: rotateX(74deg) translateY(-7px) skewX(1.1deg);
+    transform: rotateX(67deg) translateY(-6px) skewX(0.8deg);
   }
 }
 
@@ -460,7 +476,7 @@ function starStyle(s: Star): Record<string, string> {
     repeating-linear-gradient(
       174deg,
       transparent 0 5px,
-      rgba(34, 227, 255, 0.12) 5px 6px,
+      rgba(255, 46, 136, 0.14) 5px 6px,
       transparent 6px 12px,
       rgba(255, 46, 136, 0.08) 12px 13px,
       transparent 13px 22px
@@ -489,7 +505,7 @@ function starStyle(s: Star): Record<string, string> {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(to bottom, rgba(10, 1, 24, 0.06) 0%, rgba(10, 1, 24, 0.26) 32%, rgba(10, 1, 24, 0.62) 100%);
+    linear-gradient(to bottom, rgba(10, 1, 24, 0.03) 0%, rgba(10, 1, 24, 0.2) 32%, rgba(10, 1, 24, 0.55) 100%);
 }
 
 /* 新背景的地平线辉光：品红为主，贴近参考图的暖色水天线 */
