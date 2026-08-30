@@ -133,7 +133,7 @@ async function onSubmit(): Promise<void> {
 <style>
 .mappool-dialog {
   height: 100vh;
-  margin-top: 0;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -168,6 +168,9 @@ async function onSubmit(): Promise<void> {
 .mappool-dialog .el-form-item:last-child .el-form-item__content {
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
 }
 
 .mappool-dialog .mappool-wrap {
