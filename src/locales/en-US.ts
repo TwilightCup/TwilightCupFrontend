@@ -1044,6 +1044,7 @@ const messages: MessageSchema = {
   // ── director broadcast scenes (scenes.html MPE entries) ─────────────
   "scenes.noToken": "Missing token: add ?token=<director JWT> to the URL",
   "scenes.backgrounds.default": "Default",
+  "scenes.backgrounds.synthwave": "Water Synthwave",
   "scenes.conn.connecting": "Connecting",
   "scenes.conn.reconnecting": "Reconnecting",
   "scenes.conn.closed": "Disconnected (check network/token)",
