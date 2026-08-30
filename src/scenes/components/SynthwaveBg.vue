@@ -120,13 +120,13 @@ function rippleFrame(now: number): void {
 
   setTurbulenceBaseFrequency(
     reflTurbulence.value,
-    0.007 + Math.sin(t * 0.9) * 0.002,
-    0.017 + Math.cos(t * 0.7) * 0.004,
+    0.007 + Math.sin(t * 0.7) * 0.002,
+    0.017 + Math.cos(t * 0.55) * 0.004,
   );
   setTurbulenceBaseFrequency(
     gridTurbulence.value,
-    0.012 + Math.sin(t * 1.05 + 2.1) * 0.003,
-    0.027 + Math.cos(t * 0.8 + 1.3) * 0.005,
+    0.012 + Math.sin(t * 0.85 + 2.1) * 0.003,
+    0.027 + Math.cos(t * 0.65 + 1.3) * 0.005,
   );
 }
 
@@ -761,7 +761,7 @@ watch(
   background-size:
     140% 140%,
     160% 160%;
-  animation: waterGlintsDrift 7s linear infinite;
+  animation: waterGlintsDrift 9s linear infinite;
 }
 
 @keyframes waterGlintsDrift {
