@@ -145,6 +145,44 @@ async function onSubmit(): Promise<void> {
 .mappool-dialog .el-dialog__body {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.mappool-dialog .el-form {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mappool-dialog .el-form-item:last-child {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0;
+}
+
+.mappool-dialog .el-form-item:last-child .el-form-item__content {
+  flex: 1;
+  min-height: 0;
+}
+
+.mappool-dialog .mappool-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mappool-dialog .mappool-wrap .field-hint {
+  flex-shrink: 0;
+}
+
+.mappool-dialog .mappool-editor {
+  flex: 1;
+  min-height: 0;
 }
 </style>

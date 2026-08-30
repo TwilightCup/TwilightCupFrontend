@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { ElMessageBox } from "element-plus";
+import { Delete } from "@element-plus/icons-vue";
 import { useI18n } from "vue-i18n";
 import {
   CATEGORY_KINDS,
@@ -174,9 +175,10 @@ const canAddCategory = computed(() => props.mappool.categories.length < CATEGORY
             type="danger"
             class="cat-delete"
             :title="$t('mappoolEditor.deleteCategoryBtn')"
+            :aria-label="$t('mappoolEditor.deleteCategoryBtn')"
             @click="removeCategory(ci)"
           >
-            {{ $t("mappoolEditor.deleteCategoryBtn") }}
+            <el-icon><Delete /></el-icon>
           </el-button>
         </div>
 
@@ -227,16 +229,21 @@ const canAddCategory = computed(() => props.mappool.categories.length < CATEGORY
 <style scoped>
 .mappool-editor {
   width: 100%;
+  height: 100%;
+  min-height: 0;
 }
 .editor-layout {
   display: flex;
   gap: 12px;
   align-items: stretch;
-  min-height: 320px;
+  height: 100%;
+  min-height: 0;
 }
 .category-sidebar {
   width: 190px;
   flex-shrink: 0;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -338,6 +345,8 @@ const canAddCategory = computed(() => props.mappool.categories.length < CATEGORY
 .category-main {
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 10px;
