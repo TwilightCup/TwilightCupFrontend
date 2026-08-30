@@ -465,14 +465,10 @@ function starStyle(s: Star): Record<string, string> {
    才能保证逐帧连续、循环时无跳变 */
 @keyframes synthwaveGridScroll {
   from {
-    background-position:
-      0 0,
-      0 0;
+    background-position: 0 0;
   }
   to {
-    background-position:
-      0 0,
-      0 12vmin;
+    background-position: 0 12vmin;
   }
 }
 
