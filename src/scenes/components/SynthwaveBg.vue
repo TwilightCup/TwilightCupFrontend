@@ -156,7 +156,6 @@ function starStyle(s: Star): Record<string, string> {
 
     <!-- 水面：包含向镜头滚动的发光网格、水波反射和动态涟漪 -->
     <div v-if="background === 'synthwave'" class="water">
-      <div class="water-glow" />
       <div class="floor">
         <div class="grid-vertical" />
         <div class="grid-horizontal" />
@@ -390,38 +389,6 @@ function starStyle(s: Star): Record<string, string> {
     #0a0120 100%
   );
 }
-/* 太阳在水面的纵向反射：中央渐窄、带水平波光的光柱 */
-.synthwave-bg[data-background="synthwave"] .water-glow {
-  position: absolute;
-  left: 50%;
-  top: 0;
-  transform: translateX(-50%);
-  width: 17vmin;
-  height: 100%;
-  background:
-    linear-gradient(
-      90deg,
-      transparent 0%,
-      rgba(255, 46, 136, 0.22) 22%,
-      rgba(255, 138, 61, 0.5) 44%,
-      rgba(255, 214, 160, 0.58) 50%,
-      rgba(255, 138, 61, 0.5) 56%,
-      rgba(255, 46, 136, 0.22) 78%,
-      transparent 100%
-    ),
-    repeating-linear-gradient(
-      to bottom,
-      rgba(255, 180, 110, 0.55) 0 10px,
-      rgba(255, 46, 136, 0.34) 10px 22px,
-      transparent 22px 36px
-    );
-  filter: blur(4px) drop-shadow(0 0 24px rgba(255, 138, 61, 0.38));
-  -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.95), transparent 96%);
-  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.95), transparent 96%);
-  mix-blend-mode: screen;
-  opacity: 0.95;
-}
-
 /* 水面版网格：拆成两层。
    层1 grid-vertical：透视纵线从地平线一路延伸到画面底部，负责“网格延伸得更远”；
    层2 grid-horizontal：横线持续向镜头滚动；整层填满水面，让网格从地平线
