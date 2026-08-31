@@ -12,6 +12,7 @@ import PrepPanel from "@/components/PrepPanel.vue";
 import BanPickPanel from "@/components/BanPickPanel.vue";
 import VerdictPanel from "@/components/VerdictPanel.vue";
 import PlayerStatusCard from "@/components/PlayerStatusCard.vue";
+import PlayerMonitorPanel from "@/components/PlayerMonitorPanel.vue";
 import CounterWidget from "@/components/CounterWidget.vue";
 import ChatPanel from "@/components/ChatPanel.vue";
 import RoundHistoryDrawer from "@/components/RoundHistoryDrawer.vue";
@@ -41,6 +42,13 @@ const showPrepFallback = computed(
 const showVerdict = computed(
   () =>
     match.phase === MatchPhase.IN_ROUND || match.phase === MatchPhase.ROUND_JUDGING,
+);
+/** 准备阶段 / 倒计时阶段 / 回合进行阶段显示选手画面监控 */
+const showPlayerMonitor = computed(
+  () =>
+    match.phase === MatchPhase.PREP ||
+    match.phase === MatchPhase.COUNTDOWN ||
+    match.phase === MatchPhase.IN_ROUND,
 );
 
 function logout(): void {
@@ -117,6 +125,8 @@ onUnmounted(() => {
 
     <main :key="String(route.params.matchId)" class="main">
       <div class="col-center">
+        <PlayerMonitorPanel v-if="showPlayerMonitor && !readOnly" />
+
         <el-alert
           v-if="!match.metaReady"
           type="info"
@@ -127,7 +137,7 @@ onUnmounted(() => {
           {{ $t('matchView.coldAlert') }}
         </el-alert>
 
-        <CountdownBanner />
+        <CountdownBanner v-if="match.phase !== MatchPhase.COUNTDOWN" />
 
         <!-- 胜负已定：手动收尾横幅（结束比赛/踢选手由裁判触发） -->
         <MatchEndBanner v-if="match.winnerDecided && !match.matchEnded" />

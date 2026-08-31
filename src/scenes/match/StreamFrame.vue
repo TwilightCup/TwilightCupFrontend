@@ -40,23 +40,32 @@ interface MpegtsModule {
   Events?: Record<string, string>;
 }
 
+const props = withDefaults(
+  defineProps<{
+    side: "A" | "B";
+    hlsUrl: string;
+    embedUrl?: string;
+    /** 当前导播/裁判/管理 JWT（YouTube/B站代理流地址需要；场景页传 URL token） */
+    token?: string;
+    /** 隐藏该侧画面（等待信号占位；应急开关，控制台经 config_update 广播） */
+    hidden?: boolean;
+    /** 重新拉流计数（变化即重挂播放器：卡顿应急刷新） */
+    refreshNonce?: number;
+    /** 是否按 4:3 裁剪画面（导播端 true；裁判端监控 false，按原始 16:9 完整显示） */
+    crop4to3?: boolean;
+  }>(),
+  {
+    hidden: false,
+    refreshNonce: 0,
+    crop4to3: true,
+  },
+);
+
 declare global {
   interface Window {
     mpegts?: MpegtsModule;
   }
 }
-
-const props = defineProps<{
-  side: "A" | "B";
-  hlsUrl: string;
-  embedUrl?: string;
-  /** 当前导播/裁判/管理 JWT（YouTube/B站代理流地址需要；场景页传 URL token） */
-  token?: string;
-  /** 隐藏该侧画面（等待信号占位；应急开关，控制台经 config_update 广播） */
-  hidden?: boolean;
-  /** 重新拉流计数（变化即重挂播放器：卡顿应急刷新） */
-  refreshNonce?: number;
-}>();
 
 /** HLS/B站流播放失败（MSE 不可用 / 致命解码错误）→ 占位（可见，不黑屏） */
 const videoBroken = ref(false);
@@ -256,7 +265,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="frame" :class="side">
+  <div class="frame" :class="[side, { uncropped: !props.crop4to3 }]">
     <!-- 其它外部站点嵌入（YouTube/B站已改走同源代理，不走 iframe） -->
     <iframe
       v-if="mode === 'embed'"
@@ -294,6 +303,10 @@ onBeforeUnmount(() => {
   overflow: hidden;
   background: #050010;
 }
+/* 裁判端监控：不裁剪成 4:3，按原始 16:9 完整显示 */
+.frame.uncropped {
+  aspect-ratio: 16 / 9;
+}
 .video {
   background: #000;
   border: 0;
@@ -305,6 +318,10 @@ video.video {
   height: 100%;
   object-fit: cover;
 }
+/* 裁判端监控视频：完整显示，不裁边 */
+.frame.uncropped video.video {
+  object-fit: contain;
+}
 /* <iframe>：object-fit 不生效——高度撑满卡片、宽度按 16:9 外溢（= 卡宽 ×4/3），
    居中后由 .frame 的 overflow:hidden 裁去左右，口径与 <video> 的 cover 一致 */
 iframe.video {
@@ -314,6 +331,15 @@ iframe.video {
   height: 100%;
   aspect-ratio: 16 / 9;
   transform: translateX(-50%);
+}
+/* 裁判端监控 iframe：使用原始 16:9 完整显示，不做左右裁切 */
+.frame.uncropped iframe.video {
+  position: static;
+  left: auto;
+  height: 100%;
+  width: 100%;
+  aspect-ratio: auto;
+  transform: none;
 }
 /* 占位：动画渐变 + 扫描线 + 主题色内边框（推流后不渲染，画面完整覆盖） */
 .placeholder {

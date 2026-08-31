@@ -250,6 +250,8 @@ const messages = {
   // ── MatchView ────────────────────────────────────────────────────────
   "matchView.coldAlert": "比赛元数据将在首个回合开始后生成。进入准备阶段后，请在「本回合选图」中手动输入首个选图编号（如 ML1）。",
   "matchView.endedReadonly": "比赛已结束。当前为只读查看，所有裁判操作均已锁定。",
+  "matchView.streamMonitorTitle": "选手画面监控",
+  "matchView.streamRefreshBtn": "重拉流",
 
   // ── MatchHeader ──────────────────────────────────────────────────────
   "matchHeader.unnamed": "未命名比赛（等待开始）",
@@ -264,6 +266,9 @@ const messages = {
   "matchHeader.resumeMatchBtn": "恢复比赛",
   "matchHeader.myMatchesBtn": "我的比赛",
   "matchHeader.dataViewBtn": "数据查看",
+  "matchHeader.streamsBtn": "选手画面",
+  "matchHeader.streamsSaved": "选手画面配置已保存",
+  "matchHeader.streamsNoMatch": "尚未进入比赛，暂时无法保存选手画面配置",
 
   // ── CountdownBanner ──────────────────────────────────────────────────
   "countdown.manualLabel": "裁判发起 · 开始倒计时",

@@ -246,6 +246,8 @@ const messages: MessageSchema = {
   // ── matchView ────────────────────────────────────────────────────────
   "matchView.coldAlert": "Match metadata is generated after the first round starts. Once in the prep phase, enter the first pick code manually in \"This round's pick\" (e.g. ML1).",
   "matchView.endedReadonly": "This match has ended. Read-only: all referee controls are locked.",
+  "matchView.streamMonitorTitle": "Stream monitor",
+  "matchView.streamRefreshBtn": "Reload",
 
   // ── matchHeader ──────────────────────────────────────────────────────
   "matchHeader.unnamed": "Unnamed match (awaiting start)",
@@ -260,6 +262,9 @@ const messages: MessageSchema = {
   "matchHeader.resumeMatchBtn": "Resume match",
   "matchHeader.myMatchesBtn": "My matches",
   "matchHeader.dataViewBtn": "Data view",
+  "matchHeader.streamsBtn": "Streams",
+  "matchHeader.streamsSaved": "Stream configuration saved",
+  "matchHeader.streamsNoMatch": "No active match available. Stream configuration is not saved yet.",
 
   // ── countdown ────────────────────────────────────────────────────────
   "countdown.manualLabel": "Referee-initiated · countdown started",

@@ -8,6 +8,7 @@ import { MatchPhase } from "@/api/types";
 import { phaseInfo, type TagType } from "@/utils/format";
 import RoleSwitcher from "@/components/RoleSwitcher.vue";
 import AccountMenu from "@/components/AccountMenu.vue";
+import PlayerStreamsDropdown from "@/components/PlayerStreamsDropdown.vue";
 import type { ConnStatus } from "@/ws/socket";
 
 const emit = defineEmits<{
@@ -111,6 +112,12 @@ async function onResume(): Promise<void> {
         <el-tag :type="phase.type" effect="dark" size="large" class="phase-tag">
           {{ phase.label }}
         </el-tag>
+        <span
+          v-if="match.phase === MatchPhase.COUNTDOWN && match.countdown"
+          class="header-countdown"
+        >
+          {{ match.countdown.remaining }}s
+        </span>
         <el-tag
           v-if="draftStageTag"
           :type="draftStageTag.type"
@@ -153,6 +160,7 @@ async function onResume(): Promise<void> {
           {{ $t('matchHeader.resumeMatchBtn') }}
         </el-button>
         <el-button size="small" @click="emit('open-history')">{{ $t('matchHeader.dataViewBtn') }}</el-button>
+        <PlayerStreamsDropdown />
         <el-button size="small" @click="emit('back')">{{ $t('matchHeader.myMatchesBtn') }}</el-button>
         <RoleSwitcher />
         <AccountMenu @logout="emit('logout')" />
@@ -245,6 +253,12 @@ async function onResume(): Promise<void> {
 .phase-tag {
   min-width: 92px;
   justify-content: center;
+}
+.header-countdown {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--tc-primary);
+  font-variant-numeric: tabular-nums;
 }
 .conn {
   display: flex;
