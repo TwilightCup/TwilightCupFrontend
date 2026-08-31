@@ -123,7 +123,12 @@ onUnmounted(() => {
       {{ $t('conn.connectingBanner', { action: $t(match.connStatus === 'reconnecting' ? 'conn.action.reconnect' : 'conn.action.connect') }) }}
     </div>
 
-    <main :key="String(route.params.matchId)" class="main">
+    <main :key="String(route.params.matchId)" class="main" :class="{ 'three-col': showPlayerMonitor }">
+      <div v-if="showPlayerMonitor" class="col-left">
+        <PlayerStatusCard side="A" />
+        <PlayerStatusCard side="B" />
+      </div>
+
       <div class="col-center">
         <PlayerMonitorPanel v-if="showPlayerMonitor && !readOnly" />
 
@@ -155,7 +160,7 @@ onUnmounted(() => {
         <PrepPanel v-if="showPrepFallback && !readOnly" />
         <VerdictPanel v-if="showVerdict && !readOnly" />
 
-        <div class="players">
+        <div v-if="!showPlayerMonitor" class="players">
           <PlayerStatusCard side="A" />
           <PlayerStatusCard side="B" />
         </div>
@@ -199,6 +204,15 @@ onUnmounted(() => {
   display: flex;
   gap: 12px;
   padding: 12px;
+}
+.col-left {
+  width: 300px;
+  flex-shrink: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
 }
 .col-center {
   flex: 1;

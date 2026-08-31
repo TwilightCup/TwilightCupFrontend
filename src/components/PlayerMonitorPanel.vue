@@ -87,8 +87,8 @@ function refreshStream(side: "A" | "B"): void {
   margin-bottom: 8px;
 }
 .monitor-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
 }
 .monitor-side {
