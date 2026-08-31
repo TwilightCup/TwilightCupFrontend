@@ -206,8 +206,8 @@ onUnmounted(() => {
   padding: 12px;
 }
 .col-left {
-  width: 300px;
-  flex-shrink: 0;
+  flex: 0 1 300px;
+  min-width: 220px;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -229,9 +229,9 @@ onUnmounted(() => {
   gap: 4px;
   overflow-y: auto;
 }
-/* 三栏模式下中栏监控面板自适应填满可用高度，流画面各自均分剩余空间 */
+/* 三栏模式下中栏监控面板自适应可用区域；流画面始终按 16:9 展示 */
 .main.three-col .col-center :deep(.monitor) {
-  flex: 1 1 0;
+  flex: 0 1 auto;
   min-height: 160px;
   display: flex;
   flex-direction: column;
@@ -245,7 +245,7 @@ onUnmounted(() => {
   overflow-y: auto;
 }
 .main.three-col .col-center :deep(.monitor .monitor-side) {
-  flex: 1 1 0;
+  flex: 0 0 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -254,10 +254,8 @@ onUnmounted(() => {
   flex: 0 0 auto;
 }
 .main.three-col .col-center :deep(.monitor .monitor-side .frame) {
-  flex: 1;
+  flex-shrink: 0;
   min-height: 0;
-  height: auto;
-  aspect-ratio: auto;
 }
 .col-right {
   width: 360px;
