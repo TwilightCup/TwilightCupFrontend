@@ -146,15 +146,15 @@ async function onResume(): Promise<void> {
         <span>{{ connInfo.text }}</span>
       </div>
       <div class="actions">
-        <RoleSwitcher />
         <el-button v-if="!match.matchEnded && draft.canPause" size="small" type="warning" plain @click="onPause">
           {{ $t('matchHeader.pauseMatchBtn') }}
         </el-button>
         <el-button v-if="!match.matchEnded && draft.canResume" size="small" type="success" plain @click="onResume">
           {{ $t('matchHeader.resumeMatchBtn') }}
         </el-button>
-        <el-button size="small" @click="emit('back')">{{ $t('matchHeader.myMatchesBtn') }}</el-button>
         <el-button size="small" @click="emit('open-history')">{{ $t('matchHeader.dataViewBtn') }}</el-button>
+        <el-button size="small" @click="emit('back')">{{ $t('matchHeader.myMatchesBtn') }}</el-button>
+        <RoleSwitcher />
         <AccountMenu @logout="emit('logout')" />
       </div>
     </div>
