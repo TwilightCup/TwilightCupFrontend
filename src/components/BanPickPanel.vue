@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, ref, watch } from "vue";
+import { computed, h, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useDraftStore, type Side } from "@/stores/draft";
@@ -186,66 +186,6 @@ function submitCtPick(): void {
   }
   ctDialogVisible.value = false;
   draft.confirmPickWithOptions(code, [...ctDialogTags.value], ctDialogRetry.value ?? undefined);
-}
-
-// --- PREP：CT/EX 选图可调整词条、CT/EX 单关可调整重试次数后重新提交 ---
-const prepTagInput = ref<string[]>([]);
-const prepRetryInput = ref<number | null>(null);
-const prepIsCt = computed(() => {
-  const code = match.pendingPickCode;
-  if (!code) return false;
-  const k = draft.kindOfCode(code);
-  return (k === "CT" || k === "EX") && draft.ctTagCount > 0;
-});
-const prepKind = computed(() => (match.pendingPickCode ? draft.kindOfCode(match.pendingPickCode) : null));
-const prepIsCp = computed(() => prepKind.value === "CP");
-const prepIsEx = computed(() => prepKind.value === "EX");
-const prepSingle = computed(() => {
-  const p = match.pendingPickCode ? draft.pickByCode(match.pendingPickCode) : null;
-  return p?.type === PickType.SINGLE;
-});
-/** CT/EX 单关：重试次数可在此调整（初值沿用已提交值） */
-const prepNeedsRetry = computed(() =>
-  match.pendingPickCode ? draft.needsRefereeRetry(match.pendingPickCode) : false,
-);
-const prepTagOptions = computed<{ value: string; disabled: boolean }[]>(() => {
-  const known = prepSingle.value
-    ? [...draft.ctTagChoices, "Achievement"]
-    : [...draft.ctTagChoices];
-  // EX 不受本场禁用词条约束
-  return known
-    .filter((tg) => prepIsEx.value || !draft.state.bannedTags.includes(tg))
-    .map((tg) => ({
-      value: tg,
-      disabled: (tg === "Checkpoint" && prepTagInput.value.includes("No Checkpoint")) ||
-        (tg === "No Checkpoint" && prepTagInput.value.includes("Checkpoint")),
-    }));
-});
-const prepBannedHit = computed(() =>
-  prepTagInput.value.filter((tg) => draft.state.bannedTags.includes(tg)),
-);
-// 进入 PREP 时以已提交词条 / 重试为初值（重赛沿用 / 手动改选均可在此基础上调整）
-watch(
-  () => [match.pendingPickCode, draft.state.stage] as const,
-  ([code, st]) => {
-    if (st === "PREP" && code) {
-      prepTagInput.value = [...match.pendingTags];
-      prepRetryInput.value = match.pendingRetry;
-    }
-  },
-  { immediate: true },
-);
-
-function reapplyPickTags(): void {
-  const code = match.pendingPickCode;
-  if (!code) return;
-  if (prepNeedsRetry.value && (prepRetryInput.value == null || prepRetryInput.value < 1)) {
-    ElMessage.warning(t("banpick.pickRetryRequired"));
-    return;
-  }
-  // CP：词条固定 Checkpoint，不可调整
-  const tags = prepIsCp.value ? ["Checkpoint"] : [...prepTagInput.value];
-  match.selectPick(code, tags, prepRetryInput.value ?? undefined);
 }
 
 // --- PREP / 开局 ---
@@ -496,50 +436,6 @@ const showPrepUi = computed(() => match.phase === MatchPhase.PREP);
             class="prep-tag"
           >{{ tg }}</el-tag>
         </template>
-      </div>
-
-      <!-- CT/EX 选图：词条可调整后重新提交；CP 词条固定 Checkpoint 不可改 -->
-      <div v-if="prepIsCt || prepIsCp" class="tag-block">
-        <div class="row-label">
-          {{
-            prepIsCp
-              ? $t('banpick.prepCpTagLabel')
-              : $t('banpick.prepTagLabel', { n: draft.ctTagCount })
-          }}
-        </div>
-        <div class="btn-row">
-          <el-select
-            v-if="!prepIsCp"
-            v-model="prepTagInput"
-            multiple
-            collapse-tags
-            :multiple-limit="draft.ctTagCount"
-            :placeholder="$t('banpick.ctTagPlaceholder')"
-            class="tag-select"
-          >
-            <el-option
-              v-for="o in prepTagOptions"
-              :key="o.value"
-              :value="o.value"
-              :label="o.value"
-              :disabled="o.disabled"
-            />
-          </el-select>
-          <el-tag v-else type="warning" effect="plain" class="prep-tag">Checkpoint</el-tag>
-          <el-input-number
-            v-if="prepNeedsRetry"
-            v-model="prepRetryInput"
-            :min="1"
-            controls-position="right"
-            class="retry-input"
-          />
-          <el-button type="primary" plain @click="reapplyPickTags">
-            {{ $t('banpick.reapplyTagsBtn') }}
-          </el-button>
-        </div>
-        <div v-if="!prepIsEx && prepBannedHit.length > 0" class="tip warn">
-          {{ $t('banpick.ctTagBannedHit', { tags: prepBannedHit.join(', ') }) }}
-        </div>
       </div>
 
       <div class="btn-row">
