@@ -107,6 +107,20 @@ async function onResume(): Promise<void> {
           </div>
         </div>
       </div>
+      <div class="phase-tags">
+        <el-tag :type="phase.type" effect="dark" size="large" class="phase-tag">
+          {{ phase.label }}
+        </el-tag>
+        <el-tag
+          v-if="draftStageTag"
+          :type="draftStageTag.type"
+          effect="plain"
+          size="large"
+          class="phase-tag"
+        >
+          {{ draftStageTag.label }}
+        </el-tag>
+      </div>
     </div>
 
     <div class="center">
@@ -124,25 +138,6 @@ async function onResume(): Promise<void> {
       <div v-if="match.matchWinner" class="winner">
         🏆 {{ $t('matchHeader.winnerLabel', { name: winnerId || match.matchWinner }) }}
       </div>
-    </div>
-
-    <div class="right">
-      <el-tag :type="phase.type" effect="dark" size="large" class="phase-tag">
-        {{ phase.label }}
-      </el-tag>
-      <el-tag
-        v-if="draftStageTag"
-        :type="draftStageTag.type"
-        effect="plain"
-        size="large"
-        class="phase-tag"
-      >
-        {{ draftStageTag.label }}
-      </el-tag>
-      <div class="conn" :title="$t('conn.statusTooltip', { text: connInfo.text })">
-        <span class="dot" :style="{ background: connInfo.dot }" />
-        <span>{{ connInfo.text }}</span>
-      </div>
       <div class="actions">
         <RoleSwitcher />
         <el-button v-if="!match.matchEnded && draft.canPause" size="small" type="warning" plain @click="onPause">
@@ -154,6 +149,13 @@ async function onResume(): Promise<void> {
         <el-button size="small" @click="emit('back')">{{ $t('matchHeader.myMatchesBtn') }}</el-button>
         <el-button size="small" @click="emit('open-history')">{{ $t('matchHeader.dataViewBtn') }}</el-button>
         <AccountMenu @logout="emit('logout')" />
+      </div>
+    </div>
+
+    <div class="right">
+      <div class="conn" :title="$t('conn.statusTooltip', { text: connInfo.text })">
+        <span class="dot" :style="{ background: connInfo.dot }" />
+        <span>{{ connInfo.text }}</span>
       </div>
     </div>
   </header>
@@ -184,6 +186,13 @@ async function onResume(): Promise<void> {
   align-items: center;
   gap: 12px;
 }
+.phase-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
 .logo {
   width: 26px;
   height: 26px;
@@ -199,6 +208,10 @@ async function onResume(): Promise<void> {
 }
 .center {
   text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
 }
 .score {
   display: flex;
@@ -252,6 +265,10 @@ async function onResume(): Promise<void> {
 }
 .actions {
   display: flex;
+  align-items: center;
+  justify-content: center;
   gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 2px;
 }
 </style>
