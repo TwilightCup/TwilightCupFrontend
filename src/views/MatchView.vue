@@ -212,6 +212,12 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  overflow: hidden;
+}
+/* 左栏两张卡片各占半高；内容多时在卡片内部滚动 */
+.main.three-col .col-left :deep(.card) {
+  flex: 1 1 0;
+  min-height: 0;
   overflow-y: auto;
 }
 .col-center {
@@ -222,6 +228,36 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 4px;
   overflow-y: auto;
+}
+/* 三栏模式下中栏监控面板自适应填满可用高度，流画面各自均分剩余空间 */
+.main.three-col .col-center :deep(.monitor) {
+  flex: 1 1 0;
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+}
+.main.three-col .col-center :deep(.monitor .title) {
+  flex: 0 0 auto;
+}
+.main.three-col .col-center :deep(.monitor .monitor-grid) {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.main.three-col .col-center :deep(.monitor .monitor-side) {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.main.three-col .col-center :deep(.monitor .monitor-side .side-head) {
+  flex: 0 0 auto;
+}
+.main.three-col .col-center :deep(.monitor .monitor-side .frame) {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  aspect-ratio: auto;
 }
 .col-right {
   width: 360px;
