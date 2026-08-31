@@ -138,6 +138,13 @@ async function onResume(): Promise<void> {
       <div v-if="match.matchWinner" class="winner">
         🏆 {{ $t('matchHeader.winnerLabel', { name: winnerId || match.matchWinner }) }}
       </div>
+    </div>
+
+    <div class="right">
+      <div class="conn" :title="$t('conn.statusTooltip', { text: connInfo.text })">
+        <span class="dot" :style="{ background: connInfo.dot }" />
+        <span>{{ connInfo.text }}</span>
+      </div>
       <div class="actions">
         <RoleSwitcher />
         <el-button v-if="!match.matchEnded && draft.canPause" size="small" type="warning" plain @click="onPause">
@@ -149,13 +156,6 @@ async function onResume(): Promise<void> {
         <el-button size="small" @click="emit('back')">{{ $t('matchHeader.myMatchesBtn') }}</el-button>
         <el-button size="small" @click="emit('open-history')">{{ $t('matchHeader.dataViewBtn') }}</el-button>
         <AccountMenu @logout="emit('logout')" />
-      </div>
-    </div>
-
-    <div class="right">
-      <div class="conn" :title="$t('conn.statusTooltip', { text: connInfo.text })">
-        <span class="dot" :style="{ background: connInfo.dot }" />
-        <span>{{ connInfo.text }}</span>
       </div>
     </div>
   </header>
@@ -208,10 +208,6 @@ async function onResume(): Promise<void> {
 }
 .center {
   text-align: center;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
 }
 .score {
   display: flex;
@@ -266,9 +262,6 @@ async function onResume(): Promise<void> {
 .actions {
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 2px;
 }
 </style>
