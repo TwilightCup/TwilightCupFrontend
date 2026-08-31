@@ -289,7 +289,7 @@ const showPrepUi = computed(() => match.phase === MatchPhase.PREP);
 
 <template>
   <section class="panel bp">
-    <div class="bp-head">
+    <div v-if="stage !== 'PREP'" class="bp-head">
       <div class="bp-title">
         <span class="bp-stage">{{ stageLabel(stage) }}</span>
         <el-tag size="small" type="warning" effect="dark">
@@ -561,18 +561,14 @@ const showPrepUi = computed(() => match.phase === MatchPhase.PREP);
           </span>
         </div>
       </div>
-      <div class="row-label mt8">{{ $t('banpick.timeoutInfo') }}</div>
-      <div class="btn-row">
-        <el-button :disabled="draft.state.usedTimeout.A" @click="draft.useTimeout('A')">{{ $t('banpick.timeoutPlayerBtn', { name: match.playerNames.A || $t('seat.a') }) }}</el-button>
-        <el-button :disabled="draft.state.usedTimeout.B" @click="draft.useTimeout('B')">{{ $t('banpick.timeoutPlayerBtn', { name: match.playerNames.B || $t('seat.b') }) }}</el-button>
-      </div>
-      <div class="btn-row mt8">
+      <div class="btn-row mt8 prep-actions">
         <el-button type="warning" size="large" :disabled="!showPrepUi" @click="onManualStart">{{ $t('banpick.manualStartNoInterruptBtn') }}</el-button>
+        <el-button size="small" plain @click="draft.resetDraft()">{{ $t('banpick.resetDraftBtn') }}</el-button>
       </div>
       <div v-if="!showPrepUi" class="tip">{{ $t('banpick.waitForPrepTip') }}</div>
     </div>
 
-    <div class="bp-foot">
+    <div v-if="stage !== 'PREP'" class="bp-foot">
       <el-button size="small" plain @click="draft.resetDraft()">{{ $t('banpick.resetDraftBtn') }}</el-button>
     </div>
 
@@ -845,8 +841,9 @@ const showPrepUi = computed(() => match.phase === MatchPhase.PREP);
 .ready {
   flex: 1;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
   padding: 8px 12px;
   border-radius: 8px;
   background: var(--tc-hover);
@@ -862,6 +859,10 @@ const showPrepUi = computed(() => match.phase === MatchPhase.PREP);
   display: flex;
   gap: 6px;
   align-items: center;
+  flex-wrap: wrap;
+}
+.prep-actions {
+  align-items: flex-end;
 }
 .ready.a .who {
   color: var(--tc-a);
