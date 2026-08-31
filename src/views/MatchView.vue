@@ -13,7 +13,6 @@ import BanPickPanel from "@/components/BanPickPanel.vue";
 import VerdictPanel from "@/components/VerdictPanel.vue";
 import PlayerStatusCard from "@/components/PlayerStatusCard.vue";
 import PlayerMonitorPanel from "@/components/PlayerMonitorPanel.vue";
-import CounterWidget from "@/components/CounterWidget.vue";
 import ChatPanel from "@/components/ChatPanel.vue";
 import RoundHistoryDrawer from "@/components/RoundHistoryDrawer.vue";
 import AuthFailMask from "@/components/AuthFailMask.vue";
@@ -191,9 +190,11 @@ onUnmounted(() => {
           {{ $t('matchView.endedReadonly') }}
         </el-alert>
 
-        <BanPickPanel v-if="showBanPick && !readOnly" />
-        <PrepPanel v-if="showPrepFallback && !readOnly" />
-        <VerdictPanel v-if="showVerdict && !readOnly" />
+        <template v-if="!showPlayerMonitor">
+          <BanPickPanel v-if="showBanPick && !readOnly" />
+          <PrepPanel v-if="showPrepFallback && !readOnly" />
+          <VerdictPanel v-if="showVerdict && !readOnly" />
+        </template>
 
         <div v-if="!showPlayerMonitor" class="players">
           <PlayerStatusCard side="A" />
@@ -202,7 +203,11 @@ onUnmounted(() => {
       </div>
 
       <div class="col-right">
-        <CounterWidget v-if="!readOnly" />
+        <template v-if="showPlayerMonitor">
+          <BanPickPanel v-if="showBanPick && !readOnly" />
+          <PrepPanel v-if="showPrepFallback && !readOnly" />
+          <VerdictPanel v-if="showVerdict && !readOnly" />
+        </template>
         <ChatPanel :read-only="readOnly" />
       </div>
     </main>
@@ -268,12 +273,13 @@ onUnmounted(() => {
 .main.three-col .col-center {
   flex: 0 1 auto;
 }
-/* 三栏模式下中栏监控面板自适应可用区域；流画面始终按 16:9 展示 */
+/* 三栏模式下中栏监控面板填满可用高度；流画面始终按 16:9 展示 */
 .main.three-col .col-center :deep(.monitor) {
-  flex: 0 1 auto;
-  min-height: 160px;
+  flex: 1 1 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  margin-bottom: 0;
 }
 .main.three-col .col-center :deep(.monitor .title) {
   flex: 0 0 auto;
@@ -281,19 +287,21 @@ onUnmounted(() => {
 .main.three-col .col-center :deep(.monitor .monitor-grid) {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  overflow: hidden;
 }
 .main.three-col .col-center :deep(.monitor .monitor-side) {
-  flex: 0 0 auto;
+  flex: 1 1 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  justify-content: center;
 }
 .main.three-col .col-center :deep(.monitor .monitor-side .side-head) {
   flex: 0 0 auto;
 }
 .main.three-col .col-center :deep(.monitor .monitor-side .frame) {
-  flex-shrink: 0;
+  flex: 0 0 auto;
+  width: 100%;
   min-height: 0;
 }
 .col-right {
