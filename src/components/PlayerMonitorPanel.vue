@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { watch } from "vue";
+import { Refresh } from "@element-plus/icons-vue";
 import { useMatchStore } from "@/stores/match";
 import { useAuthStore } from "@/stores/auth";
 import StreamFrame from "@/scenes/match/StreamFrame.vue";
@@ -26,39 +27,46 @@ function refreshStream(side: "A" | "B"): void {
 
 <template>
   <section class="monitor">
-    <div class="title">{{ $t('matchView.streamMonitorTitle') }}</div>
     <div class="monitor-grid">
       <div class="monitor-side">
-        <div class="side-head">
-          <span class="name tc-a">A · {{ match.playerNames.A || $t('seat.a') }}</span>
-          <el-button size="small" @click="refreshStream('A')">
-            {{ $t('matchView.streamRefreshBtn') }}
-          </el-button>
+        <div class="stream-wrap">
+          <StreamFrame
+            side="A"
+            :hls-url="config.hlsA"
+            :embed-url="config.embedA"
+            :token="auth.token"
+            :refresh-nonce="config.refreshA"
+            :crop4to3="false"
+          />
+          <button
+            type="button"
+            class="refresh-btn"
+            :title="$t('matchView.streamRefreshBtn')"
+            @click="refreshStream('A')"
+          >
+            <el-icon :size="16"><Refresh /></el-icon>
+          </button>
         </div>
-        <StreamFrame
-          side="A"
-          :hls-url="config.hlsA"
-          :embed-url="config.embedA"
-          :token="auth.token"
-          :refresh-nonce="config.refreshA"
-          :crop4to3="false"
-        />
       </div>
       <div class="monitor-side">
-        <div class="side-head">
-          <span class="name tc-b">B · {{ match.playerNames.B || $t('seat.b') }}</span>
-          <el-button size="small" @click="refreshStream('B')">
-            {{ $t('matchView.streamRefreshBtn') }}
-          </el-button>
+        <div class="stream-wrap">
+          <StreamFrame
+            side="B"
+            :hls-url="config.hlsB"
+            :embed-url="config.embedB"
+            :token="auth.token"
+            :refresh-nonce="config.refreshB"
+            :crop4to3="false"
+          />
+          <button
+            type="button"
+            class="refresh-btn"
+            :title="$t('matchView.streamRefreshBtn')"
+            @click="refreshStream('B')"
+          >
+            <el-icon :size="16"><Refresh /></el-icon>
+          </button>
         </div>
-        <StreamFrame
-          side="B"
-          :hls-url="config.hlsB"
-          :embed-url="config.embedB"
-          :token="auth.token"
-          :refresh-nonce="config.refreshB"
-          :crop4to3="false"
-        />
       </div>
     </div>
   </section>
@@ -80,12 +88,6 @@ function refreshStream(side: "A" | "B"): void {
   padding: 12px 14px;
   margin-bottom: 12px;
 }
-.title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--tc-text-dim);
-  margin-bottom: 8px;
-}
 .monitor-grid {
   display: flex;
   flex-direction: column;
@@ -94,18 +96,30 @@ function refreshStream(side: "A" | "B"): void {
 .monitor-side {
   min-width: 0;
 }
-.side-head {
+.stream-wrap {
+  position: relative;
+  width: 100%;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 6px;
+  flex-direction: column;
 }
-.side-head .name {
-  font-size: 13px;
-  font-weight: 700;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.refresh-btn {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  color: #fff;
+  cursor: pointer;
+  z-index: 2;
+  transition: background 0.2s;
+}
+.refresh-btn:hover {
+  background: rgba(0, 0, 0, 0.7);
 }
 </style>

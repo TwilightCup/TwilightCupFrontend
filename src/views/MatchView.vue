@@ -58,9 +58,9 @@ function updateMiddleWidth(): void {
   if (!main) return;
   const h = main.clientHeight;
   if (!h) return;
-  // 两张 16:9 画面纵向排列：减去标题、表头、间距、内边距等固定开销，
+  // 两张 16:9 画面纵向排列：减去卡片内边距、间距等固定开销，
   // 再按每张 16:9 反推中栏最大宽度，保证两个画面都能完整落入可视高度。
-  const overhead = 130;
+  const overhead = 50;
   const frameArea = Math.max(100, h - overhead);
   const byHeight = Math.max(260, Math.round((frameArea / 2) * 16 / 9));
   const availableWidth = main.clientWidth - 360 - 48 - 220;
@@ -294,10 +294,10 @@ onUnmounted(() => {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  justify-content: center;
 }
-.main.three-col .col-center :deep(.monitor .monitor-side .side-head) {
-  flex: 0 0 auto;
+.main.three-col .col-center :deep(.monitor .monitor-side .stream-wrap) {
+  flex: 1 1 0;
+  min-height: 0;
 }
 .main.three-col .col-center :deep(.monitor .monitor-side .frame) {
   flex: 0 0 auto;
