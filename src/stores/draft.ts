@@ -600,6 +600,21 @@ export const useDraftStore = defineStore("draft", () => {
   }
 
   // =========================================================================
+  // 取消本次选图（仅 PREP 阶段使用）：回到 PICK 阶段，并移除刚选中的图
+  // =========================================================================
+
+  function cancelPick(): void {
+    if (state.stage !== "PREP") return;
+    const last = state.picks.pop();
+    if (!last) return;
+    // 恢复到该 pick 对应的选手再来一次
+    state.nextPicker = last.by;
+    const tb = isTBPrep();
+    match.clearPendingPick();
+    enterStage(tb ? "TB_FORCE" : "PICK");
+  }
+
+  // =========================================================================
   // 重置
   // =========================================================================
 
@@ -723,6 +738,7 @@ export const useDraftStore = defineStore("draft", () => {
     startPickTimer,
     startPrepTimer,
     manualStart,
+    cancelPick,
     resetDraft,
     $reset,
   };

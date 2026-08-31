@@ -563,7 +563,7 @@ const showPrepUi = computed(() => match.phase === MatchPhase.PREP);
       </div>
       <div class="btn-row mt8 prep-actions">
         <el-button type="warning" size="large" :disabled="!showPrepUi" @click="onManualStart">{{ $t('banpick.manualStartNoInterruptBtn') }}</el-button>
-        <el-button size="small" plain @click="draft.resetDraft()">{{ $t('banpick.resetDraftBtn') }}</el-button>
+        <el-button size="small" plain @click="draft.cancelPick()">{{ $t('banpick.cancelPickBtn') }}</el-button>
       </div>
       <div v-if="!showPrepUi" class="tip">{{ $t('banpick.waitForPrepTip') }}</div>
     </div>

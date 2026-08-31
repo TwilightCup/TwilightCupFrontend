@@ -435,6 +435,7 @@ const messages = {
   "banpick.manualStartNoInterruptBtn": "手动开始（不可中断）",
   "banpick.waitForPrepTip": "等待进入准备阶段后可手动开始。",
   "banpick.resetDraftBtn": "重置 ban/pick",
+  "banpick.cancelPickBtn": "取消pick",
   "banpick.pickConfirmMsg": "确认选定 {code}？",
   "banpick.pickConfirmTitle": "选图确认",
   "banpick.pickConfirmBtn": "选定",

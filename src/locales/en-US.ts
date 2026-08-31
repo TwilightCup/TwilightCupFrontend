@@ -431,6 +431,7 @@ const messages: MessageSchema = {
   "banpick.manualStartNoInterruptBtn": "Manual start (uninterruptible)",
   "banpick.waitForPrepTip": "Wait for the prep phase before starting manually.",
   "banpick.resetDraftBtn": "Reset ban/pick",
+  "banpick.cancelPickBtn": "Cancel pick",
   "banpick.pickConfirmMsg": "Confirm pick {code}?",
   "banpick.pickConfirmTitle": "Confirm pick",
   "banpick.pickConfirmBtn": "Pick",

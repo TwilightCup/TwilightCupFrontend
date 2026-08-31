@@ -676,6 +676,13 @@ export const useMatchStore = defineStore("match", () => {
     }
   }
 
+  /** 取消当前尚未开始的选图（仅改本地 pending，服务端仍以之后的新选图覆盖）。 */
+  function clearPendingPick(): void {
+    pendingPickCode.value = null;
+    pendingTags.value = [];
+    pendingRetry.value = null;
+  }
+
   function manualStart(): void {
     socket?.send(send.refereeManualStart());
   }
@@ -810,6 +817,7 @@ export const useMatchStore = defineStore("match", () => {
     sendChat,
     markPrep,
     selectPick,
+    clearPendingPick,
     manualStart,
     sendDraft,
     doVerdict,
