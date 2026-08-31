@@ -45,12 +45,13 @@ const showVerdict = computed(
   () =>
     match.phase === MatchPhase.IN_ROUND || match.phase === MatchPhase.ROUND_JUDGING,
 );
-/** 准备阶段 / 倒计时阶段 / 回合进行阶段显示选手画面监控 */
+/** 准备阶段 / 倒计时阶段 / 回合进行阶段显示选手画面监控。
+ *  取消选图回到 PICK/TB_FORCE 后即使服务端仍是 PREP，也不显示三栏监控。 */
 const showPlayerMonitor = computed(
   () =>
-    match.phase === MatchPhase.PREP ||
     match.phase === MatchPhase.COUNTDOWN ||
-    match.phase === MatchPhase.IN_ROUND,
+    match.phase === MatchPhase.IN_ROUND ||
+    (match.phase === MatchPhase.PREP && draft.state.stage === "PREP"),
 );
 
 function updateMiddleWidth(): void {
