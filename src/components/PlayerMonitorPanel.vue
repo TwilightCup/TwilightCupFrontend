@@ -84,14 +84,14 @@ function refreshStream(side: "A" | "B"): void {
   --syn-text-dim: #a99bd6;
   background: var(--tc-bg-soft);
   border: 1px solid var(--tc-border);
-  border-radius: 10px;
-  padding: 12px 14px;
-  margin-bottom: 12px;
+  border-radius: 8px;
+  padding: 6px 8px;
+  margin-bottom: 0;
 }
 .monitor-grid {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
 }
 .monitor-side {
   min-width: 0;
@@ -104,8 +104,8 @@ function refreshStream(side: "A" | "B"): void {
 }
 .refresh-btn {
   position: absolute;
-  right: 10px;
-  bottom: 10px;
+  right: 8px;
+  bottom: 8px;
   width: 32px;
   height: 32px;
   border-radius: 8px;
