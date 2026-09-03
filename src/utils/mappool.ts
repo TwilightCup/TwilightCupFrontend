@@ -133,6 +133,7 @@ export function normalizeMappool(m: Mappool): Mappool {
     return {
       name: c.name,
       picks: c.picks.map((p) => normalizePick(p, kind)),
+      ct_tags: c.ct_tags,
     };
   });
   cats.sort((a, b) => {

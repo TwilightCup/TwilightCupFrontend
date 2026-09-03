@@ -79,12 +79,14 @@ const totalRows = computed(
     (groups.value.some((g) => g.kind === "CT") ? 1 : 0), // CT 词条板占一行
 );
 
-/** CT 候选词条：CT_TAG_BASE + （类别内含单关图时）Achievement */
+/** CT 候选词条：优先按当前图池 CT 类别配置；单关仍自动附带 Achievement；旧数据未配置时回退内置词条。 */
 const ctCandidates = computed(() => {
   const ct = groups.value.find((g) => g.kind === "CT");
   if (!ct) return [];
   const hasSingle = ct.picks.some((p) => p.type === PickType.SINGLE);
-  return ctTagsFor(hasSingle);
+  const base = ct.ctTags ? [...ct.ctTags] : ctTagsFor(hasSingle);
+  if (!hasSingle) return base;
+  return base.includes("Achievement") ? base : [...base, "Achievement"];
 });
 
 // ---- BP 状态（WS draft_state → director.draft） ----

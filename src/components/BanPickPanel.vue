@@ -4,7 +4,7 @@ import { useI18n } from "vue-i18n";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useDraftStore, type Side } from "@/stores/draft";
 import { useMatchStore } from "@/stores/match";
-import { MatchPhase, PickType, type Pick } from "@/api/types";
+import { MatchPhase, type Pick } from "@/api/types";
 import { categoryKindInfo } from "@/utils/format";
 
 /**
@@ -127,15 +127,12 @@ function isCtPick(p: Pick): boolean {
   return k === "CT" || k === "EX";
 }
 
-/** 词条候选：CT 过滤本场已 ban，EX 不受禁用词条约束；单关含 Achievement。 */
+/** 词条候选：按当前图池 CT 类别配置；CT 过滤本场已 ban，EX 不受禁用词条约束。 */
 const ctDialogOptions = computed<{ value: string; disabled: boolean }[]>(() => {
   const code = ctDialogCode.value;
   const p = code ? draft.pickByCode(code) : null;
-  const single = p?.type === PickType.SINGLE;
   const isEx = code ? draft.kindOfCode(code) === "EX" : false;
-  const known = single
-    ? [...draft.ctTagChoices, "Achievement"]
-    : [...draft.ctTagChoices];
+  const known = p ? draft.ctTagChoicesFor(p) : [];
   return known
     .filter((tg) => isEx || !draft.state.bannedTags.includes(tg))
     .map((tg) => ({

@@ -17,6 +17,7 @@ import { ElMessage } from "element-plus";
 import { api, ApiError } from "@/api/client";
 import {
   CategoryKind,
+  CT_TAG_ACHIEVEMENT,
   MatchPhase,
   MatchStatus,
   PickType,
@@ -142,13 +143,42 @@ export const useDraftStore = defineStore("draft", () => {
   // 派生：CT 词条 ban
   // =========================================================================
 
-  /** CT 词条禁用候选：固定枚举（CT 选图定义时不预录词条，由选手 pick 时再选）。 */
+  /** 当前图池 CT 类别显式配置的支持词条；None = 旧数据未配置（回退内置词条）。 */
+  const ctTagCategoryChoices = computed<string[] | null>(() => {
+    const cat = mappool.value?.categories.find(
+      (c) => categoryKindOf(c.name) === CategoryKind.CT,
+    );
+    return cat?.ct_tags ?? null;
+  });
+
+  /** CT 词条禁用候选：CT 类别当前支持的词条，但剔除 Achievement（词条禁用仍只针对基础词条）。 */
   const ctTagChoices = computed<string[]>(() => {
     const hasCT = mappool.value?.categories.some(
       (c) => categoryKindOf(c.name) === CategoryKind.CT,
     );
-    return hasCT ? [...CT_TAG_BASE] : [];
+    if (!hasCT) return [];
+    const explicit = ctTagCategoryChoices.value;
+    return explicit
+      ? explicit.filter((t) => t !== CT_TAG_ACHIEVEMENT)
+      : [...CT_TAG_BASE];
   });
+
+  /** 某选图词条候选：CT 按图池配置；EX/旧 CT 未配置回退内置词条（单关加 Achievement）。 */
+  function ctTagChoicesFor(pick: Pick): string[] {
+    const k = kindOfCode(pick.code);
+    if (k === CategoryKind.EX) {
+      return pick.type === PickType.SINGLE
+        ? [...CT_TAG_BASE, CT_TAG_ACHIEVEMENT]
+        : [...CT_TAG_BASE];
+    }
+    if (k === CategoryKind.CT) {
+      const base = ctTagCategoryChoices.value ?? [...CT_TAG_BASE];
+      const result = pick.type === PickType.SINGLE ? [...base, CT_TAG_ACHIEVEMENT] : [...base];
+      return [...new Set(result)];
+    }
+    return [];
+  }
+
   const tagBanDone = computed(() => state.tagBanActed.A && state.tagBanActed.B);
 
   // =========================================================================
@@ -700,6 +730,7 @@ export const useDraftStore = defineStore("draft", () => {
     lowRoller,
     ordersDecided,
     ctTagChoices,
+    ctTagChoicesFor,
     tagBanDone,
     draftSlots,
     currentSlot,

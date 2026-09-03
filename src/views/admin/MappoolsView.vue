@@ -7,11 +7,13 @@ import type { MappoolLibItem } from "@/api/types";
 import { categoryKindInfo, dateTime } from "@/utils/format";
 import { categoryKindOf } from "@/utils/mappool";
 import MappoolFormDialog from "@/components/admin/MappoolFormDialog.vue";
+import CustomTagsDialog from "@/components/admin/CustomTagsDialog.vue";
 
 const { t } = useI18n();
 const admin = useAdminStore();
 
 const dialogOpen = ref(false);
+const customTagsOpen = ref(false);
 const editing = ref<MappoolLibItem | null>(null);
 
 function openCreate(): void {
@@ -64,6 +66,7 @@ onMounted(() => {
         <span class="count">{{ $t('admin.mappools.count', { n: admin.mappools.length }) }}</span>
       </div>
       <div class="actions">
+        <el-button @click="customTagsOpen = true">{{ $t('admin.mappools.customTagsBtn') }}</el-button>
         <el-button :loading="admin.mappoolsLoading" @click="admin.loadMappools(true)">
           {{ $t('common.refresh') }}
         </el-button>
@@ -108,6 +111,7 @@ onMounted(() => {
     </el-table>
 
     <MappoolFormDialog v-model="dialogOpen" :mappool="editing" />
+    <CustomTagsDialog v-model="customTagsOpen" />
   </div>
 </template>
 

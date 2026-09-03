@@ -359,6 +359,8 @@ export interface PasswordChange {
 export interface Category {
   name: string;
   picks: Pick[];
+  /** CT 类别支持的词条（管理端词条库中的 name 列表；None=旧数据未配置，回退内置词条；[]=不支持词条） */
+  ct_tags?: string[] | null;
 }
 
 /** 图池：一场比赛所有可选项目的集合 */
@@ -408,6 +410,17 @@ export interface LevelCreate {
 export interface LevelUpdate {
   display_name?: string;
   logo?: string | null;
+}
+
+/** 词条库条目（后端 /admin/ct-tags，「词条管理」页维护）；name 唯一且不可改 */
+export interface CustomTag {
+  id: string;
+  name: string;
+  created_at: string;
+}
+
+export interface CustomTagCreate {
+  name: string;
 }
 
 export interface MatchOut {

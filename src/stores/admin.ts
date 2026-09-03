@@ -19,6 +19,8 @@ import type {
   AccountOut,
   AccountUpdate,
   BracketView,
+  CustomTag,
+  CustomTagCreate,
   FixtureAssignBody,
   FixtureCreateMatchBody,
   FixtureOut,
@@ -54,6 +56,10 @@ export const useAdminStore = defineStore("admin", () => {
   const levels = ref<Level[]>([]);
   const levelsLoading = ref(false);
   const levelsLoaded = ref(false);
+
+  const customTags = ref<CustomTag[]>([]);
+  const customTagsLoading = ref(false);
+  const customTagsLoaded = ref(false);
 
   const tournaments = ref<TournamentOut[]>([]);
   const tournamentsLoading = ref(false);
@@ -302,6 +308,48 @@ export const useAdminStore = defineStore("admin", () => {
       return true;
     } catch (e) {
       ElMessage.error(msgOf(e, tr("toast.deleteLevelFail")));
+      return false;
+    }
+  }
+
+  // ---- 词条库（「词条管理」页） ------------------------------------------
+
+  async function loadCustomTags(force = false): Promise<void> {
+    if (!auth.token) return;
+    if (customTagsLoaded.value && !force) return;
+    customTagsLoading.value = true;
+    try {
+      customTags.value = await api.listCustomTags(auth.token);
+      customTagsLoaded.value = true;
+    } catch (e) {
+      ElMessage.error(msgOf(e, tr("toast.loadCustomTagsFail")));
+    } finally {
+      customTagsLoading.value = false;
+    }
+  }
+
+  async function createCustomTag(body: CustomTagCreate): Promise<CustomTag | null> {
+    if (!auth.token) return null;
+    try {
+      const tag = await api.createCustomTag(body, auth.token);
+      customTags.value = [tag, ...customTags.value];
+      ElMessage.success(tr("toast.createCustomTagOk", { name: tag.name }));
+      return tag;
+    } catch (e) {
+      ElMessage.error(msgOf(e, tr("toast.createCustomTagFail")));
+      return null;
+    }
+  }
+
+  async function deleteCustomTag(id: string): Promise<boolean> {
+    if (!auth.token) return false;
+    try {
+      await api.deleteCustomTag(id, auth.token);
+      customTags.value = customTags.value.filter((x) => x.id !== id);
+      ElMessage.success(tr("toast.deleteCustomTagOk"));
+      return true;
+    } catch (e) {
+      ElMessage.error(msgOf(e, tr("toast.deleteCustomTagFail")));
       return false;
     }
   }
@@ -642,6 +690,9 @@ export const useAdminStore = defineStore("admin", () => {
     levels,
     levelsLoading,
     levelsLoaded,
+    customTags,
+    customTagsLoading,
+    customTagsLoaded,
     tournaments,
     tournamentsLoading,
     tournamentsLoaded,
@@ -665,6 +716,9 @@ export const useAdminStore = defineStore("admin", () => {
     createLevel,
     updateLevel,
     deleteLevel,
+    loadCustomTags,
+    createCustomTag,
+    deleteCustomTag,
     loadTournaments,
     loadTournament,
     createTournament,

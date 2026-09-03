@@ -13,9 +13,12 @@ import {
 } from "@/api/types";
 import { categoryKindOf } from "@/utils/mappool";
 import { categoryKindInfo } from "@/utils/format";
+import { useAdminStore } from "@/stores/admin";
 import MappoolPickEditor from "./MappoolPickEditor.vue";
 
 const { t } = useI18n();
+const admin = useAdminStore();
+void admin.loadCustomTags();
 
 /**
  * 图池编辑器：左侧类别侧栏 → 右侧当前类别选图。
@@ -47,6 +50,22 @@ const selectedCategory = computed(() =>
     ? props.mappool.categories[selectedIndex.value]
     : null,
 );
+
+/** CT 类别支持词条的选择值（旧数据未配置时回退展示词条库全部）。 */
+const selectedCtTags = computed<string[]>({
+  get() {
+    const cat = selectedCategory.value;
+    if (!cat || categoryKindOf(cat.name) !== CategoryKind.CT) return [];
+    if (cat.ct_tags) return [...cat.ct_tags];
+    return admin.customTags.map((x) => x.name);
+  },
+  set(v) {
+    const cat = selectedCategory.value;
+    if (cat && categoryKindOf(cat.name) === CategoryKind.CT) {
+      cat.ct_tags = [...v];
+    }
+  },
+});
 
 watch(
   () => props.mappool,
@@ -106,6 +125,12 @@ function addCategory(): void {
   props.mappool.categories.push({
     name,
     picks: [],
+    // 新建 CT 类别默认启用词条库全部词条；管理端可再缩减。
+    // 词条库尚未加载完成时保持 null（旧数据回退内置词条），避免误写为空列表。
+    ct_tags:
+      name === CategoryKind.CT && admin.customTagsLoaded
+        ? admin.customTags.map((x) => x.name)
+        : null,
   });
   selectedIndex.value = props.mappool.categories.length - 1;
   newCategoryKind.value = "";
@@ -237,6 +262,34 @@ const canAddCategory = computed(() => props.mappool.categories.length < CATEGORY
         </div>
 
         <template v-else>
+          <div
+            v-if="categoryKindOf(selectedCategory.name) === CategoryKind.CT"
+            class="ct-tag-card"
+          >
+            <div class="ct-tag-card-head">
+              <span class="ct-tag-card-title">{{ $t("mappoolEditor.ctTagTitle") }}</span>
+              <span class="ct-tag-card-hint">{{ $t("mappoolEditor.ctTagHint") }}</span>
+            </div>
+            <el-select
+              v-model="selectedCtTags"
+              multiple
+              collapse-tags
+              :placeholder="$t('mappoolEditor.ctTagPlaceholder')"
+              class="ct-tag-select"
+              :disabled="admin.customTags.length === 0"
+            >
+              <el-option
+                v-for="tag in admin.customTags"
+                :key="tag.id"
+                :value="tag.name"
+                :label="tag.name"
+              />
+            </el-select>
+            <p v-if="admin.customTags.length === 0" class="ct-tag-empty">
+              {{ $t("mappoolEditor.ctTagEmpty") }}
+            </p>
+          </div>
+
           <div class="picks">
             <MappoolPickEditor
               v-for="(pick, pi) in selectedCategory.picks"
@@ -405,6 +458,39 @@ const canAddCategory = computed(() => props.mappool.categories.length < CATEGORY
 }
 .main-empty p {
   margin: 0;
+}
+.ct-tag-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--tc-bg);
+  border: 1px solid var(--tc-border);
+  border-radius: 10px;
+}
+.ct-tag-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ct-tag-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tc-text);
+}
+.ct-tag-card-hint {
+  font-size: 11px;
+  color: var(--tc-text-dim);
+}
+.ct-tag-select {
+  width: 100%;
+}
+.ct-tag-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--tc-text-dim);
 }
 .picks {
   display: flex;

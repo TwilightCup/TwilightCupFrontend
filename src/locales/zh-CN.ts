@@ -624,11 +624,22 @@ const messages = {
   "admin.mappools.count": "共 {n} 个图池",
   "admin.mappools.empty": "暂无图池，点击右上角「新建图池」创建",
   "admin.mappools.createBtn": "新建图池",
+  "admin.mappools.customTagsBtn": "词条管理",
   "admin.mappools.colName": "图池名称",
   "admin.mappools.colPickCount": "选图数",
   "admin.mappools.colCategories": "类别",
   "admin.mappools.deleteConfirmMsg": "确认删除图池「{name}」？已用此图池创建的比赛不受影响（内嵌保留）。",
   "admin.mappools.deleteConfirmTitle": "删除图池",
+
+  // ── 词条管理（CustomTagsDialog） ───────────────────────────────────────
+  "customTags.title": "词条管理",
+  "customTags.hint": "维护图池 CT 类别可选的词条；图池编辑器中的 CT 类别会从这里的词条中进行选择。删除词条不影响已引用它的图池/比赛。",
+  "customTags.namePlaceholder": "输入词条原文",
+  "customTags.addBtn": "添加",
+  "customTags.empty": "暂无词条，先添加一个词条",
+  "customTags.nameRequired": "请输入词条名称",
+  "customTags.deleteConfirmMsg": "确认删除词条「{name}」？已引用它的图池/比赛不受影响。",
+  "customTags.deleteConfirmTitle": "删除词条",
 
   // ── 关卡管理（LevelsView） ───────────────────────────────────────────
   "admin.levels.title": "关卡管理",
@@ -802,6 +813,10 @@ const messages = {
   "mappoolEditor.tbOnlyOne": "TB 类别仅 1 个选图",
   "mappoolEditor.addCategoryBtn": "+ 添加类别",
   "mappoolEditor.maxCategories": "6 个类别已满",
+  "mappoolEditor.ctTagTitle": "CT 词条",
+  "mappoolEditor.ctTagHint": "选择当前图池 CT 类别支持的词条（CP 类别仍固定 Checkpoint，不受影响）",
+  "mappoolEditor.ctTagPlaceholder": "选择支持的词条（可不选）",
+  "mappoolEditor.ctTagEmpty": "词条库为空，请先在「词条管理」中添加词条",
 
   // ── 图池表单（MappoolFormDialog） ────────────────────────────────────
   "mappoolForm.titleEdit": "编辑图池",
@@ -980,6 +995,11 @@ const messages = {
   "toast.updateMappoolFail": "更新图池失败",
   "toast.deleteMappoolOk": "已删除图池",
   "toast.deleteMappoolFail": "删除图池失败",
+  "toast.loadCustomTagsFail": "加载词条列表失败",
+  "toast.createCustomTagOk": "已添加词条「{name}」",
+  "toast.createCustomTagFail": "添加词条失败",
+  "toast.deleteCustomTagOk": "已删除词条",
+  "toast.deleteCustomTagFail": "删除词条失败",
   "toast.loadLevelsFail": "加载关卡列表失败",
   "toast.createLevelOk": "已创建关卡「{name}」",
   "toast.createLevelFail": "创建关卡失败",

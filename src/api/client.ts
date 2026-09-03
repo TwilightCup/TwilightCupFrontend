@@ -9,6 +9,8 @@ import type {
   AccountUpdate,
   BracketView,
   ChatMessage,
+  CustomTag,
+  CustomTagCreate,
   DisplayNameUpdate,
   FixtureAssignBody,
   FixtureCreateMatchBody,
@@ -409,6 +411,26 @@ export const api = {
 
   async deleteMappool(mappoolId: string, token: string): Promise<void> {
     await request<void>(`/admin/mappools/${encodeURIComponent(mappoolId)}`, {
+      method: "DELETE",
+      token,
+    });
+  },
+
+  // ---- 词条库（管理员）---------------------------------------------------
+  listCustomTags(token: string): Promise<CustomTag[]> {
+    return request<CustomTag[]>("/admin/ct-tags", { method: "GET", token });
+  },
+
+  createCustomTag(body: CustomTagCreate, token: string): Promise<CustomTag> {
+    return request<CustomTag>("/admin/ct-tags", {
+      method: "POST",
+      token,
+      body: JSON.stringify(body),
+    });
+  },
+
+  async deleteCustomTag(tagId: string, token: string): Promise<void> {
+    await request<void>(`/admin/ct-tags/${encodeURIComponent(tagId)}`, {
       method: "DELETE",
       token,
     });

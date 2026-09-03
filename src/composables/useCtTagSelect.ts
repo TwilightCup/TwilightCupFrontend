@@ -2,9 +2,10 @@
  * 裁判端词条选图逻辑（PrepPanel / BanPickPanel 共用）。
  *
  * 所选 pick 为 CT / EX 类别时可选 0-2 个词条，随 referee_select_pick 的 tags
- * 字段提交。选项 = CT_TAGS（单关另加 Achievement）；CT 过滤本场词条 ban 环节
- * （draft.bannedTags）已禁用的词条，EX 不受禁用词条约束；冲突对（Checkpoint +
- * No Checkpoint）互相置灰。CP 类别不显示选择器，提交时自动携带 Checkpoint。
+ * 字段提交。CT 选项按当前图池 CT 类别的 `ct_tags` 配置（旧图池回退内置枚举，
+ * 单关另加 Achievement）；CT 过滤本场词条 ban 环节（draft.bannedTags）已禁用
+ * 的词条，EX 不受禁用词条约束；冲突对（Checkpoint + No Checkpoint）互相置灰。
+ * CP 类别不显示选择器，提交时自动携带 Checkpoint。
  * 词条名沿用原文（不翻译），仅提示语走 i18n。
  */
 import { computed, ref, watch } from "vue";
@@ -46,6 +47,15 @@ export function useCtTagSelect() {
     () => match.pickInfo[match.pendingPickCode ?? ""]?.type === PickType.SINGLE,
   );
 
+  /** 当前选中的 Pick（词条候选按图池 CT 类别配置；无图池时回退全局函数）。 */
+  const currentPick = computed(() => draft.pickByCode(match.pendingPickCode ?? ""));
+
+  const tagChoices = computed<string[]>(() => {
+    const p = currentPick.value;
+    if (p) return draft.ctTagChoicesFor(p);
+    return ctTagsFor(isSinglePick.value);
+  });
+
   /** CT/EX 单关：重试次数改由裁判选图时指定（必填）。 */
   const needsRetry = computed(() => {
     const cat = pickCategory.value;
@@ -54,7 +64,7 @@ export function useCtTagSelect() {
 
   /** 词条可选项（CT 过滤已 ban，EX 不过滤）；与已选词条有冲突的标记 disabled。 */
   const tagOptions = computed<{ value: string; disabled: boolean }[]>(() => {
-    const all = ctTagsFor(isSinglePick.value).filter(
+    const all = tagChoices.value.filter(
       (t) => isExPick.value || !draft.state.bannedTags.includes(t),
     );
     return all.map((t) => ({

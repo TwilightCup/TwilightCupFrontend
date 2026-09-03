@@ -620,11 +620,22 @@ const messages: MessageSchema = {
   "admin.mappools.count": "{n} mappools",
   "admin.mappools.empty": "No mappools yet — click \"New mappool\" in the top right to create one",
   "admin.mappools.createBtn": "New mappool",
+  "admin.mappools.customTagsBtn": "Custom Tags",
   "admin.mappools.colName": "Mappool name",
   "admin.mappools.colPickCount": "Picks",
   "admin.mappools.colCategories": "Categories",
   "admin.mappools.deleteConfirmMsg": "Delete mappool \"{name}\"? Matches already created with it are unaffected (embedded snapshot retained).",
   "admin.mappools.deleteConfirmTitle": "Delete mappool",
+
+  // ── custom tags (CustomTagsDialog) ─────────────────────────────────────
+  "customTags.title": "Custom Tags",
+  "customTags.hint": "Maintain the tags selectable for CT categories. The mappool editor picks from these tags for each mappool's CT category. Deleting a tag does not affect mappools/matches already referencing it.",
+  "customTags.namePlaceholder": "Enter tag text",
+  "customTags.addBtn": "Add",
+  "customTags.empty": "No tags yet — add one first",
+  "customTags.nameRequired": "Please enter a tag name",
+  "customTags.deleteConfirmMsg": "Delete tag \"{name}\"? Mappools/matches already referencing it are unaffected.",
+  "customTags.deleteConfirmTitle": "Delete tag",
 
   // ── level library (LevelsView) ──────────────────────────────────────
   "admin.levels.title": "Level library",
@@ -798,6 +809,10 @@ const messages: MessageSchema = {
   "mappoolEditor.tbOnlyOne": "TB category has exactly 1 pick",
   "mappoolEditor.addCategoryBtn": "+ Add category",
   "mappoolEditor.maxCategories": "All 6 categories used",
+  "mappoolEditor.ctTagTitle": "CT tags",
+  "mappoolEditor.ctTagHint": "Select the tags supported by this mappool's CT category (CP still auto-carries Checkpoint and is unaffected)",
+  "mappoolEditor.ctTagPlaceholder": "Select supported tags (optional)",
+  "mappoolEditor.ctTagEmpty": "The tag library is empty — add tags in \"Custom Tags\" first",
 
   // ── mappool form ─────────────────────────────────────────────────────
   "mappoolForm.titleEdit": "Edit mappool",
@@ -976,6 +991,11 @@ const messages: MessageSchema = {
   "toast.updateMappoolFail": "Failed to update mappool",
   "toast.deleteMappoolOk": "Mappool deleted",
   "toast.deleteMappoolFail": "Failed to delete mappool",
+  "toast.loadCustomTagsFail": "Failed to load custom tags",
+  "toast.createCustomTagOk": "Tag \"{name}\" added",
+  "toast.createCustomTagFail": "Failed to add tag",
+  "toast.deleteCustomTagOk": "Tag deleted",
+  "toast.deleteCustomTagFail": "Failed to delete tag",
   "toast.loadLevelsFail": "Failed to load levels",
   "toast.createLevelOk": "Created level \"{name}\"",
   "toast.createLevelFail": "Failed to create level",

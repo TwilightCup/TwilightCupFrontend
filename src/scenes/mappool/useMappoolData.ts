@@ -21,6 +21,8 @@ import { MOCK_MAPPOOL } from "@/scenes/mock/mappool";
 export interface MappoolGroup {
   kind: CategoryKind;
   picks: Pick[];
+  /** CT 类别显式配置的支持词条；None=旧数据未配置。 */
+  ctTags?: string[] | null;
 }
 
 export function useMappoolData() {
@@ -57,21 +59,29 @@ export function useMappoolData() {
 
 /** 按 CATEGORY_KINDS 顺序展平图池为分组（未知类别排在最后） */
 function flatten(pool: Mappool): MappoolGroup[] {
-  const byKind = new Map<CategoryKind, Pick[]>();
-  for (const k of CATEGORY_KINDS) byKind.set(k, []);
+  interface Bucket {
+    picks: Pick[];
+    ctTags?: string[] | null;
+  }
+  const byKind = new Map<CategoryKind, Bucket>();
+  for (const k of CATEGORY_KINDS) byKind.set(k, { picks: [], ctTags: null });
   const etc: Pick[] = [];
 
   for (const cat of pool.categories as Category[]) {
     const kind = (cat.name?.toUpperCase() as CategoryKind) ?? "";
     const bucket = byKind.get(kind);
-    if (bucket) bucket.push(...cat.picks);
-    else etc.push(...cat.picks);
+    if (bucket) {
+      bucket.picks.push(...cat.picks);
+      bucket.ctTags = cat.ct_tags ?? null;
+    } else {
+      etc.push(...cat.picks);
+    }
   }
 
   const out: MappoolGroup[] = [];
   for (const k of CATEGORY_KINDS) {
-    const picks = byKind.get(k) ?? [];
-    if (picks.length) out.push({ kind: k, picks });
+    const bucket = byKind.get(k);
+    if (bucket && bucket.picks.length) out.push({ kind: k, picks: bucket.picks, ctTags: bucket.ctTags });
   }
   if (etc.length) out.push({ kind: "EX" as CategoryKind, picks: etc });
   return out;
