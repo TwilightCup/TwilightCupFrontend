@@ -810,7 +810,7 @@ const messages: MessageSchema = {
   "mappoolEditor.addCategoryBtn": "+ Add category",
   "mappoolEditor.maxCategories": "All 6 categories used",
   "mappoolEditor.ctTagTitle": "CT tags",
-  "mappoolEditor.ctTagHint": "Select the tags supported by this mappool's CT category (CP still auto-carries Checkpoint and is unaffected)",
+  "mappoolEditor.selectAllCtTags": "Select all",
   "mappoolEditor.ctTagPlaceholder": "Select supported tags (optional)",
   "mappoolEditor.ctTagEmpty": "The tag library is empty — add tags in \"Custom Tags\" first",
 

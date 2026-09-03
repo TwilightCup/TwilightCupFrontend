@@ -814,7 +814,7 @@ const messages = {
   "mappoolEditor.addCategoryBtn": "+ 添加类别",
   "mappoolEditor.maxCategories": "6 个类别已满",
   "mappoolEditor.ctTagTitle": "CT 词条",
-  "mappoolEditor.ctTagHint": "选择当前图池 CT 类别支持的词条（CP 类别仍固定 Checkpoint，不受影响）",
+  "mappoolEditor.selectAllCtTags": "全选",
   "mappoolEditor.ctTagPlaceholder": "选择支持的词条（可不选）",
   "mappoolEditor.ctTagEmpty": "词条库为空，请先在「词条管理」中添加词条",
 

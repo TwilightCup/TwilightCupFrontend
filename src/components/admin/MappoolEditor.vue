@@ -67,6 +67,20 @@ const selectedCtTags = computed<string[]>({
   },
 });
 
+const allCtTagNames = computed(() => admin.customTags.map((x) => x.name));
+const isAllCtTagsSelected = computed(
+  () => allCtTagNames.value.length > 0 && allCtTagNames.value.every((t) => selectedCtTags.value.includes(t)),
+);
+const isCtTagSelectionIndeterminate = computed(() => {
+  const selected = selectedCtTags.value.filter((t) => allCtTagNames.value.includes(t));
+  return selected.length > 0 && !isAllCtTagsSelected.value;
+});
+
+function toggleAllCtTags(value: string | number | boolean): void {
+  const on = value === true || value === 1 || value === "true";
+  selectedCtTags.value = on ? [...allCtTagNames.value] : [];
+}
+
 watch(
   () => props.mappool,
   () => {
@@ -268,7 +282,6 @@ const canAddCategory = computed(() => props.mappool.categories.length < CATEGORY
           >
             <div class="ct-tag-card-head">
               <span class="ct-tag-card-title">{{ $t("mappoolEditor.ctTagTitle") }}</span>
-              <span class="ct-tag-card-hint">{{ $t("mappoolEditor.ctTagHint") }}</span>
             </div>
             <el-select
               v-model="selectedCtTags"
@@ -278,6 +291,16 @@ const canAddCategory = computed(() => props.mappool.categories.length < CATEGORY
               class="ct-tag-select"
               :disabled="admin.customTags.length === 0"
             >
+              <template #header>
+                <el-checkbox
+                  :model-value="isAllCtTagsSelected"
+                  :indeterminate="isCtTagSelectionIndeterminate"
+                  :disabled="admin.customTags.length === 0"
+                  @change="toggleAllCtTags"
+                >
+                  {{ $t("mappoolEditor.selectAllCtTags") }}
+                </el-checkbox>
+              </template>
               <el-option
                 v-for="tag in admin.customTags"
                 :key="tag.id"
@@ -479,10 +502,6 @@ const canAddCategory = computed(() => props.mappool.categories.length < CATEGORY
   font-size: 13px;
   font-weight: 600;
   color: var(--tc-text);
-}
-.ct-tag-card-hint {
-  font-size: 11px;
-  color: var(--tc-text-dim);
 }
 .ct-tag-select {
   width: 100%;
