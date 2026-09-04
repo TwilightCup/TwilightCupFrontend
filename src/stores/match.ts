@@ -55,6 +55,12 @@ export interface ChatLine {
   systemKind?: string;
 }
 
+/** 某席最近一条 UTC 时间戳（receivedAt = 本地接收时刻） */
+export interface UtcTimestamp {
+  utcMs: number;
+  receivedAt: number;
+}
+
 type Side = "A" | "B";
 
 function freshPlayer(accountId = ""): PlayerLive {
@@ -149,6 +155,9 @@ export const useMatchStore = defineStore("match", () => {
     A: freshPlayer(),
     B: freshPlayer(),
   });
+  // 双席最近一条 UTC 时间戳（裁判侧时钟同步/监控用；连接级遥测，不随回合清空）
+  const utcA = ref<UtcTimestamp | null>(null);
+  const utcB = ref<UtcTimestamp | null>(null);
 
   // --- 比分 ---
   const winsA = ref(0);
@@ -291,6 +300,9 @@ export const useMatchStore = defineStore("match", () => {
         if (msg.player_a_name) playerNames.A = msg.player_a_name;
         if (msg.player_b_name) playerNames.B = msg.player_b_name;
         authErrorMessage.value = "";
+        // 新连接/换场先清旧 UTC 遥测，随后服务端握手会补发当前双方最近值
+        utcA.value = null;
+        utcB.value = null;
         void loadMatchDetail();
         void loadHistory();
         break;
@@ -333,6 +345,17 @@ export const useMatchStore = defineStore("match", () => {
         // player_status 会随后带全量状态；此处仅作最小更新兜底
         applyLevelTimeUpdate(msg.seat, msg);
         break;
+      case "utc_timestamp": {
+        // 选手 UTC 时间戳：连接级遥测，按席覆盖最近一条（服务端已按席暂存，
+        // 晚连握手里也会先补发）。用于裁判侧时钟同步/监控展示。
+        const sample: UtcTimestamp = {
+          utcMs: msg.utc_ms,
+          receivedAt: Date.now(),
+        };
+        if (msg.seat === "PLAYER_A") utcA.value = sample;
+        else if (msg.seat === "PLAYER_B") utcB.value = sample;
+        break;
+      }
       case "round_result":
         applyRoundResult(msg.round_id, msg.verdict, msg.score_a_ms ?? null, msg.score_b_ms ?? null);
         break;
@@ -750,6 +773,8 @@ export const useMatchStore = defineStore("match", () => {
     bPreload.value = "absent";
     players.A = freshPlayer();
     players.B = freshPlayer();
+    utcA.value = null;
+    utcB.value = null;
     winsA.value = 0;
     winsB.value = 0;
     matchWinner.value = null;
@@ -789,6 +814,8 @@ export const useMatchStore = defineStore("match", () => {
     aPreload,
     bPreload,
     players,
+    utcA,
+    utcB,
     playerNames,
     winsA,
     winsB,

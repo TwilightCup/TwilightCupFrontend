@@ -12,7 +12,7 @@ import StreamFrame from "@/scenes/match/StreamFrame.vue";
 import AuthFailMask from "@/components/AuthFailMask.vue";
 import { requestSpeedrunRefresh } from "@/api/speedrun";
 import { AttemptStatus, MatchPhase } from "@/api/types";
-import { formatMs, phaseInfo, playerStatusInfo, preloadTagInfo, shortTime } from "@/utils/format";
+import { formatMs, formatUtcTime, phaseInfo, playerStatusInfo, preloadTagInfo, shortTime } from "@/utils/format";
 import {
   DEFAULT_SCENE,
   isSceneKey,
@@ -898,11 +898,13 @@ onUnmounted(() => {
               <span class="who tc-a">A · {{ director.nameOf("A") }}</span>
               <span>{{ progText("A") }}</span>
               <span class="dim">{{ $t("directorView.bestTimeLabel", { time: formatMs(bestMs("A")) }) }}</span>
+              <span class="dim utc">{{ $t("directorView.utcSyncLabel", { time: director.utcA ? formatUtcTime(director.utcA.utcMs) : "—" }) }}</span>
             </div>
             <div class="prog-row">
               <span class="who tc-b">B · {{ director.nameOf("B") }}</span>
               <span>{{ progText("B") }}</span>
               <span class="dim">{{ $t("directorView.bestTimeLabel", { time: formatMs(bestMs("B")) }) }}</span>
+              <span class="dim utc">{{ $t("directorView.utcSyncLabel", { time: director.utcB ? formatUtcTime(director.utcB.utcMs) : "—" }) }}</span>
             </div>
           </div>
         </div>

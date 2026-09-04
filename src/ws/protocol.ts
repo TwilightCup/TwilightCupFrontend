@@ -87,6 +87,11 @@ export interface ClientReconnectResync {
   type: "reconnect_resync";
   round_id: string;
 }
+/** 选手端 UTC 时间戳周期上报（连接后按固定间隔发送；utc_ms 为 Unix UTC 毫秒） */
+export interface ClientUtcTimestamp {
+  type: "utc_timestamp";
+  utc_ms: number;
+}
 /** 选手端预载状态上报（仅选手席位，PREP 阶段有意义；SINGLE 合集报 "na"） */
 export interface ClientPreloadReport {
   type: "preload_report";
@@ -142,6 +147,7 @@ export type ClientMessage =
   | ClientProjectComplete
   | ClientForfeitSignal
   | ClientReconnectResync
+  | ClientUtcTimestamp
   | ClientPreloadReport
   | ClientDraftSync
   | ClientDirectorCommand;
@@ -213,6 +219,10 @@ export const send = {
   reconnectResync: (round_id: string): ClientReconnectResync => ({
     type: "reconnect_resync",
     round_id,
+  }),
+  utcTimestamp: (utcMs: number): ClientUtcTimestamp => ({
+    type: "utc_timestamp",
+    utc_ms: utcMs,
   }),
   // ---- 裁判端 ban/pick 草稿上报（转发给导播）----
   draftSync: (state: Record<string, unknown>): ClientDraftSync => ({
@@ -395,6 +405,17 @@ export interface SrvLiveTime {
   /** 现实/墙钟累计（毫秒）；选手端提供方支持 Real Time 时携带，可能为 null */
   real_time_ms?: number | null;
 }
+/**
+ * 选手 UTC 时间戳中转（连接后按固定间隔；仅裁判与全体导播收到，选手互不感知）。
+ * 服务端按席暂存最近一条，裁判/导播连入时握手补发双方；用于时钟偏移/同步显示。
+ * 原始上报（C→S utc_timestamp）仅选手发送，裁判/导播前端只消费。
+ */
+export interface SrvUtcTimestamp {
+  type: "utc_timestamp";
+  seat: SeatName;
+  /** Unix UTC 毫秒时间戳 */
+  utc_ms: number;
+}
 export interface SrvRoundResult {
   type: "round_result";
   round_id: string;
@@ -474,6 +495,7 @@ export type ServerMessage =
   | SrvLevelTimeUpdate
   | SrvSubsegmentGap
   | SrvLiveTime
+  | SrvUtcTimestamp
   | SrvRoundResult
   | SrvCumulativeScore
   | SrvMatchEnd

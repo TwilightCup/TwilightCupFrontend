@@ -226,6 +226,15 @@ export function shortTime(iso?: string | null): string {
   return d.toLocaleTimeString(currentLocaleTag(), { hour12: false });
 }
 
+/** Unix UTC 毫秒时间戳 → UTC HH:MM:SS；null/undefined → "N/A" */
+export function formatUtcTime(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined || Number.isNaN(ms)) return t("format.na");
+  return new Date(ms).toLocaleTimeString(currentLocaleTag(), {
+    hour12: false,
+    timeZone: "UTC",
+  });
+}
+
 /** 日期时间（YYYY-MM-DD HH:MM） */
 export function dateTime(iso?: string | null): string {
   if (!iso) return t("common.dash");

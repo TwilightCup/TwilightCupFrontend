@@ -339,6 +339,7 @@ const messages: MessageSchema = {
   "playerStatusCard.singleAttempt": "Single-level attempts",
   "playerStatusCard.attemptIndex": "Attempt {n}",
   "playerStatusCard.waiting": "Waiting for player timing data…",
+  "playerStatusCard.utcSync": "UTC sync",
 
   // ── counter ──────────────────────────────────────────────────────────
   "counter.title": "Standalone timer",
@@ -496,6 +497,7 @@ const messages: MessageSchema = {
   "directorView.noRoundYet": "No round yet",
   "directorView.bothProgressTitle": "Both players' progress",
   "directorView.bestTimeLabel": "Best {time}",
+  "directorView.utcSyncLabel": "UTC {time}",
   "directorView.copyOverlayBtn": "Copy link",
   "directorView.overlayNotReady": "Not connected yet, generating link",
   "directorView.overlayCopied": "Stage link copied — paste it into the OBS browser source",

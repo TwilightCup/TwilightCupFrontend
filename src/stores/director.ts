@@ -78,6 +78,13 @@ export interface LiveTime {
   receivedAt: number;
 }
 
+/** 某席最近一条 UTC 时间戳（receivedAt = 本地接收时刻） */
+export interface UtcTimestamp {
+  /** Unix UTC 毫秒时间戳（选手端上报） */
+  utcMs: number;
+  receivedAt: number;
+}
+
 const MAX_LOG = 200;
 
 function clock(): string {
@@ -180,6 +187,10 @@ export const useDirectorStore = defineStore("director", () => {
    */
   const liveTimeA = ref<LiveTime | null>(null);
   const liveTimeB = ref<LiveTime | null>(null);
+  // 双席最近一条 UTC 时间戳（连接级遥测，不随回合清空；服务端按席暂存并
+  // 在裁判/导播连入时握手补发，用于时钟偏移/同步显示）
+  const utcA = ref<UtcTimestamp | null>(null);
+  const utcB = ref<UtcTimestamp | null>(null);
 
   socket.onStatusChange = (s) => {
     connStatus.value = s;
@@ -220,6 +231,9 @@ export const useDirectorStore = defineStore("director", () => {
         if (msg.player_a_name) nameA.value = msg.player_a_name;
         if (msg.player_b_name) nameB.value = msg.player_b_name;
         authError.value = "";
+        // 新连接/换场先清旧 UTC 遥测，随后服务端握手会补发当前双方最近值
+        utcA.value = null;
+        utcB.value = null;
         void loadMeta();
         break;
       case "auth_error":
@@ -316,6 +330,17 @@ export const useDirectorStore = defineStore("director", () => {
         };
         if (msg.seat === "PLAYER_A") liveTimeA.value = sample;
         else if (msg.seat === "PLAYER_B") liveTimeB.value = sample;
+        break;
+      }
+      case "utc_timestamp": {
+        // 选手 UTC 时间戳：连接级遥测，按席覆盖最近一条（服务端已按席暂存，
+        // 晚连握手里也会先补发）。用于裁判/导播侧时钟偏移/同步展示。
+        const sample: UtcTimestamp = {
+          utcMs: msg.utc_ms,
+          receivedAt: Date.now(),
+        };
+        if (msg.seat === "PLAYER_A") utcA.value = sample;
+        else if (msg.seat === "PLAYER_B") utcB.value = sample;
         break;
       }
       case "round_result":
@@ -538,6 +563,10 @@ export const useDirectorStore = defineStore("director", () => {
   function liveTimeOf(side: "A" | "B"): LiveTime | null {
     return side === "A" ? liveTimeA.value : liveTimeB.value;
   }
+  /** 某席最近一条 UTC 时间戳（无上报为 null） */
+  function utcOf(side: "A" | "B"): UtcTimestamp | null {
+    return side === "A" ? utcA.value : utcB.value;
+  }
 
   /**
    * 场景独立入口页链接（stage.html / mappool.html 等，页面名不带斜杠）：
@@ -606,6 +635,9 @@ export const useDirectorStore = defineStore("director", () => {
     // 双席 live_time 实时计时（主计时器实时走表数据源）
     liveTimeA,
     liveTimeB,
+    // 双席 UTC 时间戳（时钟同步显示数据源）
+    utcA,
+    utcB,
     // 派生 / 动作
     isMulti,
     matchEnded,
@@ -622,5 +654,6 @@ export const useDirectorStore = defineStore("director", () => {
     nameOf,
     playerOf,
     liveTimeOf,
+    utcOf,
   };
 });

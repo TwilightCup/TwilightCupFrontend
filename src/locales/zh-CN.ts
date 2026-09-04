@@ -343,6 +343,7 @@ const messages = {
   "playerStatusCard.singleAttempt": "单关尝试",
   "playerStatusCard.attemptIndex": "尝试 {n}",
   "playerStatusCard.waiting": "等待选手上报计时数据…",
+  "playerStatusCard.utcSync": "UTC 同步",
 
   // ── CounterWidget ────────────────────────────────────────────────────
   "counter.title": "独立倒计时器",
@@ -500,6 +501,7 @@ const messages = {
   "directorView.noRoundYet": "尚未进入回合",
   "directorView.bothProgressTitle": "双方进度",
   "directorView.bestTimeLabel": "最佳 {time}",
+  "directorView.utcSyncLabel": "UTC {time}",
   "directorView.copyOverlayBtn": "复制链接",
   "directorView.overlayNotReady": "尚未连接，链接生成中",
   "directorView.overlayCopied": "舞台链接已复制，粘贴到 OBS 浏览器源",
