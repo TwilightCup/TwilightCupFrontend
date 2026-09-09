@@ -2,18 +2,20 @@
 /**
  * synthwave2「水面浪潮2」全屏 WebGL 背景。
  *
- * 这是对原版 synthwave 预设的完整 WebGL 重绘：天空、太阳、远山、星星、水下网格
- * 和水面都在同一个 fragment shader 里程序化生成，因此水面倒影可以直接按地平线
- * 镜像采样同一套场景函数，不会出现 DOM 倒影和真实场景对不上的问题。
+ * 上半屏（天空 / 远山 / 太阳）由 Canvas2D 按原版 SVG/CSS 精确绘制成纹理；
+ * WebGL fragment shader 负责天空显示、程序化闪烁星星、水面波纹 / 平面反射 /
+ * 折射网格 / 高光与暗角。这样天空轮廓和颜色能最大程度还原原版，水面则保留
+ * 完整的实时着色器效果。
  *
  * 兼容性策略：
- *  - 只申请 WebGL1，使用 GLSL ES 1.00，尽量兼容旧版 OBS CEF；
+ *  - 只申请 WebGL1，使用 GLSL ES 1.00；
  *  - 初始化失败 / 着色器编译失败 / WebGL context lost 时向父组件 emit `failed`，
- *    父组件会退回现有 CSS/SVG 水面，保证 OBS 不黑屏；
- *  - 内部渲染分辨率按 DPR 上限 1.5 控制，避免 OBS 同时编码时 GPU 压力过大。
+ *    父组件退回现有 CSS/SVG 水面，保证不黑屏；
+ *  - 内部渲染分辨率按 DPR 上限 1.5 控制，避免同时编码时 GPU 压力过大。
  */
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { WATER_FRAGMENT_SHADER, WATER_VERTEX_SHADER } from "./waterShaderSources";
+import { createWaterSkyCanvas } from "./waterSkyTexture";
 
 const emit = defineEmits<{ (e: "failed"): void }>();
 
@@ -22,9 +24,11 @@ const canvasEl = ref<HTMLCanvasElement | null>(null);
 let gl: WebGLRenderingContext | null = null;
 let program: WebGLProgram | null = null;
 let buffer: WebGLBuffer | null = null;
+let skyTexture: WebGLTexture | null = null;
 let positionLocation = -1;
 let timeLocation: WebGLUniformLocation | null = null;
 let resolutionLocation: WebGLUniformLocation | null = null;
+let skyTextureLocation: WebGLUniformLocation | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let rafId = 0;
 let running = false;
@@ -125,18 +129,53 @@ function setupGL(): boolean {
   gl.enableVertexAttribArray(positionLocation);
   gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
 
+  skyTexture = gl.createTexture();
+  if (!skyTexture) return false;
+  gl.bindTexture(gl.TEXTURE_2D, skyTexture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texImage2D(
+    gl.TEXTURE_2D,
+    0,
+    gl.RGBA,
+    1,
+    1,
+    0,
+    gl.RGBA,
+    gl.UNSIGNED_BYTE,
+    new Uint8Array([0, 0, 0, 255]),
+  );
+
   timeLocation = gl.getUniformLocation(program, "uTime");
   resolutionLocation = gl.getUniformLocation(program, "uResolution");
+  skyTextureLocation = gl.getUniformLocation(program, "uSkyTex");
 
   gl.useProgram(program);
+  if (skyTextureLocation) gl.uniform1i(skyTextureLocation, 0);
   gl.disable(gl.DEPTH_TEST);
   gl.disable(gl.BLEND);
   gl.clearColor(0.0, 0.0, 0.0, 1.0);
   return true;
 }
 
+function updateSkyTexture(): void {
+  if (!gl || !skyTexture) return;
+  const canvas = canvasEl.value;
+  if (!canvas) return;
+  const skyCanvas = createWaterSkyCanvas(canvas.width, canvas.height);
+  gl.bindTexture(gl.TEXTURE_2D, skyTexture);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, skyCanvas);
+}
+
 function cleanupGL(): void {
   if (!gl) return;
+  if (skyTexture) {
+    gl.deleteTexture(skyTexture);
+    skyTexture = null;
+  }
   if (buffer) {
     gl.deleteBuffer(buffer);
     buffer = null;
@@ -148,6 +187,7 @@ function cleanupGL(): void {
   positionLocation = -1;
   timeLocation = null;
   resolutionLocation = null;
+  skyTextureLocation = null;
   gl = null;
 }
 
@@ -161,7 +201,10 @@ function resize(): void {
   if (width === canvas.width && height === canvas.height) return;
   canvas.width = width;
   canvas.height = height;
-  if (gl) gl.viewport(0, 0, width, height);
+  if (gl) {
+    gl.viewport(0, 0, width, height);
+    updateSkyTexture();
+  }
 }
 
 function frame(now: number): void {
@@ -176,6 +219,8 @@ function frame(now: number): void {
   resize();
 
   gl.useProgram(program);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, skyTexture);
   if (timeLocation) gl.uniform1f(timeLocation, (now - startTime) / 1000);
   if (resolutionLocation) gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
