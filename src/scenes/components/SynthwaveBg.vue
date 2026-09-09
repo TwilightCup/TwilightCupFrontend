@@ -21,6 +21,12 @@ const { config, load, refresh, save } = useDirectorConfig();
 
 const background = computed(() => normalizeSceneBackground(config.background));
 
+/** 所有「水面浪潮」系背景共享同一套 DOM 骨架与动画；synthwave1 在此基础上做视觉增强。 */
+const isWater = computed(
+  () => background.value === "synthwave" || background.value === "synthwave1",
+);
+const isWaterV1 = computed(() => background.value === "synthwave1");
+
 function configStorageKey(): string {
   return `twc-director-cfg:${params.matchId || "_global_"}`;
 }
@@ -56,6 +62,8 @@ watch(
 const bgSuffix = useId();
 const sunGradId = `sun-grad-${bgSuffix}`;
 const sunMaskId = `sun-mask-${bgSuffix}`;
+const sunMaskV1Id = `sun-mask-v1-${bgSuffix}`;
+const sunHaloId = `sun-halo-${bgSuffix}`;
 const sunGradReflId = `sun-grad-refl-${bgSuffix}`;
 const sunMaskReflId = `sun-mask-refl-${bgSuffix}`;
 const waterRippleId = `water-ripple-${bgSuffix}`;
@@ -71,15 +79,23 @@ interface Star {
   duration: string;
   maxOpacity: number;
 }
-const stars = Array.from({ length: 96 }, (_, id): Star => ({
-  id,
-  left: Math.random() * 100,
-  top: Math.random() * 36,
-  size: 1 + Math.random() * 1.6,
-  delay: `${(Math.random() * 8).toFixed(2)}s`,
-  duration: `${(3 + Math.random() * 6).toFixed(2)}s`,
-  maxOpacity: 0.18 + Math.random() * 0.5,
-}));
+
+/** 生成一组随机星星；idOffset 用于让 synthwave1 的额外星群拥有独立 key。 */
+function createStars(count: number, idOffset = 0): Star[] {
+  return Array.from({ length: count }, (_, i): Star => ({
+    id: idOffset + i,
+    left: Math.random() * 100,
+    top: Math.random() * 36,
+    size: 1 + Math.random() * 1.6,
+    delay: `${(Math.random() * 8).toFixed(2)}s`,
+    duration: `${(3 + Math.random() * 6).toFixed(2)}s`,
+    maxOpacity: 0.18 + Math.random() * 0.5,
+  }));
+}
+
+const stars = createStars(96);
+/** synthwave1 额外增加的星群：让星空比原版更密、更有层次。 */
+const v1Stars = createStars(72, 1000);
 
 function starStyle(s: Star): Record<string, string> {
   return {
@@ -157,8 +173,8 @@ function stopRipple(): void {
 
 watch(
   background,
-  (v) => {
-    if (v === "synthwave") startRipple();
+  () => {
+    if (isWater.value) startRipple();
     else stopRipple();
   },
   { immediate: true, flush: "post" },
@@ -170,15 +186,31 @@ watch(
     <!-- 天空渐变（default 为空层；synthwave 水面版用 CSS 画出日落渐变） -->
     <div class="sky" />
 
+    <!-- synthwave1：星云 / 极光层，给天空增加复古未来氛围 -->
+    <template v-if="isWaterV1">
+      <div class="sky-nebula" />
+      <div class="sky-aurora" />
+    </template>
+
     <!-- 随机缓慢闪烁星星（仅水面版） -->
-    <div v-if="background === 'synthwave'" class="stars">
+    <div v-if="isWater" class="stars" :class="{ 'stars-v1': isWaterV1 }">
       <i v-for="s in stars" :key="s.id" class="star" :style="starStyle(s)" />
+      <template v-if="isWaterV1">
+        <i v-for="s in v1Stars" :key="`v1-star-${s.id}`" class="star" :style="starStyle(s)" />
+      </template>
+    </div>
+
+    <!-- synthwave1：偶发流星，为静态星空增加一点生命感 -->
+    <div v-if="isWaterV1" class="shooting-stars" aria-hidden="true">
+      <i class="shooting-star" />
+      <i class="shooting-star" />
     </div>
 
     <!-- 远山剪影（仅水面版） -->
     <svg
-      v-if="background === 'synthwave'"
+      v-if="isWater"
       class="mountains"
+      :class="{ 'mountains-v1': isWaterV1 }"
       viewBox="0 0 1920 260"
       preserveAspectRatio="none"
       aria-hidden="true"
@@ -200,10 +232,14 @@ watch(
       />
     </svg>
 
+    <!-- synthwave1：山脉脚下的暖色雾气，让远山与地平线衔接更自然 -->
+    <div v-if="isWaterV1" class="mountain-mist" />
+
     <!-- 合成器太阳：default 使用旧 CSS 圆盘；synthwave 水面版使用 SVG 精确做出下半镂空横线 -->
     <svg
-      v-if="background === 'synthwave'"
+      v-if="isWater"
       class="sun-svg"
+      :class="{ 'sun-v1': isWaterV1 }"
       viewBox="0 0 200 200"
       aria-hidden="true"
     >
@@ -214,6 +250,12 @@ watch(
           <stop offset="0.72" stop-color="#ff8a3d" />
           <stop offset="1" stop-color="#ff2e88" />
         </linearGradient>
+        <radialGradient v-if="isWaterV1" :id="sunHaloId" cx="50%" cy="50%" r="50%">
+          <stop offset="0" stop-color="#fff8d6" stop-opacity="0.5" />
+          <stop offset="0.35" stop-color="#ffd166" stop-opacity="0.28" />
+          <stop offset="0.68" stop-color="#ff8a3d" stop-opacity="0.14" />
+          <stop offset="1" stop-color="#ff2e88" stop-opacity="0" />
+        </radialGradient>
         <mask :id="sunMaskId" maskUnits="userSpaceOnUse" x="0" y="0" width="200" height="200">
           <circle cx="100" cy="100" r="98" fill="#fff" />
           <g fill="#000">
@@ -227,13 +269,61 @@ watch(
             <rect x="0" y="188" width="200" height="6" />
           </g>
         </mask>
+        <mask
+          v-if="isWaterV1"
+          :id="sunMaskV1Id"
+          maskUnits="userSpaceOnUse"
+          x="0"
+          y="0"
+          width="200"
+          height="200"
+        >
+          <circle cx="100" cy="100" r="98" fill="#fff" />
+          <g fill="#000">
+            <rect x="0" y="106" width="200" height="4" />
+            <rect x="0" y="116" width="200" height="5" />
+            <rect x="0" y="127" width="200" height="5" />
+            <rect x="0" y="138" width="200" height="6" />
+            <rect x="0" y="150" width="200" height="6" />
+            <rect x="0" y="162" width="200" height="7" />
+            <rect x="0" y="175" width="200" height="8" />
+            <rect x="0" y="189" width="200" height="9" />
+          </g>
+        </mask>
       </defs>
-      <circle cx="100" cy="100" r="98" :fill="`url(#${sunGradId})`" :mask="`url(#${sunMaskId})`" />
+      <circle
+        v-if="isWaterV1"
+        class="sun-halo"
+        cx="100"
+        cy="100"
+        r="118"
+        :fill="`url(#${sunHaloId})`"
+      />
+      <circle
+        cx="100"
+        cy="100"
+        r="98"
+        :fill="`url(#${sunGradId})`"
+        :mask="isWaterV1 ? `url(#${sunMaskV1Id})` : `url(#${sunMaskId})`"
+      />
+      <circle
+        v-if="isWaterV1"
+        class="sun-ring"
+        cx="100"
+        cy="100"
+        r="99"
+        fill="none"
+        stroke="rgba(255, 244, 214, 0.78)"
+        stroke-width="1.4"
+      />
     </svg>
     <div v-else class="sun" />
 
     <!-- 水面：网格之上叠加真实水面反射/波纹/折射；网格被水波置换后像沉在水下 -->
-    <div v-if="background === 'synthwave'" class="water">
+    <div v-if="isWater" class="water">
+      <!-- synthwave1：地平线霓虹线，把天空和水面切成更清晰的两层 -->
+      <div v-if="isWaterV1" class="water-horizon-glow" />
+
       <!-- 水波置换滤镜：给水面反射与水下网格做像素级波纹折射（无颜色覆盖） -->
       <svg class="water-filter-defs" aria-hidden="true">
         <defs>
@@ -299,6 +389,7 @@ watch(
       >
         <div class="grid-vertical" />
         <div class="grid-horizontal" />
+        <div v-if="isWaterV1" class="grid-axis" />
       </div>
 
       <!-- 水面层：位于网格上方，只做反射/波纹/波光，不添加任何颜色覆盖 -->
@@ -364,6 +455,8 @@ watch(
         </div>
 
         <!-- 波光：透明底上的高光细纹，随水波缓慢漂移 -->
+        <div v-if="isWaterV1" class="water-caustics" />
+        <div v-if="isWaterV1" class="water-light-column" />
         <div class="water-glints" />
       </div>
 
@@ -375,10 +468,13 @@ watch(
     </div>
 
     <!-- 合成器浪潮水面版不画中线：山脉底部直接贴网格起始点 -->
-    <div v-if="background !== 'synthwave'" class="horizon-glow" />
+    <div v-if="!isWater" class="horizon-glow" />
+
+    <!-- synthwave1：地平线高光带，强化「夕阳沉入水面」的切割感 -->
+    <div v-if="isWaterV1" class="horizon-glow-v1" />
 
     <!-- 顶部/底部压暗，贴近参考图的暗角 -->
-    <div v-if="background === 'synthwave'" class="vignette" />
+    <div v-if="isWater" class="vignette" />
   </div>
 </template>
 
@@ -498,7 +594,7 @@ watch(
    ============================================================ */
 
 /* 整体：天顶近黑，地平线亮品红，水面回落到深紫黑，上下氛围压暗 */
-.synthwave-bg[data-background="synthwave"] {
+.synthwave-bg:is([data-background="synthwave"], [data-background="synthwave1"]) {
   background: linear-gradient(
     180deg,
     #08010f 0%,
@@ -513,7 +609,7 @@ watch(
 }
 
 /* 天空：地平线附近的暖粉色辉光 */
-.synthwave-bg[data-background="synthwave"] .sky {
+.synthwave-bg:is([data-background="synthwave"], [data-background="synthwave1"]) .sky {
   position: absolute;
   left: 0;
   right: 0;
@@ -532,12 +628,12 @@ watch(
 }
 
 /* 星星：天花板区域随机小点，用透明度呼吸模拟缓慢闪烁 */
-.synthwave-bg[data-background="synthwave"] .stars {
+.synthwave-bg:is([data-background="synthwave"], [data-background="synthwave1"]) .stars {
   position: absolute;
   inset: 0 0 64% 0;
   pointer-events: none;
 }
-.synthwave-bg[data-background="synthwave"] .star {
+.synthwave-bg:is([data-background="synthwave"], [data-background="synthwave1"]) .star {
   position: absolute;
   border-radius: 50%;
   background: #eef0ff;
@@ -552,7 +648,7 @@ watch(
 }
 
 /* 远山：三层剪影，底部刚好坐在水面地平线上 */
-.synthwave-bg[data-background="synthwave"] .mountains {
+.synthwave-bg:is([data-background="synthwave"], [data-background="synthwave1"]) .mountains {
   position: absolute;
   left: 0;
   right: 0;
@@ -561,12 +657,12 @@ watch(
   width: 100%;
   opacity: 0.92;
 }
-.synthwave-bg[data-background="synthwave"] .mountains path {
+.synthwave-bg:is([data-background="synthwave"], [data-background="synthwave1"]) .mountains path {
   filter: drop-shadow(0 -4px 10px rgba(255, 46, 136, 0.16));
 }
 
 /* 中央太阳：比默认更大、更暖，底部被山水面裁切 */
-.synthwave-bg[data-background="synthwave"] .sun-svg {
+.synthwave-bg:is([data-background="synthwave"], [data-background="synthwave1"]) .sun-svg {
   position: absolute;
   left: 50%;
   bottom: 45%;
@@ -580,7 +676,7 @@ watch(
 }
 
 /* 水面：上半透出地平线辉光，整体深紫黑 */
-.synthwave-bg[data-background="synthwave"] .water {
+.synthwave-bg:is([data-background="synthwave"], [data-background="synthwave1"]) .water {
   position: absolute;
   left: 0;
   right: 0;
@@ -600,19 +696,19 @@ watch(
    层1 grid-vertical：透视纵线从地平线一路延伸到画面底部，负责“网格延伸得更远”；
    层2 grid-horizontal：横线持续向镜头滚动；整层填满水面，让网格从地平线
    一路延伸到画面底部。 */
-.synthwave-bg[data-background="synthwave"] .floor {
+.synthwave-bg:is([data-background="synthwave"], [data-background="synthwave1"]) .floor {
   height: 100%;
   perspective: 26vmin;
   perspective-origin: 50% 0;
   z-index: 1;
 }
-.synthwave-bg[data-background="synthwave"] .grid-vertical,
-.synthwave-bg[data-background="synthwave"] .grid-horizontal {
+.synthwave-bg:is([data-background="synthwave"], [data-background="synthwave1"]) .grid-vertical,
+.synthwave-bg:is([data-background="synthwave"], [data-background="synthwave1"]) .grid-horizontal {
   position: absolute;
   inset: 0;
   transform-origin: 50% 0;
 }
-.synthwave-bg[data-background="synthwave"] .grid-vertical {
+.synthwave-bg:is([data-background="synthwave"], [data-background="synthwave1"]) .grid-vertical {
   transform: rotateX(67deg);
   background-image:
     linear-gradient(90deg, rgba(255, 255, 255, 0.85) 0 0.75px, rgba(255, 94, 181, 1) 0.75px 1.75px, transparent 1.75px);
@@ -628,7 +724,7 @@ watch(
   mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.6) 4%, #000 10%, #000 100%);
   animation: gridWater 4.2s ease-in-out infinite;
 }
-.synthwave-bg[data-background="synthwave"] .grid-horizontal {
+.synthwave-bg:is([data-background="synthwave"], [data-background="synthwave1"]) .grid-horizontal {
   transform: rotateX(67deg);
   background-image:
     linear-gradient(to bottom, rgba(255, 255, 255, 0.85) 0 0.75px, rgba(255, 94, 181, 1) 0.75px 1.75px, transparent 1.75px);
@@ -669,7 +765,7 @@ watch(
 }
 
 /* 水面滤镜定义：仅提供 feTurbulence/feDisplacementMap 置换源，本身不渲染像素 */
-.synthwave-bg[data-background="synthwave"] .water-filter-defs {
+.synthwave-bg:is([data-background="synthwave"], [data-background="synthwave1"]) .water-filter-defs {
   position: absolute;
   width: 0;
   height: 0;
@@ -678,7 +774,7 @@ watch(
 }
 
 /* 水面层：覆盖在网格上方，透明底 + 深度遮罩淡出，只做反射/波纹/波光 */
-.synthwave-bg[data-background="synthwave"] .water-surface {
+.synthwave-bg:is([data-background="synthwave"], [data-background="synthwave1"]) .water-surface {
   position: absolute;
   inset: 0;
   z-index: 2;
@@ -708,7 +804,7 @@ watch(
  * 整屏），再以地平线（transform-origin 50% 50.2%）为轴垂直翻转。这样上方天空、
  * 星星、远山、太阳会以地平线为对称轴映射到水面区域，且越靠近镜头越淡出。
  */
-.synthwave-bg[data-background="synthwave"] .water-reflection {
+.synthwave-bg:is([data-background="synthwave"], [data-background="synthwave1"]) .water-reflection {
   position: absolute;
   left: 0;
   right: 0;
@@ -724,7 +820,7 @@ watch(
 }
 
 /* 反射用天空：与上方 .sky 同一渐变，按整屏坐标系摆放 */
-.synthwave-bg[data-background="synthwave"] .refl-sky {
+.synthwave-bg:is([data-background="synthwave"], [data-background="synthwave1"]) .refl-sky {
   position: absolute;
   left: 0;
   right: 0;
@@ -743,13 +839,13 @@ watch(
 }
 
 /* 反射层里的星星容器：沿用 .stars/.star 样式，按整屏坐标摆放后随反射翻转 */
-.synthwave-bg[data-background="synthwave"] .refl-stars {
+.synthwave-bg:is([data-background="synthwave"], [data-background="synthwave1"]) .refl-stars {
   opacity: 0.9;
 }
 
 /* 波光：透明底上的柔和高光带，经 SVG 置换后随水波扭动；无颜色覆盖。
    渐变起点/终点都是 transparent，避免硬边在置换后出现像素锯齿。 */
-.synthwave-bg[data-background="synthwave"] .water-glints {
+.synthwave-bg:is([data-background="synthwave"], [data-background="synthwave1"]) .water-glints {
   position: absolute;
   inset: -6% 0;
   pointer-events: none;
@@ -790,7 +886,7 @@ watch(
 }
 
 /* 水面整体压暗，保证底部深、不抢前景内容 */
-.synthwave-bg[data-background="synthwave"] .water-shade {
+.synthwave-bg:is([data-background="synthwave"], [data-background="synthwave1"]) .water-shade {
   position: absolute;
   inset: 0;
   z-index: 3;
@@ -799,12 +895,569 @@ watch(
 }
 
 /* 顶部/底部四角压暗，模拟参考图边缘更深 */
-.synthwave-bg[data-background="synthwave"] .vignette {
+.synthwave-bg:is([data-background="synthwave"], [data-background="synthwave1"]) .vignette {
   position: absolute;
   inset: 0;
   pointer-events: none;
   background:
     radial-gradient(ellipse 120% 80% at 50% 50%, transparent 46%, rgba(5, 0, 15, 0.28) 78%, rgba(3, 0, 10, 0.62) 100%),
     linear-gradient(to bottom, rgba(8, 1, 15, 0.5) 0%, transparent 18%, transparent 78%, rgba(5, 0, 12, 0.48) 100%);
+}
+
+/* ============================================================
+   synthwave1（水面浪潮 1）：水面浪潮的增强版本
+   在 synthwave 的 DOM 骨架上叠加更浓的夕阳、星云、流星、山脉辉光、
+   霓虹网格与水面光柱；原 synthwave 预设保持不变。
+   ============================================================ */
+
+/* 整体天空：天顶更深，地平线更亮，水面一侧保留深紫黑 */
+.synthwave-bg[data-background="synthwave1"] {
+  background:
+    radial-gradient(ellipse 78% 44% at 50% 60%, rgba(255, 46, 136, 0.2), transparent 72%),
+    linear-gradient(
+      180deg,
+      #02000a 0%,
+      #08001f 18%,
+      #25094c 38%,
+      #7d177f 52%,
+      #ff2e88 60%,
+      #ff8a3d 62%,
+      #3a0b45 66%,
+      #13032e 82%,
+      #03000b 100%
+    );
+}
+
+/* 天空渐变：加入暖金色夕阳核与更宽的品红辉光 */
+.synthwave-bg[data-background="synthwave1"] .sky {
+  height: 56%;
+  background:
+    radial-gradient(ellipse 46% 30% at 50% 78%, rgba(255, 209, 102, 0.28), transparent 70%),
+    radial-gradient(ellipse 74% 48% at 50% 80%, rgba(255, 46, 136, 0.4), transparent 74%),
+    linear-gradient(
+      180deg,
+      #02000a 0%,
+      #0a0125 22%,
+      #2a0a4c 40%,
+      #7d177f 52%,
+      #d92286 60%,
+      #ff5b9f 68%,
+      #ff2e88 100%
+    );
+}
+
+/* 星云：两团低饱和的青色/品红雾，给深色天空一点层次 */
+.synthwave-bg[data-background="synthwave1"] .sky-nebula {
+  position: absolute;
+  left: -6%;
+  right: -6%;
+  top: -4%;
+  height: 64%;
+  pointer-events: none;
+  opacity: 0.52;
+  mix-blend-mode: screen;
+  filter: blur(18px);
+  background:
+    radial-gradient(ellipse 28% 24% at 16% 24%, rgba(34, 227, 255, 0.14), transparent 70%),
+    radial-gradient(ellipse 40% 30% at 84% 18%, rgba(255, 46, 136, 0.18), transparent 72%),
+    radial-gradient(ellipse 58% 32% at 52% 62%, rgba(255, 138, 61, 0.12), transparent 74%);
+  animation: nebulaDrift 18s ease-in-out infinite alternate;
+}
+
+/* 极光带：一条斜向的柔光带，增加复古未来感 */
+.synthwave-bg[data-background="synthwave1"] .sky-aurora {
+  position: absolute;
+  left: -12%;
+  right: -12%;
+  top: 26%;
+  height: 15%;
+  pointer-events: none;
+  opacity: 0.32;
+  mix-blend-mode: screen;
+  filter: blur(20px);
+  transform: skewX(-9deg);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(34, 227, 255, 0.14) 22%,
+    rgba(255, 46, 136, 0.24) 48%,
+    rgba(255, 138, 61, 0.14) 72%,
+    transparent 100%
+  );
+  animation: auroraShift 14s ease-in-out infinite alternate;
+}
+
+/* 星空：更亮的呼吸、青/粉色星点，部分亮星带十字星芒 */
+.synthwave-bg[data-background="synthwave1"] .stars-v1 {
+  inset: 0 0 60% 0;
+}
+.synthwave-bg[data-background="synthwave1"] .stars-v1 .star {
+  background: #ffffff;
+  box-shadow:
+    0 0 3px rgba(255, 255, 255, 0.95),
+    0 0 8px rgba(140, 230, 255, 0.8),
+    0 0 16px rgba(255, 46, 136, 0.42);
+  animation-name: starTwinkleV1;
+}
+.synthwave-bg[data-background="synthwave1"] .stars-v1 .star:nth-child(3n) {
+  background: #c9f7ff;
+}
+.synthwave-bg[data-background="synthwave1"] .stars-v1 .star:nth-child(5n) {
+  background: #ffd1e8;
+}
+.synthwave-bg[data-background="synthwave1"] .stars-v1 .star:nth-child(7n) {
+  width: 3px !important;
+  height: 3px !important;
+  box-shadow:
+    0 0 4px rgba(255, 255, 255, 0.95),
+    0 0 11px rgba(255, 255, 255, 0.85),
+    0 0 22px rgba(34, 227, 255, 0.72),
+    0 0 34px rgba(255, 46, 136, 0.46);
+}
+.synthwave-bg[data-background="synthwave1"] .stars-v1 .star:nth-child(11n) {
+  width: 3.5px !important;
+  height: 3.5px !important;
+}
+.synthwave-bg[data-background="synthwave1"] .stars-v1 .star:nth-child(11n)::before,
+.synthwave-bg[data-background="synthwave1"] .stars-v1 .star:nth-child(11n)::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 13px;
+  height: 1.5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.95), 0 0 12px rgba(34, 227, 255, 0.76);
+  transform: translate(-50%, -50%);
+}
+.synthwave-bg[data-background="synthwave1"] .stars-v1 .star:nth-child(11n)::after {
+  width: 1.5px;
+  height: 13px;
+}
+
+/* 流星：低频划过天顶，不影响前景阅读 */
+.synthwave-bg[data-background="synthwave1"] .shooting-stars {
+  position: absolute;
+  inset: 0 0 58% 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.synthwave-bg[data-background="synthwave1"] .shooting-star {
+  position: absolute;
+  top: 13%;
+  left: 70%;
+  width: 118px;
+  height: 2px;
+  border-radius: 999px;
+  opacity: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.95), rgba(180, 240, 255, 0.9));
+  box-shadow:
+    0 0 8px rgba(160, 230, 255, 0.9),
+    0 0 18px rgba(255, 46, 136, 0.52);
+  transform: translate3d(0, 0, 0) rotate(-28deg) scaleX(0.2);
+  animation: shootingStar 9s linear infinite;
+}
+.synthwave-bg[data-background="synthwave1"] .shooting-star:nth-child(2) {
+  top: 31%;
+  left: 18%;
+  animation-delay: 4.8s;
+  animation-duration: 11s;
+}
+
+/* 远山：抬高一点，增加饱和度，并给山脊线加一圈品红/暖白辉光 */
+.synthwave-bg[data-background="synthwave1"] .mountains-v1 {
+  bottom: 49.8%;
+  height: 14.4%;
+  opacity: 0.98;
+  filter: saturate(1.22) contrast(1.08) drop-shadow(0 0 8px rgba(255, 46, 136, 0.22));
+}
+.synthwave-bg[data-background="synthwave1"] .mountains-v1 path {
+  filter:
+    drop-shadow(0 -1px 1px rgba(255, 218, 236, 0.6))
+    drop-shadow(0 -3px 6px rgba(255, 46, 136, 0.5))
+    drop-shadow(0 0 15px rgba(255, 46, 136, 0.24));
+}
+.synthwave-bg[data-background="synthwave1"] .mountains-v1 path:nth-child(1) {
+  fill: #6d2aa6;
+}
+.synthwave-bg[data-background="synthwave1"] .mountains-v1 path:nth-child(2) {
+  fill: #3c0d6e;
+}
+.synthwave-bg[data-background="synthwave1"] .mountains-v1 path:nth-child(3) {
+  fill: #1d0538;
+}
+
+/* 山脚雾气：把山脉、地平线、水面柔和地连成一体 */
+.synthwave-bg[data-background="synthwave1"] .mountain-mist {
+  position: absolute;
+  left: -2%;
+  right: -2%;
+  bottom: 49%;
+  height: 9%;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  filter: blur(15px);
+  background:
+    radial-gradient(ellipse 72% 100% at 50% 100%, rgba(255, 46, 136, 0.34), transparent 72%),
+    linear-gradient(to top, rgba(255, 94, 181, 0.18), transparent 82%);
+}
+
+/* 太阳：更大的暖色核心、外圈光晕和一圈细亮边 */
+.synthwave-bg[data-background="synthwave1"] .sun-v1 {
+  width: 41vmin;
+  height: 41vmin;
+  bottom: 45%;
+  filter:
+    drop-shadow(0 0 10px rgba(255, 243, 175, 0.9))
+    drop-shadow(0 0 26px rgba(255, 138, 61, 0.72))
+    drop-shadow(0 0 70px rgba(255, 46, 136, 0.6))
+    drop-shadow(0 0 140px rgba(255, 46, 136, 0.32));
+}
+.synthwave-bg[data-background="synthwave1"] .sun-halo {
+  filter: blur(2.4px);
+  transform-origin: 100px 100px;
+  animation: sunHaloPulse 5s ease-in-out infinite;
+}
+.synthwave-bg[data-background="synthwave1"] .sun-ring {
+  opacity: 0.82;
+  filter:
+    drop-shadow(0 0 4px rgba(255, 243, 175, 0.9))
+    drop-shadow(0 0 10px rgba(255, 138, 61, 0.68));
+}
+
+/* 网格：纵向青白、横向品红，双层霓虹比原版更锐利 */
+.synthwave-bg[data-background="synthwave1"] .grid-vertical {
+  background-image:
+    linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.95) 0 0.9px,
+      rgba(34, 227, 255, 1) 0.9px 2.1px,
+      rgba(34, 227, 255, 0.25) 2.1px 3px,
+      transparent 3px
+    );
+  filter:
+    brightness(1.42)
+    saturate(1.2)
+    drop-shadow(0 0 3px rgba(255, 255, 255, 0.78))
+    drop-shadow(0 0 8px rgba(34, 227, 255, 0.66))
+    drop-shadow(0 0 20px rgba(34, 227, 255, 0.32));
+}
+.synthwave-bg[data-background="synthwave1"] .grid-horizontal {
+  background-image:
+    linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 0.9) 0 0.9px,
+      rgba(255, 94, 181, 1) 0.9px 2.1px,
+      rgba(255, 46, 136, 0.26) 2.1px 3px,
+      transparent 3px
+    );
+  filter:
+    brightness(1.36)
+    saturate(1.24)
+    drop-shadow(0 0 3px rgba(255, 255, 255, 0.72))
+    drop-shadow(0 0 8px rgba(255, 46, 136, 0.72))
+    drop-shadow(0 0 20px rgba(255, 46, 136, 0.34));
+}
+
+/* 中央视线：一条从地平线延伸到镜头的光轴，增强透视纵深 */
+.synthwave-bg[data-background="synthwave1"] .grid-axis {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  pointer-events: none;
+  transform: translateX(-50%);
+  opacity: 0.86;
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.95) 0%,
+    rgba(34, 227, 255, 0.86) 24%,
+    rgba(255, 46, 136, 0.78) 62%,
+    rgba(255, 46, 136, 0.16) 100%
+  );
+  box-shadow:
+    0 0 6px rgba(255, 255, 255, 0.82),
+    0 0 15px rgba(34, 227, 255, 0.7),
+    0 0 34px rgba(255, 46, 136, 0.46);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 8%, #000 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 8%, #000 100%);
+}
+
+/* 水面：地平线附近更暖，向下过渡到深空紫黑 */
+.synthwave-bg[data-background="synthwave1"] .water {
+  background:
+    radial-gradient(ellipse 46% 34% at 50% 0%, rgba(255, 46, 136, 0.36), transparent 70%),
+    linear-gradient(
+      180deg,
+      #4a103f 0%,
+      #2b0933 9%,
+      #17062e 32%,
+      #0e0329 62%,
+      #04000e 100%
+    );
+}
+.synthwave-bg[data-background="synthwave1"] .water-horizon-glow {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -1px;
+  height: 3px;
+  z-index: 4;
+  pointer-events: none;
+  opacity: 0.88;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.9) 24%,
+    #ffb3d4 50%,
+    rgba(255, 255, 255, 0.9) 76%,
+    transparent 100%
+  );
+  box-shadow:
+    0 0 10px rgba(255, 255, 255, 0.8),
+    0 0 28px rgba(255, 46, 136, 0.82),
+    0 0 60px rgba(34, 227, 255, 0.34);
+}
+
+/* 倒影：提高一点对比和饱和度，让水面里的太阳/山脉更清楚 */
+.synthwave-bg[data-background="synthwave1"] .water-surface {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 1) 0%,
+    rgba(0, 0, 0, 0.92) 5%,
+    rgba(0, 0, 0, 0.62) 32%,
+    rgba(0, 0, 0, 0.28) 64%,
+    transparent 96%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 1) 0%,
+    rgba(0, 0, 0, 0.92) 5%,
+    rgba(0, 0, 0, 0.62) 32%,
+    rgba(0, 0, 0, 0.28) 64%,
+    transparent 96%
+  );
+}
+.synthwave-bg[data-background="synthwave1"] .water-reflection {
+  opacity: 0.66;
+  filter: saturate(1.36) contrast(1.1) brightness(1.12) blur(0.25px);
+}
+.synthwave-bg[data-background="synthwave1"] .refl-sun {
+  filter:
+    drop-shadow(0 0 10px rgba(255, 138, 61, 0.52))
+    drop-shadow(0 0 26px rgba(255, 46, 136, 0.3));
+}
+
+/* 水面焦散：透明高光斑块随水波缓慢移动 */
+.synthwave-bg[data-background="synthwave1"] .water-caustics {
+  position: absolute;
+  inset: -8% -6%;
+  pointer-events: none;
+  opacity: 0.3;
+  mix-blend-mode: screen;
+  background-image:
+    radial-gradient(ellipse 8% 5% at 22% 16%, rgba(255, 255, 255, 0.34), transparent 68%),
+    radial-gradient(ellipse 10% 5% at 74% 32%, rgba(255, 255, 255, 0.28), transparent 68%),
+    radial-gradient(ellipse 7% 4% at 46% 62%, rgba(190, 235, 255, 0.3), transparent 68%),
+    radial-gradient(ellipse 12% 6% at 84% 74%, rgba(255, 138, 61, 0.22), transparent 70%),
+    repeating-linear-gradient(
+      98deg,
+      transparent 0 22px,
+      rgba(255, 255, 255, 0.045) 30px,
+      transparent 44px,
+      transparent 66px
+    );
+  background-size:
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    180% 180%;
+  animation: waterCaustics 13s linear infinite;
+}
+
+/* 太阳在水面的光柱：从地平线向下扩散，越靠近镜头越淡 */
+.synthwave-bg[data-background="synthwave1"] .water-light-column {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 13%;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: 0.52;
+  transform: translateX(-50%);
+  filter: blur(10px);
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 243, 175, 0.48) 0%,
+    rgba(255, 138, 61, 0.34) 14%,
+    rgba(255, 46, 136, 0.24) 38%,
+    rgba(255, 46, 136, 0.06) 72%,
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.88) 50%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.88) 50%, transparent 100%);
+  animation: lightColumn 6.5s ease-in-out infinite;
+}
+
+/* 波光：比原版更明显，但保持 screen 混合，不遮挡前景 */
+.synthwave-bg[data-background="synthwave1"] .water-glints {
+  opacity: 0.38;
+  background-image:
+    repeating-linear-gradient(
+      104deg,
+      transparent 0 16px,
+      rgba(255, 255, 255, 0.14) 22px,
+      rgba(255, 255, 255, 0) 34px,
+      transparent 52px
+    ),
+    repeating-linear-gradient(
+      76deg,
+      transparent 0 24px,
+      rgba(180, 240, 255, 0.1) 34px,
+      rgba(180, 240, 255, 0) 48px,
+      transparent 70px
+    );
+  animation-duration: 6.5s;
+}
+
+/* 地平线高光：强调天空与水面之间那条明亮的切割线 */
+.synthwave-bg[data-background="synthwave1"] .horizon-glow-v1 {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 49.8%;
+  height: 4px;
+  z-index: 5;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.88) 30%,
+    #ffd1e8 50%,
+    rgba(255, 255, 255, 0.88) 70%,
+    transparent 100%
+  );
+  box-shadow:
+    0 0 16px rgba(255, 46, 136, 0.92),
+    0 0 46px rgba(255, 46, 136, 0.54),
+    0 0 84px rgba(34, 227, 255, 0.3);
+}
+
+/* 水面整体压暗略减，保留底部深邃但让霓虹更透 */
+.synthwave-bg[data-background="synthwave1"] .water-shade {
+  background:
+    linear-gradient(to bottom, rgba(10, 1, 24, 0.02) 0%, rgba(10, 1, 24, 0.17) 30%, rgba(10, 1, 24, 0.58) 100%);
+}
+
+/* synthwave1 的暗角更克制，让地平线亮度集中在画面中部 */
+.synthwave-bg[data-background="synthwave1"] .vignette {
+  background:
+    radial-gradient(
+      ellipse 132% 88% at 50% 50%,
+      transparent 52%,
+      rgba(5, 0, 15, 0.22) 78%,
+      rgba(3, 0, 10, 0.68) 100%
+    ),
+    linear-gradient(
+      to bottom,
+      rgba(3, 0, 11, 0.58) 0%,
+      transparent 16%,
+      transparent 76%,
+      rgba(3, 0, 11, 0.54) 100%
+    );
+}
+
+@keyframes starTwinkleV1 {
+  0%,
+  100% {
+    opacity: 0.18;
+    transform: scale(0.88);
+  }
+  50% {
+    opacity: calc(var(--star-max, 0.5) + 0.28);
+    transform: scale(1.62);
+  }
+}
+
+@keyframes nebulaDrift {
+  from {
+    transform: translate3d(-1.5%, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(1.5%, 1.5%, 0) scale(1.06);
+  }
+}
+
+@keyframes auroraShift {
+  from {
+    transform: skewX(-9deg) translateX(-2.5%);
+    opacity: 0.24;
+  }
+  to {
+    transform: skewX(-5deg) translateX(2.5%);
+    opacity: 0.42;
+  }
+}
+
+@keyframes shootingStar {
+  0%,
+  82% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) rotate(-28deg) scaleX(0.2);
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(-440px, 230px, 0) rotate(-28deg) scaleX(1);
+  }
+}
+
+@keyframes sunHaloPulse {
+  0%,
+  100% {
+    opacity: 0.72;
+    transform: scale(0.98);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+}
+
+@keyframes waterCaustics {
+  from {
+    background-position:
+      0 0,
+      0 0,
+      0 0,
+      0 0,
+      0 0;
+  }
+  to {
+    background-position:
+      7% 11%,
+      -5% 8%,
+      4% -6%,
+      -8% 12%,
+      58px 46px;
+  }
+}
+
+@keyframes lightColumn {
+  0%,
+  100% {
+    opacity: 0.44;
+    transform: translateX(-50%) scaleX(0.92);
+  }
+  50% {
+    opacity: 0.6;
+    transform: translateX(-50%) scaleX(1.08);
+  }
 }
 </style>
