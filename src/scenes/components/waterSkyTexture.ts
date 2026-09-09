@@ -108,12 +108,16 @@ function drawSun(ctx: CanvasRenderingContext2D, width: number, height: number): 
   ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
 
   // viewBox 200 → 实际半径 radius：scale = radius / 100。
+  // 用 destination-out 把横条位置“挖空”，让后面的天空/远山透出来；
+  // 原版 SVG mask 里的黑条也是透明孔洞，而不是黑色线条。
   const stripeScale = radius / 100;
+  ctx.globalCompositeOperation = "destination-out";
   ctx.fillStyle = "#000000";
   for (const stripe of SUN_STRIPES) {
     const y = cy + (stripe.y - 100) * stripeScale;
     ctx.fillRect(cx - radius, y, radius * 2, stripe.h * stripeScale);
   }
+  ctx.globalCompositeOperation = "source-over";
   ctx.restore();
 }
 
@@ -131,5 +135,13 @@ export function createWaterSkyCanvas(width: number, height: number): HTMLCanvasE
   fillSkyGradient(ctx, canvas.width, canvas.height);
   drawMountains(ctx, canvas.width, canvas.height);
   drawSun(ctx, canvas.width, canvas.height);
+
+  // 太阳横条是用 destination-out 挖出的透明孔；Canvas 上传到 WebGL 后透明像素
+  // 的 RGB 为 0（会显示成黑线）。这里用 destination-over 把天空/远山重新画到
+  // 这些透明孔里，效果等价于原版 SVG mask 的“镂空后透出背景”。
+  ctx.globalCompositeOperation = "destination-over";
+  fillSkyGradient(ctx, canvas.width, canvas.height);
+  drawMountains(ctx, canvas.width, canvas.height);
+  ctx.globalCompositeOperation = "source-over";
   return canvas;
 }

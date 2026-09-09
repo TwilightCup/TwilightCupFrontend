@@ -91,26 +91,27 @@ vec3 gridColor(vec2 uv, float time) {
   float depth = 1.0 / max(uv.y - HORIZON, 0.001);
   depth = min(depth, 48.0);
 
-  float wx = (uv.x - 0.5) * depth * 3.0;
-  float wz = depth * 0.32 - time * 0.55;
+  float wx = (uv.x - 0.5) * depth * 2.2;
+  // 正值让水平网格线朝镜头（画面下方）滚动，与原版 background-position 增大方向一致。
+  float wz = depth * 0.22 + time * 0.28;
 
   float px = abs(fract(wx) - 0.5);
   float pz = abs(fract(wz) - 0.5);
 
-  float lineX = 1.0 - smoothstep(0.0, 0.020, px);
-  float lineZ = 1.0 - smoothstep(0.0, 0.026, pz);
-  float glowX = 1.0 - smoothstep(0.0, 0.100, px);
-  float glowZ = 1.0 - smoothstep(0.0, 0.120, pz);
+  float lineX = 1.0 - smoothstep(0.0, 0.030, px);
+  float lineZ = 1.0 - smoothstep(0.0, 0.038, pz);
+  float glowX = 1.0 - smoothstep(0.0, 0.120, px);
+  float glowZ = 1.0 - smoothstep(0.0, 0.150, pz);
 
   float d = clamp((uv.y - HORIZON) / (1.0 - HORIZON), 0.0, 1.0);
-  float fade = smoothstep(0.0, 0.10, d) * (1.0 - 0.35 * d);
+  float fade = smoothstep(0.0, 0.10, d) * (1.0 - 0.15 * d);
 
   vec3 col = vec3(0.0);
-  col += vec3(1.0, 0.42, 0.78) * glowX * fade * 0.16;
-  col += vec3(1.0, 0.42, 0.78) * glowZ * fade * 0.12;
-  col += vec3(1.0, 0.92, 0.96) * lineX * fade * 0.55;
-  col += vec3(1.0, 0.70, 0.90) * lineZ * fade * 0.40;
-  col += vec3(1.0, 1.0, 1.0) * lineX * lineZ * fade * 0.25;
+  col += vec3(1.0, 0.42, 0.78) * glowX * fade * 0.28;
+  col += vec3(1.0, 0.42, 0.78) * glowZ * fade * 0.20;
+  col += vec3(1.0, 0.95, 0.98) * lineX * fade * 1.05;
+  col += vec3(1.0, 0.76, 0.92) * lineZ * fade * 0.85;
+  col += vec3(1.0, 1.0, 1.0) * lineX * lineZ * fade * 0.55;
   return col;
 }
 
@@ -151,7 +152,8 @@ vec3 waterColor(vec2 uv, float time, float aspect) {
   vec3 grid = gridColor(refrUv, time);
 
   vec3 col = waterBase(d);
-  col += grid * (1.0 - reflMask * 0.75);
+  // 网格尽量保持不透明：只让反射层轻微压暗，避免线条被水色/倒影洗掉。
+  col += grid * (1.0 - reflMask * 0.30);
   col = mix(col, refl, reflMask);
 
   // 太阳高光：细碎、随波纹变化，补足反射层之外的金属感。
