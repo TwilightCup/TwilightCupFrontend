@@ -1084,6 +1084,7 @@ const messages = {
   "scenes.backgrounds.default": "默认",
   "scenes.backgrounds.synthwave": "水面浪潮",
   "scenes.backgrounds.synthwave1": "水面浪潮1",
+  "scenes.backgrounds.synthwave2": "水面浪潮2",
   "scenes.conn.connecting": "连接中",
   "scenes.conn.reconnecting": "重连中",
   "scenes.conn.closed": "已断开（检查网络/令牌）",

@@ -1080,6 +1080,7 @@ const messages: MessageSchema = {
   "scenes.backgrounds.default": "Default",
   "scenes.backgrounds.synthwave": "Water Synthwave",
   "scenes.backgrounds.synthwave1": "Water Synthwave 1",
+  "scenes.backgrounds.synthwave2": "Water Synthwave 2",
   "scenes.conn.connecting": "Connecting",
   "scenes.conn.reconnecting": "Reconnecting",
   "scenes.conn.closed": "Disconnected (check network/token)",

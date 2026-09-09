@@ -7,7 +7,12 @@
  *  2. 在 SCENE_BACKGROUND_OPTIONS 补充选项，labelKey 指向 i18n 文案；
  *  3. 在 SynthwaveBg.vue 中按该 key 增加对应的视觉样式分支。
  */
-export const SCENE_BACKGROUND_KEYS = ["default", "synthwave", "synthwave1"] as const;
+export const SCENE_BACKGROUND_KEYS = [
+  "default",
+  "synthwave",
+  "synthwave1",
+  "synthwave2",
+] as const;
 
 export type SceneBackgroundKey = (typeof SCENE_BACKGROUND_KEYS)[number];
 
@@ -24,6 +29,7 @@ export const SCENE_BACKGROUND_OPTIONS: SceneBackgroundOption[] = [
   { key: "default", labelKey: "scenes.backgrounds.default" },
   { key: "synthwave", labelKey: "scenes.backgrounds.synthwave" },
   { key: "synthwave1", labelKey: "scenes.backgrounds.synthwave1" },
+  { key: "synthwave2", labelKey: "scenes.backgrounds.synthwave2" },
 ];
 
 /** 校验未知字符串是否为合法的背景 key（state_sync / localStorage 防脏） */

@@ -2,7 +2,9 @@
 /**
  * 合成器浪潮（synthwave）全屏背景：渐变天空 + 合成器太阳 + 透视霓虹网格地板。
  *
- * 纯 CSS/SVG，无外部资源（OBS 浏览器源离线缓存可靠）。固定在最底层（z-index:0），
+ * default / synthwave / synthwave1 为纯 CSS/SVG，无外部资源（OBS 浏览器源离线缓存可靠）；
+ * synthwave2「水面浪潮2」使用内联 GLSL 的全屏 WebGL 重绘（见 WaterShaderBg.vue），
+ * WebGL 不可用时自动回退到 synthwave 的 CSS/SVG 水面。固定在最底层（z-index:0），
  * 场景内容相对定位在其上。背景不透明，因此 .html 的 body 也是深紫底（见 scene-theme.css）。
  *
  * 背景样式由导播配置的 background 字段驱动（注册表见 useSceneBackgrounds）。
@@ -14,6 +16,7 @@ import { useDirectorStore } from "@/stores/director";
 import { useSceneContext } from "@/scenes/composables/useSceneContext";
 import { normalizeSceneBackground } from "@/scenes/composables/useSceneBackgrounds";
 import { useDirectorConfig } from "@/scenes/composables/useDirectorConfig";
+import WaterShaderBg from "@/scenes/components/WaterShaderBg.vue";
 
 const { params } = useSceneContext();
 const director = useDirectorStore();
@@ -21,11 +24,29 @@ const { config, load, refresh, save } = useDirectorConfig();
 
 const background = computed(() => normalizeSceneBackground(config.background));
 
-/** 所有「水面浪潮」系背景共享同一套 DOM 骨架与动画；synthwave1 在此基础上做视觉增强。 */
+/**
+ * 所有「水面浪潮」系背景共享同一套切换/回退逻辑：
+ *  - synthwave / synthwave1 继续使用现有 CSS/SVG 骨架；
+ *  - synthwave2 使用全屏 WebGL 重绘，失败时回退到原版 synthwave 的 CSS/SVG 水面。
+ */
 const isWater = computed(
-  () => background.value === "synthwave" || background.value === "synthwave1",
+  () =>
+    background.value === "synthwave" ||
+    background.value === "synthwave1" ||
+    background.value === "synthwave2",
 );
 const isWaterV1 = computed(() => background.value === "synthwave1");
+const isWaterV2 = computed(() => background.value === "synthwave2");
+/** WebGL 不可用 / 上下文丢失时置位，用于回退 CSS/SVG 水面。 */
+const shaderUnavailable = ref(false);
+/** 当前是否实际由 CSS/SVG 渲染水面（synthwave2 WebGL 正常工作时为 false）。 */
+const isWaterCss = computed(
+  () => isWater.value && !(isWaterV2.value && !shaderUnavailable.value),
+);
+/** 回退时把 data-background 映射回原版 synthwave，让现有 CSS 规则直接生效。 */
+const renderBackground = computed(() =>
+  isWaterV2.value && shaderUnavailable.value ? "synthwave" : background.value,
+);
 
 function configStorageKey(): string {
   return `twc-director-cfg:${params.matchId || "_global_"}`;
@@ -171,18 +192,30 @@ function stopRipple(): void {
   rippleRaf = 0;
 }
 
+// 背景切换时重试 WebGL；只有实际走 CSS/SVG 水面分支时才运行 SVG 置换 rAF。
 watch(
   background,
   () => {
-    if (isWater.value) startRipple();
+    if (isWaterV2.value) shaderUnavailable.value = false;
+    if (isWaterCss.value) startRipple();
     else stopRipple();
   },
   { immediate: true, flush: "post" },
 );
+watch(shaderUnavailable, () => {
+  if (isWaterCss.value) startRipple();
+  else stopRipple();
+});
 </script>
 
 <template>
-  <div class="synthwave-bg" :data-background="background" aria-hidden="true">
+  <div class="synthwave-bg" :data-background="renderBackground" aria-hidden="true">
+    <!-- synthwave2：全屏 WebGL 重绘；失败时 shaderUnavailable=true，下面的 CSS/SVG 分支接管 -->
+    <WaterShaderBg
+      v-if="isWaterV2 && !shaderUnavailable"
+      @failed="shaderUnavailable = true"
+    />
+    <template v-else>
     <!-- 天空渐变（default 为空层；synthwave 水面版用 CSS 画出日落渐变） -->
     <div class="sky" />
 
@@ -475,6 +508,7 @@ watch(
 
     <!-- 顶部/底部压暗，贴近参考图的暗角 -->
     <div v-if="isWater" class="vignette" />
+    </template>
   </div>
 </template>
 
