@@ -12,8 +12,9 @@
  *         定格在最终成绩，不再往下推），屏幕中轴对称
  *   左下角：当前选图角标卡（裁判宣布选图后常驻，PickCornerCard）
  *   底部：WR/PB 背景板（neon-panel 同款，横向铺满画面、垫在全部计时器与
- *         角标卡之下）+ PB 卡内容（当前项目 WR + 双方 PB，PbCornerCard，
- *         speedrun 同源，透明背景浮于背景板上，排版锚定不变）
+ *         角标卡之下；顶缘拉到偏差条底部，含偏差值数字随游标移动的轨道范围）
+ *         + PB 卡内容（当前项目 WR + 双方 PB，PbCornerCard，speedrun 同源，
+ *         透明背景浮于背景板上，排版锚定不变）
  *
  * 数据：onMounted 连 WS（director.connect），WS 断 / 无 match → mock 兜底（绝不黑屏）。
  * 计时口径见 useMatchTiming：多关主计时 = live_time 实时走表（每秒上报矫正 +
@@ -424,11 +425,14 @@ function onSaved(patch: Parameters<typeof save>[1]): void {
 // 随视口缩放改变字号（px 宽、顶部位置都变），须量测跟踪：观察 PlayerTimer
 // 内 .stack（主计时文本盒）与 .timer 根盒（与类名耦合，改其结构须同步此处）。
 const timersEl = ref<HTMLElement | null>(null);
+const diffZoneEl = ref<HTMLElement | null>(null);
 /** 量测得到的角标卡宽 / 高（px；null = 未测得，该项回退 CSS 兜底值） */
 const pickW = ref<number | null>(null);
 const pickH = ref<number | null>(null);
 const pbW = ref<number | null>(null);
 const pbH = ref<number | null>(null);
+/** WR/PB 背景板高（px）：偏差条底部 → 画面底（含偏差值数字的轨道范围） */
+const backH = ref<number | null>(null);
 let pickRo: ResizeObserver | null = null;
 
 function measureCornerBoxes(): void {
@@ -445,6 +449,12 @@ function measureCornerBoxes(): void {
   const h = Math.round(base.bottom - timerA.getBoundingClientRect().top);
   if (w > 0) pickW.value = w;
   if (h > 0) pickH.value = h;
+  // 背景板顶缘 = 偏差条底部（含偏差值数字随游标移动的轨道范围），量取后注入
+  const diff = diffZoneEl.value;
+  if (diff) {
+    const hb = Math.round(base.bottom - diff.getBoundingClientRect().bottom);
+    if (hb > 0) backH.value = hb;
+  }
   if (!timerB || !stackB) return;
   const w2 = Math.round(base.right - stackB.getBoundingClientRect().right - 12);
   const h2 = Math.round(base.bottom - timerB.getBoundingClientRect().top);
@@ -461,10 +471,10 @@ const pbStyle = computed(() => ({
   ...(pbW.value != null ? { width: `${pbW.value}px` } : {}),
   ...(pbH.value != null ? { height: `${pbH.value}px` } : {}),
 }));
-/** WR/PB 背景板几何：横向铺满（left/right 0），仅高度需量测注入（主计时顶 →
- *  画面底，同 pbH；未测得走 CSS 兜底） */
+/** WR/PB 背景板几何：横向铺满（left/right 0），仅高度需量测注入（偏差条底部 →
+ *  画面底，含偏差值数字的轨道范围；未测得走 CSS 兜底） */
 const pbBackStyle = computed(() => ({
-  ...(pbH.value != null ? { height: `${pbH.value}px` } : {}),
+  ...(backH.value != null ? { height: `${backH.value}px` } : {}),
 }));
 
 // 控制台 config_update 广播（WS）：实时并入本场景配置并落库
@@ -544,14 +554,15 @@ onUnmounted(() => {
 
         <!-- 多关偏差条（单关模式降为透明占位，不参与布局收缩）；diffV 为
              按导播配置回放后的显示值（对齐画面延迟） -->
-        <section class="diff-zone" :class="{ off: !isMulti }">
+        <section ref="diffZoneEl" class="diff-zone" :class="{ off: !isMulti }">
           <DiffBar :diff-ms="diffV" :gap-ms="params.gapMs" />
         </section>
 
         <!-- WR/PB 背景板：同 neon-panel 样式（直角边），横向铺满画面、顶缘 =
-             主计时顶、底贴画面边——垫在全部计时器与角标卡内容之下（z-index:-1，
-             .content 为层叠上下文；定位元素默认画在静态计时文字之上，须显式
-             垫底）；卡片内容排版锚定不变 -->
+             偏差条底部（含偏差值数字随游标移动的轨道范围）、底贴画面边——垫在
+             全部计时器与角标卡内容之下（z-index:-1，.content 为层叠上下文；
+             定位元素默认画在静态计时文字之上，须显式垫底）；卡片内容排版锚定
+             不变 -->
         <div v-if="pbCardVisible" class="pb-backdrop neon-panel" :style="pbBackStyle" />
 
         <!-- 双方计时器：屏幕中轴对称，A 左 B 右，沉底；多关副计时两行（上行
@@ -682,16 +693,17 @@ onUnmounted(() => {
   /* 尺寸容器：PickCornerCard 内以 cqh 单位随卡高折算标题字号（满高恰好三行） */
   container-type: size;
 }
-/* WR/PB 背景板：横向铺满画面、底贴画面边（顶缘 = 主计时顶，高度由脚本量测
-   注入），直角边。z-index:-1 显式垫底——.content 是层叠上下文，负 z 画在全部
-   流内计时文字与 z≥1 角标卡之下（绝对定位元素默认会盖住静态文本，DOM 顺序
-   无效，必须显式负 z） */
+/* WR/PB 背景板：横向铺满画面、底贴画面边，顶缘 = 偏差条底部（含偏差值数字
+   随游标移动的轨道范围；高度由脚本量测注入，CSS 兜底 = 计时区整高 17.3vh，
+   与 .timers 等高），直角边。z-index:-1 显式垫底——.content 是层叠上下文，
+   负 z 画在全部流内计时文字与 z≥1 角标卡之下（绝对定位元素默认会盖住静态
+   文本，DOM 顺序无效，必须显式负 z） */
 .pb-backdrop {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
-  height: 15vh;
+  height: 17.3vh;
   border-radius: 0;
   z-index: -1;
 }
