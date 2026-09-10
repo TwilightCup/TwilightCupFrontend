@@ -10,8 +10,7 @@
 export const SCENE_BACKGROUND_KEYS = [
   "default",
   "synthwave",
-  "synthwave1",
-  "synthwave2",
+  "synthwave_gl",
 ] as const;
 
 export type SceneBackgroundKey = (typeof SCENE_BACKGROUND_KEYS)[number];
@@ -28,8 +27,7 @@ export interface SceneBackgroundOption {
 export const SCENE_BACKGROUND_OPTIONS: SceneBackgroundOption[] = [
   { key: "default", labelKey: "scenes.backgrounds.default" },
   { key: "synthwave", labelKey: "scenes.backgrounds.synthwave" },
-  { key: "synthwave1", labelKey: "scenes.backgrounds.synthwave1" },
-  { key: "synthwave2", labelKey: "scenes.backgrounds.synthwave2" },
+  { key: "synthwave_gl", labelKey: "scenes.backgrounds.synthwave_gl" },
 ];
 
 /** 校验未知字符串是否为合法的背景 key（state_sync / localStorage 防脏） */

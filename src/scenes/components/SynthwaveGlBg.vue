@@ -1,21 +1,22 @@
 <script setup lang="ts">
 /**
- * synthwave2「水面浪潮2」全屏 WebGL 背景。
+ * synthwave_gl「水面浪潮GL」全屏 WebGL 背景。
  *
- * 上半屏（天空 / 远山 / 太阳）由 Canvas2D 按原版 SVG/CSS 精确绘制成纹理；
- * WebGL fragment shader 负责天空显示、程序化闪烁星星、水面波纹 / 平面反射 /
- * 折射网格 / 高光与暗角。这样天空轮廓和颜色能最大程度还原原版，水面则保留
- * 完整的实时着色器效果。
+ * 与旧版 CSS/SVG 水面不同，这一版由 GPU 一次性绘制天空、星空、远山、
+ * 镂空条纹太阳、滚动的透视霓虹网格、水面波光与波动倒影；网格和水面倒影
+ * 都做了 RGB 色散与波纹扭曲，因此更适合作为 OBS 浏览器源的大屏背景。
  *
  * 兼容性策略：
  *  - 只申请 WebGL1，使用 GLSL ES 1.00；
- *  - 初始化失败 / 着色器编译失败 / WebGL context lost 时向父组件 emit `failed`，
- *    父组件退回现有 CSS/SVG 水面，保证不黑屏；
- *  - 内部渲染分辨率按 DPR 上限 1.5 控制，避免同时编码时 GPU 压力过大。
+ *  - 初始化 / 编译 / 上下文丢失时向父组件 emit failed，由 SynthwaveBg 回退到
+ *    现有的 CSS/SVG「水面浪潮」预设，保证场景不黑屏；
+ *  - 渲染分辨率 DPR 上限 1.5，避免在 OBS 内同时编码时 GPU 压力过大。
  */
 import { onBeforeUnmount, onMounted, ref } from "vue";
-import { WATER_FRAGMENT_SHADER, WATER_VERTEX_SHADER } from "./waterShaderSources";
-import { createWaterSkyCanvas } from "./waterSkyTexture";
+import {
+  SYNTHWAVE_GL_FRAGMENT_SHADER,
+  SYNTHWAVE_GL_VERTEX_SHADER,
+} from "./synthwaveGlShaders";
 
 const emit = defineEmits<{ (e: "failed"): void }>();
 
@@ -24,11 +25,9 @@ const canvasEl = ref<HTMLCanvasElement | null>(null);
 let gl: WebGLRenderingContext | null = null;
 let program: WebGLProgram | null = null;
 let buffer: WebGLBuffer | null = null;
-let skyTexture: WebGLTexture | null = null;
 let positionLocation = -1;
 let timeLocation: WebGLUniformLocation | null = null;
 let resolutionLocation: WebGLUniformLocation | null = null;
-let skyTextureLocation: WebGLUniformLocation | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let rafId = 0;
 let running = false;
@@ -48,7 +47,7 @@ function compileShader(type: number, source: string): WebGLShader | null {
   gl.shaderSource(shader, source);
   gl.compileShader(shader);
   if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-    console.warn("[WaterShaderBg] shader compile failed:", gl.getShaderInfoLog(shader));
+    console.warn("[SynthwaveGlBg] shader compile failed:", gl.getShaderInfoLog(shader));
     gl.deleteShader(shader);
     return null;
   }
@@ -57,8 +56,8 @@ function compileShader(type: number, source: string): WebGLShader | null {
 
 function createProgram(): WebGLProgram | null {
   if (!gl) return null;
-  const vertexShader = compileShader(gl.VERTEX_SHADER, WATER_VERTEX_SHADER);
-  const fragmentShader = compileShader(gl.FRAGMENT_SHADER, WATER_FRAGMENT_SHADER);
+  const vertexShader = compileShader(gl.VERTEX_SHADER, SYNTHWAVE_GL_VERTEX_SHADER);
+  const fragmentShader = compileShader(gl.FRAGMENT_SHADER, SYNTHWAVE_GL_FRAGMENT_SHADER);
   if (!vertexShader || !fragmentShader) {
     if (vertexShader) gl.deleteShader(vertexShader);
     if (fragmentShader) gl.deleteShader(fragmentShader);
@@ -79,7 +78,7 @@ function createProgram(): WebGLProgram | null {
   gl.deleteShader(fragmentShader);
 
   if (!gl.getProgramParameter(linked, gl.LINK_STATUS)) {
-    console.warn("[WaterShaderBg] program link failed:", gl.getProgramInfoLog(linked));
+    console.warn("[SynthwaveGlBg] program link failed:", gl.getProgramInfoLog(linked));
     gl.deleteProgram(linked);
     return null;
   }
@@ -90,25 +89,18 @@ function setupGL(): boolean {
   const canvas = canvasEl.value;
   if (!canvas) return false;
 
+  const attributes: WebGLContextAttributes = {
+    alpha: false,
+    antialias: false,
+    depth: false,
+    stencil: false,
+    premultipliedAlpha: false,
+    preserveDrawingBuffer: false,
+    powerPreference: "high-performance",
+  };
   const context =
-    canvas.getContext("webgl", {
-      alpha: false,
-      antialias: false,
-      depth: false,
-      stencil: false,
-      premultipliedAlpha: false,
-      preserveDrawingBuffer: false,
-      powerPreference: "high-performance",
-    }) ??
-    (canvas.getContext("experimental-webgl", {
-      alpha: false,
-      antialias: false,
-      depth: false,
-      stencil: false,
-      premultipliedAlpha: false,
-      preserveDrawingBuffer: false,
-      powerPreference: "high-performance",
-    }) as WebGLRenderingContext | null);
+    (canvas.getContext("webgl", attributes) as WebGLRenderingContext | null) ??
+    (canvas.getContext("experimental-webgl", attributes) as WebGLRenderingContext | null);
   if (!context) return false;
   gl = context;
 
@@ -117,7 +109,7 @@ function setupGL(): boolean {
 
   positionLocation = gl.getAttribLocation(program, "aPos");
   if (positionLocation < 0) {
-    console.warn("[WaterShaderBg] attribute aPos not found");
+    console.warn("[SynthwaveGlBg] attribute aPos not found");
     return false;
   }
 
@@ -129,53 +121,18 @@ function setupGL(): boolean {
   gl.enableVertexAttribArray(positionLocation);
   gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
 
-  skyTexture = gl.createTexture();
-  if (!skyTexture) return false;
-  gl.bindTexture(gl.TEXTURE_2D, skyTexture);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  gl.texImage2D(
-    gl.TEXTURE_2D,
-    0,
-    gl.RGBA,
-    1,
-    1,
-    0,
-    gl.RGBA,
-    gl.UNSIGNED_BYTE,
-    new Uint8Array([0, 0, 0, 255]),
-  );
-
   timeLocation = gl.getUniformLocation(program, "uTime");
   resolutionLocation = gl.getUniformLocation(program, "uResolution");
-  skyTextureLocation = gl.getUniformLocation(program, "uSkyTex");
 
   gl.useProgram(program);
-  if (skyTextureLocation) gl.uniform1i(skyTextureLocation, 0);
   gl.disable(gl.DEPTH_TEST);
   gl.disable(gl.BLEND);
-  gl.clearColor(0.0, 0.0, 0.0, 1.0);
+  gl.clearColor(0.015, 0.0, 0.035, 1.0);
   return true;
-}
-
-function updateSkyTexture(): void {
-  if (!gl || !skyTexture) return;
-  const canvas = canvasEl.value;
-  if (!canvas) return;
-  const skyCanvas = createWaterSkyCanvas(canvas.width, canvas.height);
-  gl.bindTexture(gl.TEXTURE_2D, skyTexture);
-  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, skyCanvas);
 }
 
 function cleanupGL(): void {
   if (!gl) return;
-  if (skyTexture) {
-    gl.deleteTexture(skyTexture);
-    skyTexture = null;
-  }
   if (buffer) {
     gl.deleteBuffer(buffer);
     buffer = null;
@@ -187,7 +144,6 @@ function cleanupGL(): void {
   positionLocation = -1;
   timeLocation = null;
   resolutionLocation = null;
-  skyTextureLocation = null;
   gl = null;
 }
 
@@ -201,35 +157,31 @@ function resize(): void {
   if (width === canvas.width && height === canvas.height) return;
   canvas.width = width;
   canvas.height = height;
-  if (gl) {
-    gl.viewport(0, 0, width, height);
-    updateSkyTexture();
-  }
+  if (gl) gl.viewport(0, 0, width, height);
+  render(performance.now());
+}
+
+function render(now: number): void {
+  const canvas = canvasEl.value;
+  if (!gl || !program || !canvas) return;
+
+  gl.useProgram(program);
+  if (timeLocation) gl.uniform1f(timeLocation, Math.max(0, (now - startTime) / 1000));
+  if (resolutionLocation) gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
 }
 
 function frame(now: number): void {
   if (!running) return;
   rafId = requestAnimationFrame(frame);
-
-  const canvas = canvasEl.value;
-  if (!gl || !program || !canvas) return;
-
-  // 背景容器是 fixed inset:0，尺寸变化频率低；这里做一次低成本尺寸同步，
-  // 避免 OBS 在浏览器源初始化阶段拿到 300×150 的默认 canvas 尺寸。
-  resize();
-
-  gl.useProgram(program);
-  gl.activeTexture(gl.TEXTURE0);
-  gl.bindTexture(gl.TEXTURE_2D, skyTexture);
-  if (timeLocation) gl.uniform1f(timeLocation, (now - startTime) / 1000);
-  if (resolutionLocation) gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
-  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  render(now);
 }
 
 function start(): void {
   if (running) return;
   running = true;
   startTime = performance.now();
+  render(startTime);
   rafId = requestAnimationFrame(frame);
 }
 
@@ -282,11 +234,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <canvas ref="canvasEl" class="water-shader" aria-hidden="true" />
+  <canvas ref="canvasEl" class="synthwave-gl" aria-hidden="true" />
 </template>
 
 <style scoped>
-.water-shader {
+.synthwave-gl {
   position: absolute;
   inset: 0;
   display: block;

@@ -4,8 +4,9 @@ This document explains how to add a new background style to the director broadca
 scenes.
 
 The background is the fixed bottom layer used by every scene (and by the merged
-stage). It is rendered by `SynthwaveBg.vue` and currently includes the synthwave
-sun and grid style. The selected background is stored in the director config as
+stage). It is rendered by `SynthwaveBg.vue` and currently includes the default
+synthwave sun/grid, the CSS/SVG water preset, and the WebGL
+`synthwave_gl` water preset. The selected background is stored in the director config as
 `background`, persisted per match, sent over the stage URL as `?background=...`,
 and broadcast over WebSocket through `config_update`.
 
@@ -22,6 +23,10 @@ and broadcast over WebSocket through `config_update`.
     `data-background="<key>"` on the root element.
   - Automatically reacts to localStorage, cross-tab `storage` events, and
     WebSocket `config_update` messages.
+- `src/scenes/components/SynthwaveGlBg.vue` / `synthwaveGlShaders.ts`
+  - Full-screen WebGL1 implementation for the `synthwave_gl` preset.
+  - Emits `failed` when WebGL is unavailable; `SynthwaveBg.vue` then falls back
+    to the CSS/SVG `synthwave` preset.
 - `src/scenes/composables/useDirectorConfig.ts`
   - Stores and validates the `background` field in `DirectorConfig`.
   - No changes are needed here to add a new background style.
@@ -100,7 +105,9 @@ or any scene component.
 
 If a new background needs completely different DOM elements, you can extend the
 component template with a conditional branch based on `background`, but it is
-usually simpler to keep the same structure and only change CSS.
+usually simpler to keep the same structure and only change CSS. For GPU-heavy
+presets, follow `SynthwaveGlBg.vue`: isolate the WebGL component, keep a
+`failed` event, and let `SynthwaveBg.vue` fall back to a CSS/SVG preset.
 
 ### 5. Verify
 
