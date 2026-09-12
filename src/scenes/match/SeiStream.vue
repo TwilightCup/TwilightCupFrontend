@@ -31,6 +31,8 @@ const aligned = ref(false);
 const pullErr = computed(() => alignEngine.streamError[props.side]);
 /** 本侧是否已解析出 SEI 帧（区分"在解码"与"待解码/不支持"） */
 const hasFrames = computed(() => alignEngine.health[props.side].frames > 0);
+/** 本侧解码错误（WebCodecs 实际报错，明文） */
+const decodeErr = computed(() => alignEngine.health[props.side].decodeError);
 
 function refresh(): void {
   if (props.enabled && props.url) {
@@ -74,6 +76,7 @@ watch(cv, (c) => {
     />
     <div v-else class="placeholder">
       <div v-if="pullErr" class="err">⚠ 拉不到流 · {{ pullErr }}</div>
+      <div v-else-if="decodeErr" class="err">解码出错 · {{ decodeErr }}</div>
       <div v-else-if="hasFrames" class="err">画面已解析 {{ hasFrames }} 帧，但解码未就绪 / 环境不支持 WebCodecs</div>
       <div v-else class="live">● {{ bi("scenes.match.waitingSignal") }}</div>
     </div>

@@ -55,12 +55,17 @@ function hvc1Codec(hvcC: Uint8Array): string | null {
 class WebCodecsDecoder implements Decoder {
   private dec: globalThis.VideoDecoder | null = null;
   private onFrame: (rtUs: number, isKey: boolean, frame: globalThis.VideoFrame) => void;
+  private onErr?: (e: unknown) => void;
   private pendingRt: number[] = [];
   private pendingKey: boolean[] = [];
   isDecoding = false;
 
-  constructor(onFrame: (rtUs: number, isKey: boolean, frame: globalThis.VideoFrame) => void) {
+  constructor(
+    onFrame: (rtUs: number, isKey: boolean, frame: globalThis.VideoFrame) => void,
+    onErr?: (e: unknown) => void,
+  ) {
     this.onFrame = onFrame;
+    this.onErr = onErr;
   }
 
   async configure(codecStr: string, description: Uint8Array | null): Promise<boolean> {
@@ -85,7 +90,9 @@ class WebCodecsDecoder implements Decoder {
           if (rt !== undefined) this.onFrame(rt, key, frame);
           else frame.close();
         },
-        error: () => {
+        error: (e) => {
+          const m = e instanceof Error ? e.message : String(e ?? "VideoDecoder error");
+          this.onErr?.(new Error(m));
           this.dec?.close();
           this.dec = null;
           this.isDecoding = false;
@@ -161,6 +168,10 @@ export class FrameLockStream {
   hasContent = false;
   /** 本路最近解码/到达的 rt（供自锚时钟） */
   lastArrivedRtUs: number | null = null;
+  /** 是否已喂过首个关键帧（WebCodecs 首 chunk 须为关键帧，否则不输出/报错） */
+  private decStarted = false;
+  /** 最近解码错误（明文） */
+  decodeError: string | null = null;
 
   // ---- 连通性指标（维度对齐 SEIInjector 冒烟工具；供导播控制台观察） ----
   private st = { frames: 0, segs: 0, missing: 0, ntp: 0, key: 0, droppedSeq: 0, lastSeq: null as number | null, lastRtUs: null as number | null };
@@ -170,9 +181,15 @@ export class FrameLockStream {
     this.opts = opts;
     this.rawSpanUs = opts.rawSpanUs ?? 600_000_000; // 10 min in µs
     this.source = source;
-    this.decoder = new WebCodecsDecoder((rtUs, isKey, frame) => {
-      this.queue.add({ rtUs, isKey, handle: frame });
-    });
+    this.decoder = new WebCodecsDecoder(
+      (rtUs, isKey, frame) => this.queue.add({ rtUs, isKey, handle: frame }),
+      (e) => {
+        const m = e instanceof Error ? e.message : String(e);
+        console.error("[align decode]", m);
+        this.decodeError = m;
+        this.opts.onError?.(e);
+      },
+    );
     this.queue = new FrameQueue((e) => {
       const f = e.handle as globalThis.VideoFrame | null;
       try { f?.close(); } catch { /* noop */ }
@@ -206,9 +223,13 @@ export class FrameLockStream {
         for (const s of r.samples) {
           const info = this.onSample(s);
           if (info && this.ready && this.mode === "aligned") {
+            const isKey = info.keyframe || s.isKey;
+            // WebCodecs 首 chunk 必须为关键帧；起播前跳过非关键帧，否则不产帧/报错 → 黑屏
+            if (!this.decStarted && !isKey) continue;
+            this.decStarted = true;
             const rtUs = Number(info.realtime_us);
-            this.raw.push({ rtUs, isKey: info.keyframe || s.isKey, payload: new Uint8Array(s.payload) });
-            this.decoder.decodeSample(rtUs, info.keyframe || s.isKey, s.payload);
+            this.raw.push({ rtUs, isKey, payload: new Uint8Array(s.payload) });
+            this.decoder.decodeSample(rtUs, isKey, s.payload);
             this.trimRaw(rtUs);
           }
         }
@@ -310,6 +331,7 @@ export class FrameLockStream {
       hasContent: this.hasContent,
       mode: this.mode,
       frontRtUs: this.lastArrivedRtUs,
+      decodeError: this.decodeError,
     };
   }
 

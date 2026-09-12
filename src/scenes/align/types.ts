@@ -73,6 +73,8 @@ export interface StreamHealth {
   mode: "aligned" | "off";
   /** 最近到货 rt（µs） */
   frontRtUs: number | null;
+  /** 最近 WebCodecs 解码错误（明文；无则 null） */
+  decodeError: string | null;
 }
 
 export function emptyHealth(): StreamHealth {
@@ -88,5 +90,6 @@ export function emptyHealth(): StreamHealth {
     hasContent: false,
     mode: "off",
     frontRtUs: null,
+    decodeError: null,
   };
 }

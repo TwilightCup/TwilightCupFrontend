@@ -170,15 +170,16 @@ class AlignEngine {
   private drawFrame(canvas: HTMLCanvasElement, frame: CanvasImageSource): void {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    // 全幅贴合（外层裁切 4:3/16:9 由 SeiStream 容器负责）
-    const w = canvas.width || (frame as { displayWidth?: number }).displayWidth ||
-      (frame as unknown as { codedWidth?: number }).codedWidth || 1920;
-    const h = canvas.height || (frame as { displayHeight?: number }).displayHeight ||
-      (frame as unknown as { codedHeight?: number }).codedHeight || 1080;
+    // 全幅贴合（外层裁切 4:3/16:9 由 SeiStream 容器负责）。
+    // 优先取帧固有尺寸（新 canvas 默认 300×150 是假的，不能用它当画布分辨率）。
+    const frm = frame as { displayWidth?: number; displayHeight?: number; codedWidth?: number; codedHeight?: number };
+    const w = frm.displayWidth || frm.codedWidth || canvas.width || 1920;
+    const h = frm.displayHeight || frm.codedHeight || canvas.height || 1080;
     if (canvas.width !== w || canvas.height !== h) {
       canvas.width = w;
       canvas.height = h;
     }
+    ctx.clearRect(0, 0, w, h);
     ctx.drawImage(frame, 0, 0, w, h);
   }
 }
