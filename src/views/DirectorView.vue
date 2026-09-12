@@ -226,12 +226,14 @@ watch(
 // 连通性指标条（维度对齐 SEIInjector 冒烟工具，刷新由 alignEngine.health ~2.5Hz）
 function healthText(side: "A" | "B"): string {
   const err = alignEngine.streamError[side];
-  if (err) return `拉不到流 · ${err}`;
   const on = side === "A" ? cfgConfig.alignA : cfgConfig.alignB;
   const url = side === "A" ? cfgConfig.hlsA : cfgConfig.hlsB;
+  if (err) return `拉不到流 · ${err} ·（${url}）`;
   if (!on || !url) return "对齐未启用（MSE 播放）";
   const h = alignEngine.health[side];
-  if (h.frames === 0 && !h.hasContent) return "等待内容…";
+  if (h.frames === 0 && !h.hasContent) {
+    return `等待内容 · ${url} · 确认端口可达且该路径在推流`;
+  }
   const fps = h.fps ? h.fps.toFixed(0) : "—";
   let s = `${h.codec.toUpperCase()} · ${fps} fps · ${h.frames} 帧 · NTP ${h.ntp}/${h.frames}`;
   if (h.droppedSeq) s += ` · 丢帧 ${h.droppedSeq}`;
