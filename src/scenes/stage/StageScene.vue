@@ -44,6 +44,9 @@ const { config: alignCfg, load: loadCfg } = useDirectorConfig();
  *  切到比赛场景时 SeiStream 直接画已解帧 → 秒切不重缓冲。alignEngine 持常驻引用，
  *  SeiStream 卸载只减自身计数，流不会被停。 */
 const preloaded = reactive<Record<Side, string>>({ A: "", B: "" });
+// 舞台即对齐权威：自己推进虚拟时间 T 并发广播；控制台/预览读广播的 T（见 store.applyFrameAlign）
+alignEngine.setAuthority(true);
+
 function ensureAlignPreload(): void {
   for (const side of ["A", "B"] as Side[]) {
     const url = side === "A" ? alignCfg.hlsA : alignCfg.hlsB;
@@ -62,6 +65,15 @@ function ensureAlignPreload(): void {
   }
   alignEngine.start(); // 主循环（珍藏状态解/推进，无 canvas 也持续）
 }
+
+// 作为对齐权威持续广播统一虚拟时间 T + A/B 就绪（节流由 store.sendFrameAlign 控制），
+// 供控制台/预览四路同一 T、就绪反映舞台真实态；后端排除发送方，舞台自己不进回环。
+watch(
+  () => alignEngine.tUs.value,
+  (t) => {
+    if (t != null) director.sendFrameAlign(t, alignEngine.presented.A, alignEngine.presented.B);
+  },
+);
 
 watch(
   [() => director.matchId, () => director.remoteConfig],

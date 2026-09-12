@@ -247,12 +247,18 @@ function healthCls(side: "A" | "B"): "h-ok" | "h-err" | "" {
   return alignEngine.health[side].frames > 0 ? "h-ok" : "";
 }
 
-/** 该侧"切到比赛场景能否直接出画"的就绪标记（放 A/B 信息行） */
+/** 该侧"切到比赛场景能否直接出画"的就绪标记（放 A/B 信息行）。
+ *  优先读舞台（权威）经 WS 广播上报的 ready_a/b——反映的是真正渲染的舞台就绪态；
+ *  一轮广播还没到时回退本地引擎判断。 */
 function readyState(side: "A" | "B"): { cls: string; label: string } {
   const on = side === "A" ? cfgConfig.alignA : cfgConfig.alignB;
   const url = side === "A" ? cfgConfig.hlsA : cfgConfig.hlsB;
   if (!on || !url) return { cls: "off", label: "未启用" };
+  const fa = director.frameAlign;
+  const stageReady = fa ? side === "A" ? fa.readyA : fa.readyB : null;
+  if (stageReady === true) return { cls: "ok", label: "已就绪" };
   if (alignEngine.streamError[side]) return { cls: "err", label: "拉不到流" };
+  if (stageReady === false) return { cls: "wait", label: "攒缓冲中" };
   const h = alignEngine.health[side];
   if (h.frames === 0 && !h.hasContent) return { cls: "wait", label: "无内容" };
   if (!alignEngine.presented[side]) return { cls: "wait", label: "攒缓冲中" };

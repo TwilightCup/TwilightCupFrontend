@@ -38,9 +38,11 @@ class AlignEngine {
   private last = 0;
   private running = false;
   private healthTimer: ReturnType<typeof setInterval> | null = null;
-  /** 跨文档一致性：被权威页（舞台）经 WS director_cmd(frame_align) 广播的外部 T（µs）。
-   *   setExternalTUs 置位后本实例以外部 T 为准（观众页不跑自己的速率控制，取同帧<→像素一致）。 */
+  /** 跨文档一致性：被权威页（舞台）经 WS director_cmd(frame_align)/state_sync 广播的外部 T（µs）。
+   *   观众页（控制台）置位后以外部 T 为准；权威页（舞台）自己推进 RateController 并广播。 */
   private externalTUs: number | null = null;
+  /** 本实例是否是对齐权威（舞台渲染页）：true 时不用外部 T，自己跑速率控制并发广播 */
+  private isAuthority = false;
 
   /** 虚拟对齐时间戳 T（epoch 微秒）；未就绪 null */
   readonly tUs: Ref<number | null> = ref(null);
@@ -57,9 +59,14 @@ class AlignEngine {
     return this.cfg.ready;
   }
 
+  /** 标记本实例为对齐权威（舞台渲染页，自己推进 T 并广播）——便观众页不要覆盖自身的时钟 */
+  setAuthority(v: boolean): void {
+    this.isAuthority = v;
+  }
+
   setExternalTUs(us: number | null): void {
     this.externalTUs = us;
-    if (us != null) this.tUs.value = us;
+    if (!this.isAuthority && us != null) this.tUs.value = us;
   }
   /* ---- 流管理（每侧唯一流，引用计数：舞台/控制台共同引用，计数归零才停） ---- */
   private refs = new Map<Side, number>();
@@ -144,10 +151,12 @@ class AlignEngine {
         const f = s.frontier();
         if (f != null) frontiers.push(f);
       }
-      // T：外部权威（观众页）优先；否则本实例速率控制（被广播的作者页）
-      let T: number | null = this.externalTUs;
-      if (T == null && frontiers.length > 0) {
-        T = this.cfg.step(elapsed, frontiers);
+      // T：权威页自己跑速率控制（并发广播）；观众页用外部权威 T（当有）
+      let T: number | null = null;
+      if (this.isAuthority || this.externalTUs == null) {
+        if (frontiers.length > 0) T = this.cfg.step(elapsed, frontiers);
+      } else {
+        T = this.externalTUs;
       }
       if (T != null) {
         this.tUs.value = T;

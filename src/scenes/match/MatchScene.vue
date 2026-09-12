@@ -118,14 +118,7 @@ const alignedB = useAlignedTiming("B", {
 const seiA = computed(() => config.alignA && !!config.hlsA);
 const seiB = computed(() => config.alignB && !!config.hlsB);
 
-// 作为对齐权威（本页有对齐流在渲染）：把本地计算出的虚拟时间 T 节流广播，
-// 供其他页签/机器（控制台预览等）复用同一 T → 像素一致（§1.2；发送者被后端排除）
-watch(
-  () => alignEngine.tUs.value,
-  (t) => {
-    if (t != null && liveReady.value) director.sendFrameAlign(t);
-  },
-);
+// （舞台根 StageScene 作为对齐权威持续广播 frame_align(t_us, ready_a/b)，本场景不重复发）
 
 const { liveMsA, liveMsB, liveSegA, liveSegB } = useLiveTimers(
   (side) =>

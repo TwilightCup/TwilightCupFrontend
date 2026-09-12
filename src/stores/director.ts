@@ -389,6 +389,11 @@ export const useDirectorStore = defineStore("director", () => {
         // 以及服务端连接回放（state_sync：舞台/控制台晚打开也能对齐状态）
         if (msg.action === "state_sync") {
           applyStateSync(msg.payload ?? {});
+          // 后端把最近一次 frame_align 作为 state_sync 的独立子键补发（权威 T + 就绪）
+          const fa = (msg.payload as { frame_align?: unknown } | undefined)?.frame_align as
+            | { t_us?: unknown; ready_a?: unknown; ready_b?: unknown }
+            | undefined;
+          if (fa && typeof fa.t_us === "number") applyFrameAlign(fa as FrameAlignPayload);
         } else if (msg.action === "switch_scene") {
           currentSceneCmd.value = (msg.payload?.scene as string) ?? null;
         } else if (msg.action === "soon_set_target" && msg.payload?.target_ms) {
@@ -414,9 +419,9 @@ export const useDirectorStore = defineStore("director", () => {
           remoteConfig.value = patch;
           if (matchId.value) mergeStoredConfig(matchId.value, patch);
         } else if (msg.action === "frame_align" && typeof msg.payload?.t_us === "number") {
-          // 跨文档一致性：权威页（舞台）广播的虚拟时间 T（µs）→ 本页对齐引擎复用同一 T，
-          // 保证不同页签/机器上 A/B 与权威页同帧（§1.2）。发送者被后端排除，不收到自己。
-          alignEngine.setExternalTUs(msg.payload.t_us as number);
+          // 跨文档一致性：权威页（舞台）广播的虚拟时间 T（µs）+ A/B 就绪 → 观众/预览复用同 T、
+          // 就绪读舞台上报值。发送者（舞台）被后端排除，不收到自己。
+          applyFrameAlign(msg.payload as unknown as FrameAlignPayload);
         }
         break;
       default:
@@ -490,6 +495,19 @@ export const useDirectorStore = defineStore("director", () => {
   });
   /** 最近一次 config_update 广播的配置（已同步落库；ref 供已挂载场景响应） */
   const remoteConfig = ref<Partial<DirectorConfig> | null>(null);
+
+  /** 权威页（舞台）上报的最近一次帧对齐状态：统一虚拟时间 T + A/B 就绪 */
+  interface FrameAlignPayload {
+    t_us: number;
+    ready_a?: boolean;
+    ready_b?: boolean;
+  }
+  const frameAlign = ref<{ tUs: number | null; readyA: boolean; readyB: boolean } | null>(null);
+  function applyFrameAlign(p: FrameAlignPayload): void {
+    frameAlign.value = { tUs: p.t_us, readyA: !!p.ready_a, readyB: !!p.ready_b };
+    // 观众页覆盖本地时钟到权威 T；权威页（舞台）自己推进，不覆盖（否则卡死）
+    alignEngine.setExternalTUs(p.t_us);
+  }
 
   /**
    * state_sync 回放（连接建立时服务端补发，后端 c58f0ad）：并入场景/倒计时/配置。
@@ -568,15 +586,15 @@ export const useDirectorStore = defineStore("director", () => {
     return socket.sendQueued(send.directorCommand(action, payload));
   }
 
-  /** 节流广播虚拟时间 T（帧对齐跨文档一致性；发送者被后端排除不收到自己）。
-   *  由权威页（舞台，有对齐流）调用；观众页不调，只收。 */
+  /** 节流广播虚拟时间 T + A/B 就绪（帧对齐跨文档一致性；发送者=舞台被后端排除不收到自己）。
+   *  由权威页（舞台）调用；观众页不调只收。ready 反映舞台真实上屏态，观众就绪胶囊据此显示。 */
   let lastAlignT = 0;
-  function sendFrameAlign(tUs: number): void {
+  function sendFrameAlign(tUs: number, readyA?: boolean, readyB?: boolean): void {
     if (matchEnded.value) return;
     const now = Date.now();
     if (now - lastAlignT < 400) return; // ~2.5Hz 足够（帧锁同帧由 30s 缓冲兜底）
     lastAlignT = now;
-    sendDirectorCommand("frame_align", { t_us: tUs });
+    sendDirectorCommand("frame_align", { t_us: tUs, ready_a: readyA ?? false, ready_b: readyB ?? false });
   }
 
   function nameOf(side: "A" | "B"): string {
@@ -660,6 +678,8 @@ export const useDirectorStore = defineStore("director", () => {
     // subsegment 实时时间差（偏差条数据源）+ 到达时刻（防剧透门控）
     subsegmentGap,
     subsegmentGapAt,
+    // 权威页（舞台）上报的帧对齐统一虚拟时间 T + A/B 就绪（跨文档一致性）
+    frameAlign,
     // 双席 live_time 实时计时（主计时器实时走表数据源）
     liveTimeA,
     liveTimeB,
