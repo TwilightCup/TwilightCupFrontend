@@ -45,6 +45,18 @@ export async function fetchBytes(url: string): Promise<Uint8Array> {
   return new Uint8Array(await r.arrayBuffer());
 }
 
+/**
+ * 把"拿到了 m3u8 却没解析出分片"的原因分类，用于 UI 精准提示（不再笼统"等待内容"）。
+ * 有分片 → null（正常）。
+ */
+export function categorizeEmptyPlaylist(text: string, items: HlsSegmentItem[]): string | null {
+  const t = text.trimStart();
+  if (!t.startsWith("#EXTM3U")) return "m3u8 无 #EXTM3U——不是 HLS 播放列表（200 但内容异常）";
+  if (/#EXT-X-STREAM-INF/i.test(text)) return "m3u8 是 master 播放列表（含变体），需先选一条 media 列表";
+  if (items.length === 0) return "m3u8 无分片——该路径当前没有推流/列表空闲";
+  return null;
+}
+
 export interface HarvesterOptions {
   /** m3u8 轮询周期（ms） */
   pollIntervalMs: number;
@@ -60,6 +72,8 @@ export class HlsHarvester {
   private initFetched = false;
   private timer: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
+  /** 最近一次空列表诊断（去重：同一原因只报一次，恢复有分片即重置） */
+  private lastEmptyDiag: string | null = null;
 
   constructor(
     private url: string,
@@ -87,6 +101,16 @@ export class HlsHarvester {
       const url = this.url;
       const text = await (await fetch(url, { cache: "no-store" })).text();
       const pl = parseM3u8(text, url);
+      // 空列表诊断：把"拿到但没分片"的真实原因上报一次（master / 非HLS / 空闲）
+      if (pl.items.length === 0) {
+        const diag = categorizeEmptyPlaylist(text, pl.items);
+        if (diag && diag !== this.lastEmptyDiag) {
+          this.lastEmptyDiag = diag;
+          this.opts.onError?.(new Error(diag));
+        }
+      } else {
+        this.lastEmptyDiag = null;
+      }
       // init：只取一次，用于 codec/description
       if (pl.init.uri && !this.initFetched) {
         this.initFetched = true;
