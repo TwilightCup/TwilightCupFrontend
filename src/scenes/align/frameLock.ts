@@ -48,6 +48,13 @@ function hvc1Codec(hvcC: Uint8Array): string | null {
   }
 }
 
+/** 判断样本封装：起始码 00 00 00 01 → Annex-B（喂解码时去掉 description）；否则 AVCC */
+function detectEncapsulation(payload: Uint8Array): "avcc" | "annexb" {
+  return payload.length >= 4 && payload[0] === 0 && payload[1] === 0 && payload[2] === 0 && payload[3] === 1
+    ? "annexb"
+    : "avcc";
+}
+
 /**
  * WebCodecs 解码器实现（真实浏览器）。构造后 config 返回是否可用；不可用则后续 decode
  * 不会真正解码，isDecoding 保持 false——外层据此回退 MSE。
@@ -93,7 +100,8 @@ class WebCodecsDecoder implements Decoder {
         error: (e) => {
           const m = e instanceof Error ? e.message : String(e ?? "VideoDecoder error");
           this.onErr?.(new Error(m));
-          this.dec?.close();
+          // 报错后 codec 可能已进入 closed 态，再 close() 会抛 InvalidStateError——try 兜底
+          try { this.dec?.close(); } catch { /* already closed */ }
           this.dec = null;
           this.isDecoding = false;
         },
@@ -168,8 +176,8 @@ export class FrameLockStream {
   hasContent = false;
   /** 本路最近解码/到达的 rt（供自锚时钟） */
   lastArrivedRtUs: number | null = null;
-  /** 是否已喂过首个关键帧（WebCodecs 首 chunk 须为关键帧，否则不输出/报错） */
-  private decStarted = false;
+  /** sample 封装形态：AVCC(长度前缀) 或 Annex-B(起始码)——决定 WebCodecs description */
+  private encapsulation: "avcc" | "annexb" | null = null;
   /** 最近解码错误（明文） */
   decodeError: string | null = null;
 
@@ -219,19 +227,21 @@ export class FrameLockStream {
         if (r.codec) this.codec = r.codec;
         if (r.avcC) this.description = r.avcC;
         if (r.hvcC) this.description = r.hvcC;
-        if (seg.kind === "init" || r.avcC || r.hvcC) await this.configureDecoder();
         for (const s of r.samples) {
           const info = this.onSample(s);
-          if (info && this.ready && this.mode === "aligned") {
-            const isKey = info.keyframe || s.isKey;
-            // WebCodecs 首 chunk 必须为关键帧；起播前跳过非关键帧，否则不产帧/报错 → 黑屏
-            if (!this.decStarted && !isKey) continue;
-            this.decStarted = true;
-            const rtUs = Number(info.realtime_us);
-            this.raw.push({ rtUs, isKey, payload: new Uint8Array(s.payload) });
-            this.decoder.decodeSample(rtUs, isKey, s.payload);
-            this.trimRaw(rtUs);
+          const isKey = s.isKey || info?.keyframe === true;
+          // 只从关键帧起播（WebCodecs 首个 chunk 须为 key，否则不产帧/报错）
+          if (!isKey || !info) continue;
+          // 首个关键帧：此时才确定封装形态 → 配置解码器（AVCC 带 description，Annex-B 不带）
+          if (!this.encapsulation) {
+            this.encapsulation = detectEncapsulation(s.payload);
+            await this.configureDecoder();
+            if (this.mode !== "aligned" || !this.ready) break;
           }
+          const rtUs = Number(info.realtime_us);
+          this.raw.push({ rtUs, isKey, payload: new Uint8Array(s.payload) });
+          this.decoder.decodeSample(rtUs, isKey, s.payload);
+          this.trimRaw(rtUs);
         }
         if (r.samples.length > 0) {
           this.hasContent = true;
@@ -264,7 +274,9 @@ export class FrameLockStream {
     const codecStr = this.codec === "h264"
       ? (avcC ? avc1Codec(avcC) : "avc1.42E01F")
       : (hvcC ? (hvc1Codec(hvcC) ?? "hvc1.1.6.L93.B0") : "hvc1.1.6.L93.B0");
-    const ok = await this.decoder.configure(codecStr, this.description);
+    // 关键：AVCC 需带 avcC/hvcC description；Annex-B 起止需去掉 description（数据按起始码喂）。
+    const useDesc = this.encapsulation === "annexb" ? null : this.description;
+    const ok = await this.decoder.configure(codecStr, useDesc);
     if (ok) {
       this.mode = "aligned";
       this.ready = true;
