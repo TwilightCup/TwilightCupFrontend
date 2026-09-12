@@ -42,6 +42,8 @@ export interface HlsPlaylist {
   /** EXT-X-MAP init 段（fMP4 codec/description 来源） */
   init: { uri: string | null };
   items: HlsSegmentItem[];
+  /** master 播放列表选出的最优变体 media 播放列表 URI（若本条是 media 列表则为 null） */
+  variantUri?: string | null;
 }
 
 /** 一条已解码、按 realtime_us 升序待排程的帧 */

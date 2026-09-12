@@ -5,15 +5,16 @@
  */
 import type { HlsPlaylist, HlsSegmentItem } from "./types";
 
-/** 解析 m3u8 文本 → init + items（镜像冒烟工具 parseM3u8）。 */
+/** 解析 m3u8 文本 → init + items + master 变体选择（镜像冒烟工具 parseM3u8，扩展 master） */
 export function parseM3u8(text: string, base: string): HlsPlaylist {
   const init: { uri: string | null } = { uri: null };
   const items: HlsSegmentItem[] = [];
   const lines = text.split(/\r?\n/);
   let pendingDur: number | null = null;
+  let bestVariant: { uri: string; score: number } | null = null;
   const resolve = (u: string) => new URL(u, base).href;
-  for (const raw of lines) {
-    const line = raw.trim();
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!.trim();
     if (!line || line.startsWith("#EXT-X-VERSION")) continue;
     if (line.startsWith("#EXT-X-MAP:")) {
       const m = line.match(/URI="([^"]+)"/);
@@ -31,12 +32,29 @@ export function parseM3u8(text: string, base: string): HlsPlaylist {
       if (m) items.push({ uri: resolve(m[1]!), kind: "part", duration: d ? parseFloat(d[1]!) : 0 });
       continue;
     }
+    if (line.startsWith("#EXT-X-STREAM-INF:")) {
+      // master 变体：下一条非 # 行是 media 播放列表 URI；BANDWIDTH/RESOLUTION 打分选最优
+      const bw = /BANDWIDTH=(\d+)/.exec(line);
+      const res = /RESOLUTION=(\d+)x(\d+)/.exec(line);
+      const height = res ? parseInt(res[2]!, 10) : 0;
+      const bandwidth = bw ? parseInt(bw[1]!, 10) : 0;
+      for (let j = i + 1; j < lines.length; j++) {
+        const u = lines[j]!.trim();
+        if (!u || u.startsWith("#")) break;
+        // 打分：优先分辨率，其次码率；取最高
+        const score = height * 1_000_000 + bandwidth;
+        if (!bestVariant || score > bestVariant.score) bestVariant = { uri: resolve(u), score };
+        i = j;
+        break;
+      }
+      continue;
+    }
     if (!line.startsWith("#") && /^[^#]/.test(line) && pendingDur !== null) {
       items.push({ uri: resolve(line), kind: "segment", duration: pendingDur });
       pendingDur = null;
     }
   }
-  return { init, items };
+  return { init, items, variantUri: bestVariant?.uri ?? null };
 }
 
 export async function fetchBytes(url: string): Promise<Uint8Array> {
@@ -74,6 +92,8 @@ export class HlsHarvester {
   private stopped = false;
   /** 最近一次空列表诊断（去重：同一原因只报一次，恢复有分片即重置） */
   private lastEmptyDiag: string | null = null;
+  /** master 解析后锁定的 media 播放列表 URI（null = 尚未解析） */
+  private mediaUrl: string | null = null;
 
   constructor(
     private url: string,
@@ -98,7 +118,13 @@ export class HlsHarvester {
   private async poll(): Promise<void> {
     if (this.stopped) return;
     try {
-      const url = this.url;
+      // 首次：拉 master，若有变体锁最优 media（之后直接轮询 media，避免重复探测 master）
+      if (!this.mediaUrl) {
+        const masterText = await (await fetch(this.url, { cache: "no-store" })).text();
+        const master = parseM3u8(masterText, this.url);
+        this.mediaUrl = master.variantUri ?? this.url;
+      }
+      const url = this.mediaUrl;
       const text = await (await fetch(url, { cache: "no-store" })).text();
       const pl = parseM3u8(text, url);
       // 空列表诊断：把"拿到但没分片"的真实原因上报一次（master / 非HLS / 空闲）
