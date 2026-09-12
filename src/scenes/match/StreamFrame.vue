@@ -53,11 +53,14 @@ const props = withDefaults(
     refreshNonce?: number;
     /** 是否按 4:3 裁剪画面（导播端 true；裁判端监控 false，按原始 16:9 完整显示） */
     crop4to3?: boolean;
+    /** 隐藏流地址显示（舞台对外播出用——请求度不泄露内网 m3u8；控制台预览留 true 供排查） */
+    hideUrl?: boolean;
   }>(),
   {
     hidden: false,
     refreshNonce: 0,
     crop4to3: true,
+    hideUrl: false,
   },
 );
 
@@ -289,7 +292,7 @@ onBeforeUnmount(() => {
     <!-- 未推流 / 播放失败：占位（可见降级，不黑屏） -->
     <div v-else class="placeholder">
       <div class="live">● {{ bi("scenes.match.waitingSignal") }}</div>
-      <div v-if="videoBroken && (hlsUrl || embedUrl)" class="url">{{ hlsUrl || embedUrl }}</div>
+      <div v-if="!hideUrl && videoBroken && (hlsUrl || embedUrl)" class="url">{{ hlsUrl || embedUrl }}</div>
     </div>
   </div>
 </template>

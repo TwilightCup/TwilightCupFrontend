@@ -71,7 +71,6 @@ watch(cv, (c) => {
     <div v-else class="placeholder">
       <div v-if="pullErr" class="err">⚠ 拉不到流 · {{ pullErr }}</div>
       <div v-else class="live">● {{ bi("scenes.match.waitingSignal") }}</div>
-      <div v-if="props.url" class="url">{{ props.url }}</div>
     </div>
   </div>
 </template>
@@ -121,7 +120,6 @@ canvas.video {
   max-width: 92%;
   line-height: 1.4;
 }
-.url { z-index: 1; font-size: clamp(9px, 0.9vw, 13px); color: var(--syn-text-dim); }
 @keyframes shift { 0%, 100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
 @keyframes blink { 50% { opacity: 0.45; } }
 </style>

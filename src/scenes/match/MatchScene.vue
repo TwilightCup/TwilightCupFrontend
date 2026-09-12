@@ -602,6 +602,7 @@ onUnmounted(() => {
             :token="params.token"
             :hidden="config.hideA"
             :refresh-nonce="config.refreshA"
+            hide-url
           />
           <SeiStream
             v-if="seiB"
@@ -618,6 +619,7 @@ onUnmounted(() => {
             :token="params.token"
             :hidden="config.hideB"
             :refresh-nonce="config.refreshB"
+            hide-url
           />
         </section>
 
