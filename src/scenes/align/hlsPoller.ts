@@ -143,9 +143,12 @@ export class HlsHarvester {
         this.onContent(await fetchBytes(pl.init.uri!), "init");
       }
       for (const it of pl.items) {
-        if (this.seen.has(it.uri)) continue;
+        // 去重按"去掉 query"的基地址：盗链 HLS 每次轮询 session 参数会变，
+        // 同一段若按完整 URL 判重会被当新段重抓、媒体被处理两遍 → 帧率/帧数翻倍
+        const key = it.uri.split("?")[0];
+        if (this.seen.has(key)) continue;
         if (it.kind === "part" && !this.opts.followParts) continue;
-        this.seen.add(it.uri);
+        this.seen.add(key);
         try {
           this.onContent(await fetchBytes(it.uri), it.kind);
         } catch {

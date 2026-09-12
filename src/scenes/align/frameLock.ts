@@ -312,9 +312,10 @@ export class FrameLockStream {
     this.st.lastSeq = info.seq;
     if (this.st.lastRtUs != null) {
       const dt = rtUs - this.st.lastRtUs;
-      if (dt > 0 && dt < 100_000) {
+      // 只统计真实帧间隔：≥1ms(≤1000fps) 且 <200ms(≥5fps)，排除近零重复/长卡顿
+      if (dt >= 1_000 && dt < 200_000) {
         this.dtRing.push(dt);
-        if (this.dtRing.length > 30) this.dtRing.shift();
+        if (this.dtRing.length > 60) this.dtRing.shift();
       }
     }
     this.st.lastRtUs = rtUs;
@@ -337,7 +338,9 @@ export class FrameLockStream {
   /** 连通性/健康快照 */
   stats(): StreamHealth {
     const n = this.dtRing.length;
-    const mean = n ? this.dtRing.reduce((a, b) => a + b, 0) / n : null;
+    // 用中位数而非均值：稳健，抗偶发半帧/双 SEI 造成的 dt 偏小
+    const srt = [...this.dtRing].sort((a, b) => a - b);
+    const median = n ? (n % 2 ? srt[(n - 1) >> 1]! : (srt[n / 2 - 1]! + srt[n / 2]!) / 2) : null;
     return {
       codec: this.codec,
       frames: this.st.frames,
@@ -346,7 +349,7 @@ export class FrameLockStream {
       ntp: this.st.ntp,
       key: this.st.key,
       droppedSeq: this.st.droppedSeq,
-      fps: mean ? 1_000_000 / mean : null,
+      fps: median ? 1_000_000 / median : null,
       hasContent: this.hasContent,
       mode: this.mode,
       frontRtUs: this.lastArrivedRtUs,
