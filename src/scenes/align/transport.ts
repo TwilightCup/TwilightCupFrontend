@@ -10,6 +10,18 @@
 import { HlsHarvester, fetchBytes } from "./hlsPoller";
 import type { Codec } from "./types";
 
+/** 识别 HLS 段容器：首 4CC 为 MP4 box → fmp4（媒体段常以 styp/moof 开头，非仅 ftyp）；
+ *  0x47 同步 → ts；否则 annexb。 */
+function detectContainer(buf: Uint8Array): RawSegment["fmt"] {
+  const has4cc = buf.length >= 8;
+  const fourcc = has4cc ? String.fromCharCode(buf[4]!, buf[5]!, buf[6]!, buf[7]!) : "";
+  if (["ftyp", "styp", "moof", "mdat", "sidx", "moov", "mfra", "free", "skip"].includes(fourcc)) {
+    return "fmp4";
+  }
+  if (buf[0] === 0x47) return "ts"; // MPEG-TS 同步字
+  return "annexb";
+}
+
 /** 一段交给核心的原始视频内容（init 或媒体数据）。 */
 export interface RawSegment {
   kind: "init" | "data";
@@ -44,12 +56,12 @@ export class HlsFrameSource implements FrameSource {
     this.harvester = new HlsHarvester(
       opts.url,
       (buf, kind) => {
-        const ftyp = buf.length >= 4 && String.fromCharCode(buf[0], buf[1], buf[2], buf[3]) === "ftyp";
-        const ts = !ftyp && buf.length >= 8 && buf[0] === 0x47; // MPEG-TS 同步字 0x47
+        const fmt = detectContainer(buf);
         if (kind === "init") {
+          // init（ftyp/moov）也是 fmp4：为后续媒体段提供 codec/description
           this.onSegment({ kind: "init", fmt: "fmp4", payload: buf });
         } else {
-          this.onSegment({ kind: "data", fmt: ftyp ? "fmp4" : ts ? "ts" : "annexb", payload: buf });
+          this.onSegment({ kind: "data", fmt, payload: buf });
         }
       },
       {
