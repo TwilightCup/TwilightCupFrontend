@@ -33,6 +33,16 @@ const pullErr = computed(() => alignEngine.streamError[props.side]);
 const hasFrames = computed(() => alignEngine.health[props.side].frames > 0);
 /** 本侧解码错误（WebCodecs 实际报错，明文） */
 const decodeErr = computed(() => alignEngine.health[props.side].decodeError);
+/** 本侧是否已真正上屏过一帧（攒够约 30s 缓冲后才 True） */
+const presented = computed(() => alignEngine.presented[props.side]);
+/** 刚就绪的短暂"✓ 已就绪"提示（约 3s 后消失） */
+const readyFlash = ref(false);
+watch(presented, (p) => {
+  if (p) {
+    readyFlash.value = true;
+    setTimeout(() => { readyFlash.value = false; }, 3000);
+  }
+});
 
 function refresh(): void {
   if (props.enabled && props.url) {
@@ -69,11 +79,11 @@ watch(cv, (c) => {
 
 <template>
   <div class="frame" :class="[side, { uncropped: !props.crop4to3 }]">
-    <canvas
-      v-if="aligned && !props.hidden"
-      ref="cv"
-      class="video"
-    />
+    <div v-if="aligned && !props.hidden" class="stage">
+      <canvas ref="cv" class="video" />
+      <div v-if="!presented" class="phase">⏳ 攒缓冲中（需约 30s）…</div>
+      <div v-else-if="readyFlash" class="phase ok">✓ 已就绪</div>
+    </div>
     <div v-else class="placeholder">
       <div v-if="pullErr" class="err">⚠ 拉不到流 · {{ pullErr }}</div>
       <div v-else-if="decodeErr" class="err">解码出错 · {{ decodeErr }}</div>
@@ -92,6 +102,11 @@ watch(cv, (c) => {
   background: #050010;
 }
 .frame.uncropped { aspect-ratio: 16 / 9; }
+.stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
 canvas.video {
   width: 100%;
   height: 100%;
@@ -100,6 +115,23 @@ canvas.video {
   background: #000;
 }
 .frame.uncropped canvas.video { object-fit: contain; }
+.phase {
+  position: absolute;
+  inset: auto 0 8% 0;
+  margin: 0 auto;
+  width: max-content;
+  max-width: 92%;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: clamp(12px, 1.3vw, 18px);
+  font-weight: 700;
+  text-align: center;
+  z-index: 3;
+  pointer-events: none;
+}
+.phase.ok { color: #37d67a; }
 .placeholder {
   position: absolute;
   inset: 0;

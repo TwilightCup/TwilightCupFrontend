@@ -50,6 +50,8 @@ class AlignEngine {
   readonly streamError = reactive<Record<Side, string | null>>({ A: null, B: null });
   /** 各侧连通性/健康指标（对齐 SEIInjector 冒烟工具；~2.5Hz 刷新） */
   readonly health = reactive<Record<Side, StreamHealth>>({ A: emptyHealth(), B: emptyHealth() });
+  /** 各侧是否已真正上屏过一帧（攒够缓冲的判据；供 A/B 画面提示"攒缓冲中/已就绪"） */
+  readonly presented = reactive<Record<Side, boolean>>({ A: false, B: false });
 
   get ready(): boolean {
     return this.cfg.ready;
@@ -77,6 +79,7 @@ class AlignEngine {
       });
       this.streams.set(side, s);
       this.modes[side] = s.mode;
+      this.resetPresented(side);
       s.start();
     }
     this.refs.set(side, (this.refs.get(side) ?? 0) + 1);
@@ -88,12 +91,17 @@ class AlignEngine {
       this.streams.get(side)?.stop();
       this.streams.delete(side);
       this.modes[side] = "off";
+      this.presented[side] = false;
     } else {
       this.refs.set(side, c);
     }
   }
   modeOf(side: Side): "aligned" | "off" {
     return this.streams.get(side)?.mode ?? "off";
+  }
+  /** 重挂流时还原"未上屏"状态（下轮攒够缓冲再提） */
+  private resetPresented(side: Side): void {
+    this.presented[side] = false;
   }
   frontierOf(side: Side): number | null {
     return this.streams.get(side)?.frontier() ?? null;
@@ -149,10 +157,11 @@ class AlignEngine {
           if (s.hasContent && this.streamError[side]) this.streamError[side] = null;
           s.advance(T);
           const frame = s.nearest(T);
-          if (frame == null) continue;
           const cvs = this.canvases.get(side);
-          if (!cvs) continue;
-          for (const cv of cvs) this.drawFrame(cv, frame as CanvasImageSource);
+          if (frame != null && cvs) {
+            for (const cv of cvs) this.drawFrame(cv, frame as CanvasImageSource);
+            this.presented[side] = true;
+          }
         }
       }
       this.raf = requestAnimationFrame(loop);

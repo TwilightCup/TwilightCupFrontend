@@ -229,6 +229,9 @@ function healthText(side: "A" | "B"): string {
       ? `已收到 ${h.segs} 段但无 SEI 时间戳——该流需用 SEI Timestamp 编码器推`
       : `等待内容 · 未从 media 列表取到分片 · ${url}`;
   }
+  if (h.frames > 0 && !alignEngine.presented[side]) {
+    return `⏳ 攒缓冲中（已 ${h.frames} 帧，够约 30s 后上屏）…`;
+  }
   const fps = h.fps ? h.fps.toFixed(0) : "—";
   let s = `${h.codec.toUpperCase()} · ${fps} fps · ${h.frames} 帧 · NTP ${h.ntp}/${h.frames}`;
   if (h.droppedSeq) s += ` · 丢帧 ${h.droppedSeq}`;
