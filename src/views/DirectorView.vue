@@ -212,10 +212,19 @@ const showB = computed({
 // 控制台监控预览像素一致性（§1.2）：对齐开且能力就绪 → SeiStream（复用权威 T 与帧）；
 // 否则 MSE StreamFrame 兜底
 const previewAlignedA = computed(
-  () => !!cfgConfig.alignA && !!cfgConfig.hlsA && alignEngine.modes.A === "aligned",
+  () => !!cfgConfig.alignA && !!cfgConfig.hlsA && (alignEngine.modes.A === "aligned" || !!alignEngine.streamError.A),
 );
 const previewAlignedB = computed(
-  () => !!cfgConfig.alignB && !!cfgConfig.hlsB && alignEngine.modes.B === "aligned",
+  () => !!cfgConfig.alignB && !!cfgConfig.hlsB && (alignEngine.modes.B === "aligned" || !!alignEngine.streamError.B),
+);
+
+// 拉流失败直接弹提示（不必翻 console）：仅在"变错"时弹一次，恢复/持续态不刷屏
+watch(
+  () => [alignEngine.streamError.A, alignEngine.streamError.B] as const,
+  ([a, b]) => {
+    if (a) ElMessage.warning(`A 拉不到流：${a}`);
+    if (b) ElMessage.warning(`B 拉不到流：${b}`);
+  },
 );
 
 /** 应急重拉流：计数自增 → 舞台该侧播放器重挂（重新取 manifest） */

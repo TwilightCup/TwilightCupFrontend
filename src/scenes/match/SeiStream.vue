@@ -6,7 +6,7 @@
  *
  * side='A' 蓝（左）、'B' 红（右）。
  */
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { bi } from "@/utils/bilingual";
 import { alignEngine, type Side } from "@/scenes/align/useFrameAlign";
 
@@ -27,6 +27,8 @@ const props = withDefaults(
 
 const cv = ref<HTMLCanvasElement | null>(null);
 const aligned = ref(false);
+/** 本侧拉流错误（可读文案；无则 null）。来自 alignEngine.streamError（响应式） */
+const pullErr = computed(() => alignEngine.streamError[props.side]);
 
 function refresh(): void {
   if (props.enabled && props.url) {
@@ -67,8 +69,9 @@ watch(cv, (c) => {
       class="video"
     />
     <div v-else class="placeholder">
-      <div class="live">● {{ bi("scenes.match.waitingSignal") }}</div>
-      <div v-if="!aligned && props.url" class="url">{{ props.url }}</div>
+      <div v-if="pullErr" class="err">⚠ 拉不到流 · {{ pullErr }}</div>
+      <div v-else class="live">● {{ bi("scenes.match.waitingSignal") }}</div>
+      <div v-if="props.url" class="url">{{ props.url }}</div>
     </div>
   </div>
 </template>
@@ -108,6 +111,15 @@ canvas.video {
   color: var(--syn-magenta);
   animation: blink 1.4s steps(2) infinite;
   z-index: 1;
+}
+.err {
+  z-index: 1;
+  font-size: clamp(13px, 1.5vw, 22px);
+  font-weight: 800;
+  color: var(--syn-a-warm, #ffb0a0);
+  text-align: center;
+  max-width: 92%;
+  line-height: 1.4;
 }
 .url { z-index: 1; font-size: clamp(9px, 0.9vw, 13px); color: var(--syn-text-dim); }
 @keyframes shift { 0%, 100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }

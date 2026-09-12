@@ -156,6 +156,8 @@ export class FrameLockStream {
   private opts: FrameLockStreamOptions;
   private rawSpanUs: number;
   mode: "aligned" | "off" = "off";
+  /** 是否已成功拿到内容（有样本/有 SEI 锚）——拉流失败是否该提示"拉不到流"的依据 */
+  hasContent = false;
   /** 本路最近解码/到达的 rt（供自锚时钟） */
   lastArrivedRtUs: number | null = null;
 
@@ -197,12 +199,14 @@ export class FrameLockStream {
         if (r.hvcC) this.description = r.hvcC;
         if (seg.kind === "init" || r.avcC || r.hvcC) await this.configureDecoder();
         for (const s of r.samples) this.ingestSample(s);
+        if (r.samples.length > 0) this.hasContent = true;
         return;
       }
       // annexb（原始 ES / RTSP 代理单拉落点）：只解析 SEI 更新前沿锚（供速率控制 T 与
       // 延迟测量），不渲染解码——真解需转 AVCC 或 PES 重装（另一解码分支，后续按需）。
       const infos = parseAnnexbFrames(seg.payload, this.codec);
       for (const info of infos) this.lastArrivedRtUs = Number(info.realtime_us);
+      if (infos.length > 0) this.hasContent = true;
     } catch (e) {
       this.lastErr = e;
       this.opts.onError?.(e);

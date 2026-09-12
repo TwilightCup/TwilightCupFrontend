@@ -113,8 +113,13 @@ const alignedB = useAlignedTiming("B", {
   offsetMs: () => config.delayB * 1000,
   liveOf: () => (liveReady.value ? director.liveTimeOf("B") : null),
 });
-const seiA = computed(() => config.alignA && !!config.hlsA && alignEngine.modes.A === "aligned");
-const seiB = computed(() => config.alignB && !!config.hlsB && alignEngine.modes.B === "aligned");
+// SeiStream 在有"值得渲染的东西"时才接管：对齐帧，或拉流失败的可读提示（否则回 MSE）
+const seiA = computed(
+  () => config.alignA && !!config.hlsA && (alignEngine.modes.A === "aligned" || !!alignEngine.streamError.A),
+);
+const seiB = computed(
+  () => config.alignB && !!config.hlsB && (alignEngine.modes.B === "aligned" || !!alignEngine.streamError.B),
+);
 
 // 作为对齐权威（本页有对齐流在渲染）：把本地计算出的虚拟时间 T 节流广播，
 // 供其他页签/机器（控制台预览等）复用同一 T → 像素一致（§1.2；发送者被后端排除）

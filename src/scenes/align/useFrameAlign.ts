@@ -14,6 +14,21 @@ import { createFrameSource } from "./transport";
 
 export type Side = "A" | "B";
 
+/** 拉流失败 → 可读文案（fetch 对 ERR_CONNECTION_REFUSED 等一律抛 TypeError "Failed to fetch"，
+ * 据此给通用"连不上服务器"，命中具体信号再细分） */
+export function friendlyStreamError(e: unknown): string {
+  const m = e instanceof Error ? e.message : String(e);
+  if (/CORS|is not allowed|Access control|No 'Access-Control-Allow-Origin'/i.test(m)) {
+    return "跨域被拦（CORS）：检查流服务器 hlsAllowOrigins";
+  }
+  if (/404|Not Found/i.test(m)) return "流地址不存在（404）";
+  if (/abort/i.test(m)) return "拉流被中断";
+  if (/Failed to fetch|NetworkError|ECONN|connection/i.test(m)) {
+    return "无法连接到流服务器（地址写错 / 服务未启动 / 连接被拒）";
+  }
+  return `拉流失败：${m}`;
+}
+
 class AlignEngine {
   private streams = new Map<Side, FrameLockStream>();
   private canvases = new Map<Side, HTMLCanvasElement[]>();
@@ -29,6 +44,8 @@ class AlignEngine {
   readonly tUs: Ref<number | null> = ref(null);
   /** 各侧解码能力（响应式，供 UI 切 SeiStream/回退 MSE） */
   readonly modes = reactive<Record<Side, "aligned" | "off">>({ A: "off", B: "off" });
+  /** 各侧最近拉流错误（可读文案；有内容后清空）。供导播界面直接提示，不必翻 console */
+  readonly streamError = reactive<Record<Side, string | null>>({ A: null, B: null });
 
   get ready(): boolean {
     return this.cfg.ready;
@@ -44,8 +61,15 @@ class AlignEngine {
     if (!this.streams.has(side)) {
       const source = createFrameSource(kind, { url });
       const s = new FrameLockStream(source, {
-        onError: (e) => console.warn(`[align ${side}]`, e),
-        onModeChange: (m) => { this.modes[side] = m; },
+        onError: (e) => {
+          console.warn(`[align ${side}]`, e);
+          // 仅"尚无内容"时的拉流失败值得提示"拉不到"；已有内容后的偶发报错不盖画面
+          if (!s.hasContent) this.streamError[side] = friendlyStreamError(e);
+        },
+        onModeChange: (m) => {
+          this.modes[side] = m;
+          if (this.streamError[side]) this.streamError[side] = null;
+        },
       });
       this.streams.set(side, s);
       this.modes[side] = s.mode;
@@ -108,6 +132,8 @@ class AlignEngine {
         this.tUs.value = T;
         // 逐流 advance + 上屏到所有注册 canvas
         for (const [side, s] of this.streams) {
+          // 只要有内容就视为"已在拉"→ 清掉"拉不到流"提示（恢复后自动收敛）
+          if (s.hasContent && this.streamError[side]) this.streamError[side] = null;
           s.advance(T);
           const frame = s.nearest(T);
           if (frame == null) continue;
