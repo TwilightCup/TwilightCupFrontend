@@ -30,6 +30,7 @@ import type { ServerMessage } from "@/ws/protocol";
 import { send } from "@/ws/protocol";
 import { ConnStatus, MatchSocket } from "@/ws/socket";
 import { useAuthStore } from "./auth";
+import { alignEngine } from "@/scenes/align/useFrameAlign";
 import {
   mergeStoredConfig,
   type DirectorConfig,
@@ -137,6 +138,8 @@ export const useDirectorStore = defineStore("director", () => {
     scoreA: number | null;
     scoreB: number | null;
   } | null>(null);
+  /** round_result 到达时刻（纪元 ms）——叠加层按 `T/1000 ≥ at` 门控揭示防剧透 */
+  const lastResultAt = ref<number | null>(null);
 
   const nameA = ref(tr("seat.a"));
   const nameB = ref(tr("seat.b"));
@@ -178,6 +181,8 @@ export const useDirectorStore = defineStore("director", () => {
    * 新回合时同步清空；长直道可能长时间无新 gap（≠ 掉线），最近一条照常显示。
    */
   const subsegmentGap = ref<number | null>(null);
+  /** 最近一条 gap 的到达时刻（纪元 ms）——叠加层按 `T/1000 ≥ at` 门控揭示防剧透 */
+  const subsegmentGapAt = ref<number | null>(null);
 
   /**
    * 双席最近一条 live_time 实时计时（每秒上报，仅裁判/导播收到，需求见
@@ -216,6 +221,7 @@ export const useDirectorStore = defineStore("director", () => {
   /** 回合级实时遥测清空（subsegment 差距 + 双席 live_time，随回合边界重置） */
   function clearRoundTelemetry(): void {
     subsegmentGap.value = null;
+    subsegmentGapAt.value = null;
     liveTimeA.value = null;
     liveTimeB.value = null;
   }
@@ -280,6 +286,7 @@ export const useDirectorStore = defineStore("director", () => {
         playerB.value = freshPlayer();
         matchWinner.value = null;
         lastResult.value = null;
+        lastResultAt.value = null;
         clearRoundTelemetry();
         break;
       }
@@ -294,6 +301,7 @@ export const useDirectorStore = defineStore("director", () => {
         playerB.value = freshPlayer();
         matchWinner.value = null;
         lastResult.value = null;
+        lastResultAt.value = null;
         clearRoundTelemetry();
         break;
       case "player_status":
@@ -313,6 +321,7 @@ export const useDirectorStore = defineStore("director", () => {
         subsegmentGap.value =
           // gap_ms >0 = 穿越方（hit_seat）落后 → 归一为偏差条口径「正 = B 落后」
           msg.hit_seat === "PLAYER_B" ? msg.gap_ms : -msg.gap_ms;
+        subsegmentGapAt.value = Date.now();
         break;
       }
       case "live_time": {
@@ -349,6 +358,7 @@ export const useDirectorStore = defineStore("director", () => {
           scoreA: msg.score_a_ms ?? null,
           scoreB: msg.score_b_ms ?? null,
         };
+        lastResultAt.value = Date.now();
         break;
       case "cumulative_score":
         winsA.value = msg.wins_a;
@@ -403,6 +413,10 @@ export const useDirectorStore = defineStore("director", () => {
           const patch = msg.payload.config as Partial<DirectorConfig>;
           remoteConfig.value = patch;
           if (matchId.value) mergeStoredConfig(matchId.value, patch);
+        } else if (msg.action === "frame_align" && typeof msg.payload?.t_us === "number") {
+          // 跨文档一致性：权威页（舞台）广播的虚拟时间 T（µs）→ 本页对齐引擎复用同一 T，
+          // 保证不同页签/机器上 A/B 与权威页同帧（§1.2）。发送者被后端排除，不收到自己。
+          alignEngine.setExternalTUs(msg.payload.t_us as number);
         }
         break;
       default:
@@ -519,7 +533,8 @@ export const useDirectorStore = defineStore("director", () => {
       | "soon_pause"
       | "soon_reset"
       | "soon_set_target"
-      | "config_update",
+      | "config_update"
+      | "frame_align",
     payload?: Record<string, unknown>,
   ): boolean {
     // 已结束比赛仅锁定会改变比赛/直播配置的操作；场景切换只是舞台展示控制，
@@ -551,6 +566,17 @@ export const useDirectorStore = defineStore("director", () => {
 
     // 发 WS（可排队：连接未就绪时暂存，open 后按序补发，断线窗口点按钮不丢指令）
     return socket.sendQueued(send.directorCommand(action, payload));
+  }
+
+  /** 节流广播虚拟时间 T（帧对齐跨文档一致性；发送者被后端排除不收到自己）。
+   *  由权威页（舞台，有对齐流）调用；观众页不调，只收。 */
+  let lastAlignT = 0;
+  function sendFrameAlign(tUs: number): void {
+    if (matchEnded.value) return;
+    const now = Date.now();
+    if (now - lastAlignT < 400) return; // ~2.5Hz 足够（帧锁同帧由 30s 缓冲兜底）
+    lastAlignT = now;
+    sendDirectorCommand("frame_align", { t_us: tUs });
   }
 
   function nameOf(side: "A" | "B"): string {
@@ -613,6 +639,7 @@ export const useDirectorStore = defineStore("director", () => {
     threshold,
     matchWinner,
     lastResult,
+    lastResultAt,
     // 名字 / 元数据
     nameA,
     nameB,
@@ -630,8 +657,9 @@ export const useDirectorStore = defineStore("director", () => {
     messages,
     chatLines,
     draft,
-    // subsegment 实时时间差（偏差条数据源）
+    // subsegment 实时时间差（偏差条数据源）+ 到达时刻（防剧透门控）
     subsegmentGap,
+    subsegmentGapAt,
     // 双席 live_time 实时计时（主计时器实时走表数据源）
     liveTimeA,
     liveTimeB,
@@ -648,6 +676,7 @@ export const useDirectorStore = defineStore("director", () => {
     soonCmdState,
     remoteConfig,
     sendDirectorCommand,
+    sendFrameAlign,
     connect,
     connectWithAuth,
     disconnect,

@@ -29,8 +29,10 @@ export interface DirectorConfig {
   /** 重新拉流计数（自增即触发该侧播放器重挂：卡顿时应急刷新） */
   refreshA: number;
   refreshB: number;
-  /** 计时显示延迟（秒）：选手画面常有数秒延迟而计时近实时，把该侧计时器
-   *  整块（主计时 + 两行副计时）回放对齐画面；0 = 实时直通 */
+  /** 该侧启用 SEI 帧级对齐（SeiStream + 计时锚定虚拟时间 T）；关 = 回落 MSE + 手动 delay* */
+  alignA: boolean;
+  alignB: boolean;
+  /** 对齐时叠在虚拟时间 T 上的手动微调偏移（秒，正=向更久前看）；非对齐时作整段回放延迟 */
   delayA: number;
   delayB: number;
   /** 偏差条显示延迟（秒），同上（通常对齐较慢一侧的画面） */
@@ -56,6 +58,8 @@ const EMPTY: DirectorConfig = {
   hideB: false,
   refreshA: 0,
   refreshB: 0,
+  alignA: true,
+  alignB: true,
   delayA: 0,
   delayB: 0,
   delayDiff: 0,
@@ -175,6 +179,8 @@ export function useDirectorConfig() {
       hideB: stored.hideB,
       refreshA: stored.refreshA,
       refreshB: stored.refreshB,
+      alignA: url.alignA || stored.alignA,
+      alignB: url.alignB || stored.alignB,
       delayA: stored.delayA,
       delayB: stored.delayB,
       delayDiff: stored.delayDiff,

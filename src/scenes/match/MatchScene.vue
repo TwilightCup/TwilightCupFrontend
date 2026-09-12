@@ -58,8 +58,11 @@ import type { LiveTime } from "@/stores/director";
 import DiffBar from "./DiffBar.vue";
 import PlayerTimer from "./PlayerTimer.vue";
 import StreamFrame from "./StreamFrame.vue";
+import SeiStream from "./SeiStream.vue";
 import PickCornerCard from "./PickCornerCard.vue";
 import PbCornerCard from "./PbCornerCard.vue";
+import { useAlignedTiming } from "./useAlignedTiming";
+import { alignEngine } from "@/scenes/align/useFrameAlign";
 
 const { t } = useI18n();
 const director = useDirectorStore();
@@ -97,6 +100,31 @@ function mockLiveSample(side: "A" | "B"): LiveTime {
     receivedAt: now,
   };
 }
+// ---- SEI 帧级对齐：每侧是否进入对齐渲染（config.alignX && 有流 && 能力 aligned）----
+// 对齐开时叠加层计时锚定虚拟时间 T（useAlignedTiming），画面走 SeiStream；否则回落
+// useLiveTimers + useDelayedRef 手动 delay（MSE StreamFrame）。
+const alignedA = useAlignedTiming("A", {
+  enabled: () => config.alignA && !!config.hlsA,
+  offsetMs: () => config.delayA * 1000,
+  liveOf: () => (liveReady.value ? director.liveTimeOf("A") : null),
+});
+const alignedB = useAlignedTiming("B", {
+  enabled: () => config.alignB && !!config.hlsB,
+  offsetMs: () => config.delayB * 1000,
+  liveOf: () => (liveReady.value ? director.liveTimeOf("B") : null),
+});
+const seiA = computed(() => config.alignA && !!config.hlsA && alignEngine.modes.A === "aligned");
+const seiB = computed(() => config.alignB && !!config.hlsB && alignEngine.modes.B === "aligned");
+
+// 作为对齐权威（本页有对齐流在渲染）：把本地计算出的虚拟时间 T 节流广播，
+// 供其他页签/机器（控制台预览等）复用同一 T → 像素一致（§1.2；发送者被后端排除）
+watch(
+  () => alignEngine.tUs.value,
+  (t) => {
+    if (t != null && liveReady.value) director.sendFrameAlign(t);
+  },
+);
+
 const { liveMsA, liveMsB, liveSegA, liveSegB } = useLiveTimers(
   (side) =>
     liveReady.value
@@ -117,7 +145,11 @@ const { liveMsA, liveMsB, liveSegA, liveSegB } = useLiveTimers(
 
 const { sideA, sideB } = useMatchTiming({
   isMulti: () => isMulti.value,
-  liveOf: (side) => (side === "A" ? liveMsA.value : liveMsB.value),
+  liveOf: (side) => {
+    const al = side === "A" ? alignedA : alignedB;
+    if (al.active.value) return al.main.value;
+    return side === "A" ? liveMsA.value : liveMsB.value;
+  },
   levelsOf: (side) =>
     liveReady.value
       ? director.playerOf(side).completedLevels
@@ -133,15 +165,28 @@ const { sideA, sideB } = useMatchTiming({
   scoring: () => (liveReady.value ? director.scoringMethodName : MOCK_MATCH.scoringMethod),
   scoreOf: (side) => {
     if (!liveReady.value || !director.lastResult) return null;
+    // 防剧透：对齐且该回合结果尚未被虚拟时间 T 越过时暂不揭示
+    if (twMs.value != null && director.lastResultAt != null && twMs.value < director.lastResultAt) return null;
     return side === "A" ? director.lastResult.scoreA : director.lastResult.scoreB;
   },
 });
 
 // ---- 多关偏差条：subsegment 实时时间差（最近一条 gap 直接覆盖，双向交错同理；
-//      回合结束 / 新回合由 store 清空归 0；mock 用静态演示值） ----
-const diffMs = computed(() =>
-  liveReady.value ? director.subsegmentGap ?? 0 : MOCK_MATCH.gapDiffMs,
+//      回合结束 / 新回合由 store 清空归 0；mock 用静态演示值）。
+//      防剧透：对齐时仅在虚拟时间 T 越过该条 gap 的到达时刻 subsegmentGapAt 才揭示，
+//      T 前 '' 期间保持 0（中性），T 单调 → 揭示一次不反复。----
+const twMs = computed<number | null>(() =>
+  alignEngine.tUs.value == null ? null : alignEngine.tUs.value / 1000,
 );
+const diffMs = computed(() => {
+  if (!liveReady.value) return MOCK_MATCH.gapDiffMs;
+  const g = director.subsegmentGap;
+  if (g == null) return 0;
+  if (twMs.value != null && director.subsegmentGapAt != null && twMs.value < director.subsegmentGapAt) {
+    return 0;
+  }
+  return g;
+});
 
 // ---- 副计时器两行统一计算 ----
 // 多关：进行中 = 第一行当前关 + 实时单段、第二行上一关；完赛/无当前关时第一行
@@ -184,6 +229,8 @@ function levelNameOf(idx: number): string | null {
 }
 
 function liveSegTime(side: "A" | "B"): string | null {
+  const al = side === "A" ? alignedA : alignedB;
+  if (al.active.value) return al.seg.value == null ? null : formatMs(al.seg.value);
   const val = side === "A" ? liveSegA.value : liveSegB.value;
   return val == null ? null : formatMs(val);
 }
@@ -306,7 +353,7 @@ const timerAV = useDelayedRef(
     prevLevel: prevLevelA.value,
     prevSeg: prevSegA.value,
   }),
-  () => config.delayA * 1000,
+  () => (alignedA.active.value ? 0 : config.delayA * 1000),
 );
 const timerBV = useDelayedRef(
   () => ({
@@ -316,9 +363,12 @@ const timerBV = useDelayedRef(
     prevLevel: prevLevelB.value,
     prevSeg: prevSegB.value,
   }),
-  () => config.delayB * 1000,
+  () => (alignedB.active.value ? 0 : config.delayB * 1000),
 );
-const diffV = useDelayedRef(() => diffMs.value, () => config.delayDiff * 1000);
+const diffV = useDelayedRef(
+  () => diffMs.value,
+  () => (alignedA.active.value && alignedB.active.value ? 0 : config.delayDiff * 1000),
+);
 
 // ---- 左下角当前选图角标卡（pick_announced → currentRound.pick 常驻展示） ----
 // mock 演示选图：图池 mock 的 CT 选图（带词条与重试，角标各要素齐备）
@@ -532,9 +582,18 @@ onUnmounted(() => {
           <TopBar v-if="!sharedTopBar" :mock="isMock ? MOCK_TOPBAR : undefined" />
         </header>
 
-        <!-- 双 4:3 选手画面：水平居中、无缝衔接、满屏宽 -->
+        <!-- 双 4:3 选手画面：水平居中、无缝衔接、满屏宽。
+             对齐开且能力可用 → SeiStream（SEI 帧级对齐/共享 T）；否则 StreamFrame(MSE) 兜底 -->
         <section class="streams">
+          <SeiStream
+            v-if="seiA"
+            side="A"
+            :url="config.hlsA"
+            :enabled="seiA"
+            :hidden="config.hideA"
+          />
           <StreamFrame
+            v-else
             side="A"
             :hls-url="config.hlsA"
             :embed-url="config.embedA"
@@ -542,7 +601,15 @@ onUnmounted(() => {
             :hidden="config.hideA"
             :refresh-nonce="config.refreshA"
           />
+          <SeiStream
+            v-if="seiB"
+            side="B"
+            :url="config.hlsB"
+            :enabled="seiB"
+            :hidden="config.hideB"
+          />
           <StreamFrame
+            v-else
             side="B"
             :hls-url="config.hlsB"
             :embed-url="config.embedB"

@@ -9,6 +9,8 @@ import RoleSwitcher from "@/components/RoleSwitcher.vue";
 import AccountMenu from "@/components/AccountMenu.vue";
 import ColorField from "@/components/ColorField.vue";
 import StreamFrame from "@/scenes/match/StreamFrame.vue";
+import SeiStream from "@/scenes/match/SeiStream.vue";
+import { alignEngine } from "@/scenes/align/useFrameAlign";
 import AuthFailMask from "@/components/AuthFailMask.vue";
 import { requestSpeedrunRefresh } from "@/api/speedrun";
 import { AttemptStatus, MatchPhase } from "@/api/types";
@@ -136,6 +138,8 @@ const cfgForm = reactive<DirectorConfig>({
   hideB: false,
   refreshA: 0,
   refreshB: 0,
+  alignA: true,
+  alignB: true,
   delayA: 0,
   delayB: 0,
   delayDiff: 0,
@@ -205,6 +209,15 @@ const showB = computed({
   },
 });
 
+// 控制台监控预览像素一致性（§1.2）：对齐开且能力就绪 → SeiStream（复用权威 T 与帧）；
+// 否则 MSE StreamFrame 兜底
+const previewAlignedA = computed(
+  () => !!cfgConfig.alignA && !!cfgConfig.hlsA && alignEngine.modes.A === "aligned",
+);
+const previewAlignedB = computed(
+  () => !!cfgConfig.alignB && !!cfgConfig.hlsB && alignEngine.modes.B === "aligned",
+);
+
 /** 应急重拉流：计数自增 → 舞台该侧播放器重挂（重新取 manifest） */
 function refreshStream(side: "A" | "B"): void {
   const key = side === "A" ? "refreshA" : "refreshB";
@@ -216,6 +229,12 @@ function refreshStream(side: "A" | "B"): void {
 /** 计时显示延迟（秒）：把比赛详情场景的计时器 / 偏差条回放对齐有延迟的
  *  选手画面；改动即时保存并广播（与显示开关同通道，不等「保存」按钮） */
 function pushDelay(key: "delayA" | "delayB" | "delayDiff"): void {
+  if (!director.matchId) return;
+  pushConfig({ [key]: cfgForm[key] } as Partial<DirectorConfig>);
+}
+
+/** 对齐开关（alignA/B）：开 = 舞台/控制台该侧 SEI 帧级对齐 + 计时锚定虚拟 T；关 = 回落 MSE + 手动 delay */
+function toggleAlign(key: "alignA" | "alignB"): void {
   if (!director.matchId) return;
   pushConfig({ [key]: cfgForm[key] } as Partial<DirectorConfig>);
 }
@@ -238,6 +257,8 @@ const CFG_URL_KEYS: Partial<Record<keyof DirectorConfig, string>> = {
   hlsB: "hls_b",
   embedA: "embed_a",
   embedB: "embed_b",
+  alignA: "align_a",
+  alignB: "align_b",
   themeA: "theme_a",
   themeB: "theme_b",
   background: "background",
@@ -731,7 +752,15 @@ onUnmounted(() => {
             <div class="sp-col">
               <!-- 隐藏态仅作视觉提示（画面本身仍实时播放供监控），舞台已切等待占位 -->
               <div class="sp-frame">
+                <SeiStream
+                  v-if="previewAlignedA"
+                  side="A"
+                  :url="cfgConfig.hlsA"
+                  :enabled="previewAlignedA"
+                  :crop4to3="true"
+                />
                 <StreamFrame
+                  v-else
                   side="A"
                   :hls-url="cfgConfig.hlsA"
                   :embed-url="cfgConfig.embedA"
@@ -747,7 +776,15 @@ onUnmounted(() => {
             </div>
             <div class="sp-col">
               <div class="sp-frame">
+                <SeiStream
+                  v-if="previewAlignedB"
+                  side="B"
+                  :url="cfgConfig.hlsB"
+                  :enabled="previewAlignedB"
+                  :crop4to3="true"
+                />
                 <StreamFrame
+                  v-else
                   side="B"
                   :hls-url="cfgConfig.hlsB"
                   :embed-url="cfgConfig.embedB"
@@ -847,6 +884,22 @@ onUnmounted(() => {
                （秒，−/+ 以 0.5 步进；改动即时广播到舞台与场景，与显示开关同通道） -->
           <div class="card">
             <div class="card-title">{{ $t("directorView.delayTitle") }}</div>
+            <div class="align-row">
+              <span class="lbl tc-a">对齐 A</span>
+              <el-switch
+                v-model="cfgForm.alignA"
+                size="small"
+                :disabled="!director.matchId || readOnly"
+                @change="toggleAlign('alignA')"
+              />
+              <span class="lbl tc-b">对齐 B</span>
+              <el-switch
+                v-model="cfgForm.alignB"
+                size="small"
+                :disabled="!director.matchId || readOnly"
+                @change="toggleAlign('alignB')"
+              />
+            </div>
             <div class="delay-grid">
               <span class="lbl tc-a">A</span>
               <el-input-number
@@ -1192,6 +1245,12 @@ onUnmounted(() => {
 }
 /* 计时显示延迟面板：四列网格（标签A 输入A 标签B 输入B），两行——偏差条输入框
    与 B 调整框同列对齐 */
+.align-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
 .delay-grid {
   display: grid;
   grid-template-columns: auto auto auto auto;
