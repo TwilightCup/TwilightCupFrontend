@@ -247,6 +247,20 @@ function healthCls(side: "A" | "B"): "h-ok" | "h-err" | "" {
   return alignEngine.health[side].frames > 0 ? "h-ok" : "";
 }
 
+/** 该侧"切到比赛场景能否直接出画"的就绪标记（放 A/B 信息行） */
+function readyState(side: "A" | "B"): { cls: string; label: string } {
+  const on = side === "A" ? cfgConfig.alignA : cfgConfig.alignB;
+  const url = side === "A" ? cfgConfig.hlsA : cfgConfig.hlsB;
+  if (!on || !url) return { cls: "off", label: "未启用" };
+  if (alignEngine.streamError[side]) return { cls: "err", label: "拉不到流" };
+  const h = alignEngine.health[side];
+  if (h.frames === 0 && !h.hasContent) return { cls: "wait", label: "无内容" };
+  if (!alignEngine.presented[side]) return { cls: "wait", label: "攒缓冲中" };
+  return { cls: "ok", label: "已就绪" };
+}
+const readyA = computed(() => readyState("A"));
+const readyB = computed(() => readyState("B"));
+
 /** 应急重拉流：计数自增 → 舞台该侧播放器重挂（重新取 manifest） */
 function refreshStream(side: "A" | "B"): void {
   const key = side === "A" ? "refreshA" : "refreshB";
@@ -780,10 +794,12 @@ onUnmounted(() => {
           <div class="align-health">
             <div class="h-row">
               <span class="h-side tc-a">A</span>
+              <span class="h-ready" :class="readyA.cls">{{ readyA.label }}</span>
               <span class="h-val" :class="healthCls('A')">{{ healthText('A') }}</span>
             </div>
             <div class="h-row">
               <span class="h-side tc-b">B</span>
+              <span class="h-ready" :class="readyB.cls">{{ readyB.label }}</span>
               <span class="h-val" :class="healthCls('B')">{{ healthText('B') }}</span>
             </div>
           </div>
@@ -1315,6 +1331,18 @@ onUnmounted(() => {
 .h-val { color: var(--el-text-color-secondary, #8b94bd); word-break: break-all; }
 .h-val.h-ok { color: #37d67a; }
 .h-val.h-err { color: #ff5f7a; font-weight: 700; }
+.h-ready {
+  flex: none;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--font-sans, -apple-system, "PingFang SC", sans-serif);
+}
+.h-ready.ok { color: #06381c; background: #37d67a; }
+.h-ready.wait { color: #3a2a00; background: #ffb454; }
+.h-ready.err { color: #fff; background: #ff5f7a; }
+.h-ready.off { color: var(--el-text-color-secondary, #8b94bd); background: var(--el-border-color-light, #2b3456); }
 .delay-grid {
   display: grid;
   grid-template-columns: auto auto auto auto;
