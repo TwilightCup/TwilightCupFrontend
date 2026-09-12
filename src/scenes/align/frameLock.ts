@@ -10,6 +10,7 @@
  * mode='off'，由外层 SeiStream 回退 MSE StreamFrame（对齐兜底）。
  */
 import { extractFmp4Samples } from "./fmp4";
+import { extractTsVideo } from "./ts";
 import { parseSampleSei, parseAnnexbFrames } from "./sei";
 import { FrameQueue } from "./frameQueue";
 import type { FrameSource, RawSegment } from "./transport";
@@ -214,16 +215,17 @@ export class FrameLockStream {
         if (r.samples.length > 0) this.hasContent = true;
         return;
       }
+      // TS（通用 HLS，MPEG-TS 分片）：先重装 PES → Annex-B ES，再解析 SEI 锚
+      // （渲染解码仍待 WebCodecs-AnnexB 分支；TS 时至少锚/指标可见，脱离"等待内容"）。
+      if (seg.fmt === "ts") {
+        const es = extractTsVideo(seg.payload);
+        if (es) this.ingestAnnexb(es);
+        else this.opts.onError?.(new Error("TS 段重装失败（无视频 PES）"));
+        return;
+      }
       // annexb（原始 ES / RTSP 代理单拉落点）：只解析 SEI 更新前沿锚（供速率控制 T 与
       // 延迟测量），不渲染解码——真解需转 AVCC 或 PES 重装（另一解码分支，后续按需）。
-      const infos = parseAnnexbFrames(seg.payload, this.codec);
-      for (const info of infos) {
-        this.st.frames++;
-        this.st.ntp += info.clock_ntp ? 1 : 0;
-        this.st.key += info.keyframe ? 1 : 0;
-        this.lastArrivedRtUs = Number(info.realtime_us);
-      }
-      if (infos.length > 0) this.hasContent = true;
+      this.ingestAnnexb(seg.payload);
     } catch (e) {
       this.lastErr = e;
       this.opts.onError?.(e);
@@ -273,6 +275,18 @@ export class FrameLockStream {
     this.st.lastRtUs = rtUs;
     this.lastArrivedRtUs = rtUs;
     return info;
+  }
+
+  /** Annex-B ES → 逐 SEI 锚：更新前沿/指标/内容标记（TS 与原始 ES 共用） */
+  private ingestAnnexb(es: Uint8Array): void {
+    const infos = parseAnnexbFrames(es, this.codec);
+    if (infos.length > 0) this.hasContent = true;
+    for (const info of infos) {
+      this.st.frames++;
+      this.st.ntp += info.clock_ntp ? 1 : 0;
+      this.st.key += info.keyframe ? 1 : 0;
+      this.lastArrivedRtUs = Number(info.realtime_us);
+    }
   }
 
   /** 连通性/健康快照 */

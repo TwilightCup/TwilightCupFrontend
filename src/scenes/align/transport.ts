@@ -13,8 +13,8 @@ import type { Codec } from "./types";
 /** 一段交给核心的原始视频内容（init 或媒体数据）。 */
 export interface RawSegment {
   kind: "init" | "data";
-  /** 媒体形式：fmp4（LL-HLS 默认）或 annexb（原始 ES / mp4 转 AnnexB） */
-  fmt: "fmp4" | "annexb";
+  /** 媒体形式：fmp4（LL-HLS 默认）、ts（MPEG-TS 分片）或 annexb（原始 ES 单拉） */
+  fmt: "fmp4" | "annexb" | "ts";
   payload: Uint8Array;
   /** init 段携带：codec 与 description（avcC/hvcC），媒体段无关 */
   codec?: Codec;
@@ -38,21 +38,26 @@ export interface HlsSourceOptions {
 export class HlsFrameSource implements FrameSource {
   private harvester: HlsHarvester;
   private onSegment: (seg: RawSegment) => void = () => undefined;
+  private onErr: (e: unknown) => void = () => undefined;
 
   constructor(opts: HlsSourceOptions) {
     this.harvester = new HlsHarvester(
       opts.url,
       (buf, kind) => {
         const ftyp = buf.length >= 4 && String.fromCharCode(buf[0], buf[1], buf[2], buf[3]) === "ftyp";
+        const ts = !ftyp && buf.length >= 8 && buf[0] === 0x47; // MPEG-TS 同步字 0x47
         if (kind === "init") {
-          // init 段即 fmp4 init——codec/description 由核心 extractFmp4Samples 提取；
-          // 这里标记为数据段（内容实际是 stsd/avcC 等）让核心有机会先取 codec。
           this.onSegment({ kind: "init", fmt: "fmp4", payload: buf });
         } else {
-          this.onSegment({ kind: "data", fmt: ftyp ? "fmp4" : "annexb", payload: buf });
+          this.onSegment({ kind: "data", fmt: ftyp ? "fmp4" : ts ? "ts" : "annexb", payload: buf });
         }
       },
-      { pollIntervalMs: opts.pollIntervalMs ?? 800, followParts: true },
+      {
+        pollIntervalMs: opts.pollIntervalMs ?? 800,
+        followParts: true,
+        // 拉流失败（跨域/拒连/404）必须透传，让 UI 显示而不静默 → 避免永远"等待内容"
+        onError: (e) => this.onErr(e),
+      },
     );
   }
   start(): void {
@@ -65,9 +70,8 @@ export class HlsFrameSource implements FrameSource {
     this.onSegment = cb;
   }
   setOnError(cb: (e: unknown) => void): void {
-    // HlsHarvester 已内置 onError → 转发给核心
-    // (harvester 构造时未收 onError；这里改由核心统一接）
-    void cb;
+    // 保存引用；harvester 构造时已捕获 this.onErr，晚设也生效
+    this.onErr = cb;
   }
 }
 
