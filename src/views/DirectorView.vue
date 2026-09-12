@@ -214,14 +214,7 @@ const showB = computed({
 const previewAlignedA = computed(() => !!cfgConfig.alignA && !!cfgConfig.hlsA);
 const previewAlignedB = computed(() => !!cfgConfig.alignB && !!cfgConfig.hlsB);
 
-// 拉流失败直接弹提示（不必翻 console）：仅在"变错"时弹一次，恢复/持续态不刷屏
-watch(
-  () => [alignEngine.streamError.A, alignEngine.streamError.B] as const,
-  ([a, b]) => {
-    if (a) ElMessage.warning(`A 拉不到流：${a}`);
-    if (b) ElMessage.warning(`B 拉不到流：${b}`);
-  },
-);
+// 拉流失败只内联显示在 A/B 位置（指标条/画面占位），不弹窗打扰
 
 // 连通性指标条（维度对齐 SEIInjector 冒烟工具，刷新由 alignEngine.health ~2.5Hz）
 function healthText(side: "A" | "B"): string {
