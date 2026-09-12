@@ -232,7 +232,9 @@ function healthText(side: "A" | "B"): string {
   if (!on || !url) return "对齐未启用（MSE 播放）";
   const h = alignEngine.health[side];
   if (h.frames === 0 && !h.hasContent) {
-    return `等待内容 · ${url} · 确认端口可达且该路径在推流`;
+    return h.segs > 0
+      ? `已收到 ${h.segs} 段但无 SEI 时间戳——该流需用 SEI Timestamp 编码器推`
+      : `等待内容 · 未从 media 列表取到分片 · ${url}`;
   }
   const fps = h.fps ? h.fps.toFixed(0) : "—";
   let s = `${h.codec.toUpperCase()} · ${fps} fps · ${h.frames} 帧 · NTP ${h.ntp}/${h.frames}`;

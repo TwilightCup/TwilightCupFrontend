@@ -57,6 +57,8 @@ export interface StreamHealth {
   codec: Codec;
   /** 含 SEI 的样本数（已解析帧） */
   frames: number;
+  /** 已成功取到的 HLS 段数（无论是否含 SEI——用于区分"拿到段但无 SEI"与"没拿到段"） */
+  segs: number;
   /** 无 SEI 的样本数 */
   missing: number;
   /** NTP 校准帧数 */
@@ -77,6 +79,7 @@ export function emptyHealth(): StreamHealth {
   return {
     codec: "h264",
     frames: 0,
+    segs: 0,
     missing: 0,
     ntp: 0,
     key: 0,

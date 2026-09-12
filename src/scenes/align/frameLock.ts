@@ -163,7 +163,7 @@ export class FrameLockStream {
   lastArrivedRtUs: number | null = null;
 
   // ---- 连通性指标（维度对齐 SEIInjector 冒烟工具；供导播控制台观察） ----
-  private st = { frames: 0, missing: 0, ntp: 0, key: 0, droppedSeq: 0, lastSeq: null as number | null, lastRtUs: null as number | null };
+  private st = { frames: 0, segs: 0, missing: 0, ntp: 0, key: 0, droppedSeq: 0, lastSeq: null as number | null, lastRtUs: null as number | null };
   private dtRing: number[] = [];
 
   constructor(source: FrameSource, opts: FrameLockStreamOptions = {}) {
@@ -212,12 +212,16 @@ export class FrameLockStream {
             this.trimRaw(rtUs);
           }
         }
-        if (r.samples.length > 0) this.hasContent = true;
+        if (r.samples.length > 0) {
+          this.hasContent = true;
+          this.st.segs++;
+        }
         return;
       }
       // TS（通用 HLS，MPEG-TS 分片）：先重装 PES → Annex-B ES，再解析 SEI 锚
       // （渲染解码仍待 WebCodecs-AnnexB 分支；TS 时至少锚/指标可见，脱离"等待内容"）。
       if (seg.fmt === "ts") {
+        this.st.segs++;
         const es = extractTsVideo(seg.payload);
         if (es) this.ingestAnnexb(es);
         else this.opts.onError?.(new Error("TS 段重装失败（无视频 PES）"));
@@ -225,6 +229,7 @@ export class FrameLockStream {
       }
       // annexb（原始 ES / RTSP 代理单拉落点）：只解析 SEI 更新前沿锚（供速率控制 T 与
       // 延迟测量），不渲染解码——真解需转 AVCC 或 PES 重装（另一解码分支，后续按需）。
+      this.st.segs++;
       this.ingestAnnexb(seg.payload);
     } catch (e) {
       this.lastErr = e;
@@ -296,6 +301,7 @@ export class FrameLockStream {
     return {
       codec: this.codec,
       frames: this.st.frames,
+      segs: this.st.segs,
       missing: this.st.missing,
       ntp: this.st.ntp,
       key: this.st.key,
