@@ -236,20 +236,11 @@ export class FrameLockStream {
         if (r.hvcC) this.description = r.hvcC;
         for (const s of r.samples) {
           const info = this.onSample(s);
-          const isKey = s.isKey || info?.keyframe === true;
-          // 只从关键帧起播（WebCodecs 首个 chunk 须为 key，否则不产帧/报错）
-          if (!isKey || !info) continue;
-          // 首个关键帧：此时才确定封装形态 → 配置解码器（AVCC 带 description，Annex-B 不带）
-          if (!this.encapsulation) {
-            this.encapsulation = detectEncapsulation(s.payload);
-            await this.configureDecoder();
-            if (this.mode !== "aligned" || !this.ready) break;
-          }
-          const rtUs = Number(info.realtime_us);
-          this.raw.push({ rtUs, isKey, payload: new Uint8Array(s.payload) });
-          this.decoder.decodeSample(rtUs, isKey, s.payload);
-          this.trimRaw(rtUs);
+          if (!info) continue; // 无 SEI 戳的样本不参与（没有 rt 锚也无需呈现）
+          // 延迟解码：到货只入原始环（10min 字节级缓存），解码由 pump(T) 按虚拟时间节流
+          this.raw.push({ rtUs: Number(info.realtime_us), isKey: s.isKey || info.keyframe, payload: new Uint8Array(s.payload) });
         }
+        this.trimRaw(this.lastArrivedRtUs ?? 0);
         if (r.samples.length > 0) {
           this.hasContent = true;
           this.st.segs++;
@@ -362,9 +353,50 @@ export class FrameLockStream {
     while (this.raw.length && this.raw[0]!.rtUs < minUs) this.raw.shift();
   }
 
-  /** 由权威调度每帧调用：推进已解帧队列到 T，淘汰落后/超前帧 */
+  /** 由权威调度每帧调用：先按虚拟时间 T 把该解的解码出来（延迟解码），再推进队列淘汰旧帧 */
   advance(targetUs: number): void {
+    this.pump(targetUs);
     this.queue.advance(targetUs);
+  }
+
+  // ---- 延迟解码：解码器只喂 T 附近的原始样本（上屏帧 rt≈T，比前沿落后 30s），
+  //      解出的帧进小窗口队列；原始环按 10min 缓存。避免"解码即上屏被 advance 全丢"。----
+  private decPos = 0; // raw 环里下一个要喂给解码器的样本下标
+  private pendingConfigure = false;
+
+  /** T 之前最近的可用关键帧下标（解码需从关键帧起），无则 -1 */
+  private findStartKeyframe(targetUs: number): number {
+    let idx = -1;
+    for (let i = 0; i < this.raw.length; i++) {
+      if (this.raw[i]!.rtUs > targetUs) break;
+      if (this.raw[i]!.isKey) idx = i;
+    }
+    if (idx >= 0) return idx;
+    for (let i = 0; i < this.raw.length; i++) if (this.raw[i]!.isKey) return i;
+    return -1;
+  }
+
+  /** 把 raw 里 rtUs ≤ targetUs+lookahead 的样本顺序喂解码器（首次从 T 前关键帧起播） */
+  private pump(targetUs: number): void {
+    const lookaheadUs = 4_000_000; // T 之后预解 4s（给 nearest 留富余）
+    if (!this.encapsulation) {
+      const start = this.findStartKeyframe(targetUs);
+      if (start < 0) return;
+      this.decPos = start;
+      this.encapsulation = detectEncapsulation(this.raw[start]!.payload);
+      this.pendingConfigure = true;
+      void this.configureDecoder(); // mode/ready 异步落定
+      return;
+    }
+    if (this.pendingConfigure) {
+      if (this.mode !== "aligned" || !this.ready) return;
+      this.pendingConfigure = false;
+    }
+    while (this.decPos < this.raw.length && this.raw[this.decPos]!.rtUs <= targetUs + lookaheadUs) {
+      const s = this.raw[this.decPos]!;
+      this.decPos++;
+      this.decoder.decodeSample(s.rtUs, s.isKey, s.payload);
+    }
   }
 
   /** 本路最前已到货 rt（µs）；无内容 null */
