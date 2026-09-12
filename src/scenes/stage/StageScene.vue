@@ -12,11 +12,13 @@
  *  6. 顶部信息栏常驻单实例（match/mappool/categoryinfo 场景显示，v-show 切换不重挂）：
  *    跨场景切换零闪烁——场景各自内嵌的顶栏在 hosted 模式下让位（sharedTopBar）。
  */
-import { computed, onMounted, onUnmounted, provide, ref, shallowRef, watch } from "vue";
+import { computed, onMounted, onUnmounted, provide, reactive, ref, shallowRef, watch } from "vue";
 import { useDirectorStore } from "@/stores/director";
 import SynthwaveBg from "@/scenes/components/SynthwaveBg.vue";
 import TopBar from "@/scenes/components/TopBar.vue";
 import { useSceneParams } from "@/scenes/composables/useSceneParams";
+import { useDirectorConfig } from "@/scenes/composables/useDirectorConfig";
+import { alignEngine, type Side } from "@/scenes/align/useFrameAlign";
 import {
   SCENE_CONTEXT_KEY,
   type SceneContext,
@@ -36,6 +38,40 @@ import SoonScene from "@/scenes/soon/SoonScene.vue";
 
 const params = useSceneParams();
 const director = useDirectorStore();
+const { config: alignCfg, load: loadCfg } = useDirectorConfig();
+
+/** 后台预载：舞台根把 A/B 对齐流常驻拉起+解码（不论当前在哪场景），
+ *  切到比赛场景时 SeiStream 直接画已解帧 → 秒切不重缓冲。alignEngine 持常驻引用，
+ *  SeiStream 卸载只减自身计数，流不会被停。 */
+const preloaded = reactive<Record<Side, string>>({ A: "", B: "" });
+function ensureAlignPreload(): void {
+  for (const side of ["A", "B"] as Side[]) {
+    const url = side === "A" ? alignCfg.hlsA : alignCfg.hlsB;
+    const on = side === "A" ? alignCfg.alignA : alignCfg.alignB;
+    if (on && url) {
+      // 换源/首启：同源直接复用
+      if (preloaded[side] !== url) {
+        if (preloaded[side]) alignEngine.stopStream(side);
+        preloaded[side] = url;
+        alignEngine.startStream(side, url);
+      }
+    } else if (preloaded[side]) {
+      alignEngine.stopStream(side);
+      preloaded[side] = "";
+    }
+  }
+  alignEngine.start(); // 主循环（珍藏状态解/推进，无 canvas 也持续）
+}
+
+watch(
+  [() => director.matchId, () => director.remoteConfig],
+  ([mid]) => {
+    if (!mid) return;
+    loadCfg(mid, params); // URL > localStorage 并入；remoteConfig 已由 store mergeStoredConfig 落库
+    ensureAlignPreload();
+  },
+  { immediate: true },
+);
 
 /** 断线角标文案：舞台在 OBS 里，导播看不到它的连接状态，断线须自显 */
 const connText = computed(() => {
