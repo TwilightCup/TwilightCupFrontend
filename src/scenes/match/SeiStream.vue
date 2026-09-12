@@ -29,6 +29,8 @@ const cv = ref<HTMLCanvasElement | null>(null);
 const aligned = ref(false);
 /** 本侧拉流错误（可读文案；无则 null）。来自 alignEngine.streamError（响应式） */
 const pullErr = computed(() => alignEngine.streamError[props.side]);
+/** 本侧是否已解析出 SEI 帧（区分"在解码"与"待解码/不支持"） */
+const hasFrames = computed(() => alignEngine.health[props.side].frames > 0);
 
 function refresh(): void {
   if (props.enabled && props.url) {
@@ -48,9 +50,11 @@ onBeforeUnmount(() => {
   if (props.enabled && props.url) alignEngine.stopStream(props.side);
 });
 
-// 监听本侧对齐能力变化（初始化异步探测后模式可能翻转为 aligned）
+// 监听本侧对齐能力变化（isConfigSupported 异步探测后 mode 会翻转为 aligned）。
+// 必须 watch 响应式的 alignEngine.modes[side]，否则翻转不会触发（之前 watch modeOf 非响应式，
+// 导致模式转 aligned 后这里不重跑 → 永远占位"等待信号"）。
 watch(
-  () => props.enabled && props.url && alignEngine.modeOf(props.side),
+  () => alignEngine.modes[props.side],
   (m) => { aligned.value = m === "aligned"; },
 );
 
@@ -70,6 +74,7 @@ watch(cv, (c) => {
     />
     <div v-else class="placeholder">
       <div v-if="pullErr" class="err">⚠ 拉不到流 · {{ pullErr }}</div>
+      <div v-else-if="hasFrames" class="err">画面已解析 {{ hasFrames }} 帧，但解码未就绪 / 环境不支持 WebCodecs</div>
       <div v-else class="live">● {{ bi("scenes.match.waitingSignal") }}</div>
     </div>
   </div>
