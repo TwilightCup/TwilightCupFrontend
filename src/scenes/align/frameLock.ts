@@ -11,7 +11,7 @@
  */
 import { extractFmp4Samples } from "./fmp4";
 import { extractTsVideo } from "./ts";
-import { parseSampleSei, parseAnnexbFrames } from "./sei";
+import { parseSampleSei, parseAnnexbFrames, splitAvcc } from "./sei";
 import { FrameQueue } from "./frameQueue";
 import type { FrameSource, RawSegment } from "./transport";
 import type { Codec, SeiFrameInfo, StreamHealth } from "./types";
@@ -53,6 +53,31 @@ function detectEncapsulation(payload: Uint8Array): "avcc" | "annexb" {
   return payload.length >= 4 && payload[0] === 0 && payload[1] === 0 && payload[2] === 0 && payload[3] === 1
     ? "annexb"
     : "avcc";
+}
+
+/** 从关键帧样本带内提取 SPS/PPS 构建新的 avcC(description)——应对编码器中途改参数/丢参数。
+ *  AVCC 封装：NALS 长度前缀；取 type7(SPS)/type8(PPS)。提取不到返回 null（沿用旧 description）。 */
+function extractInbandAvcC(payload: Uint8Array): Uint8Array | null {
+  const nals = splitAvcc(payload);
+  const sps = nals.find((n) => (n[0]! & 0x1f) === 7);
+  const pps = nals.find((n) => (n[0]! & 0x1f) === 8);
+  if (!sps || !pps) return null;
+  const len = 7 + 2 + sps.length + 2 + pps.length; // avcC 头 7B + 两个 NAL
+  const avcC = new Uint8Array(len);
+  avcC[0] = 1; // configurationVersion
+  avcC[1] = sps[1]!; // AVCProfileIndication
+  avcC[2] = sps[2]!; // profile_compatibility
+  avcC[3] = sps[3]!; // AVCLevelIndication
+  avcC[4] = 0xff; // lengthSizeMinusOne=3（4 字节长度前缀）
+  avcC[5] = 0xe1; // numOfSPS=1
+  avcC[6] = (sps.length >> 8) & 0xff;
+  avcC[7] = sps.length & 0xff;
+  avcC.set(sps, 8);
+  avcC[8 + sps.length] = 1; // numOfPPS=1
+  avcC[9 + sps.length] = (pps.length >> 8) & 0xff;
+  avcC[10 + sps.length] = pps.length & 0xff;
+  avcC.set(pps, 11 + sps.length);
+  return avcC;
 }
 
 /**
@@ -367,10 +392,13 @@ export class FrameLockStream {
   private lastFedRtUs: number | null = null;
   /** 断流/解码报错后需要等下一个关键帧重同步 */
   private needKey = false;
-  /** 判定跳段（断流丢分片等）的 rt 间隔阈值（µs） */
-  private static readonly GAP_US = 1_000_000;
+  private resyncCount = 0;
+  /** 判定跳段（断流丢分片等）的 rt 间隔阈值（µs）——0.2s 抓更小的孔洞 */
+  private static readonly GAP_US = 200_000;
   /** 断流重同步后清零解码错误提示 */
   private resynced = false;
+  /** 连续 resync 仍失败的上限（防止反复崩在同一坏区） */
+  private static readonly MAX_RESYNC = 3;
 
   /** T 之前最近的可用关键帧下标（解码需从关键帧起），无则 -1 */
   private findStartKeyframe(targetUs: number): number {
@@ -409,8 +437,15 @@ export class FrameLockStream {
       }
       if (this.needKey) {
         if (!s.isKey) { this.decPos++; continue; } // 跳过到关键帧
-        // 到关键帧 → 重置解码器重配（从干净点起播）
+        // 到关键帧 → 重置解码器重配（从干净点起播）；若带内能取到新 SPS/PPS 用新 description，
+        // 应对编码器中途改参数/丢参数（否则多次 resync 仍崩在同一坏区）
+        this.resyncCount++;
+        if (this.resyncCount > FrameLockStream.MAX_RESYNC) { this.needKey = false; this.resyncCount = 0; }
         this.decoder.close();
+        if (this.encapsulation === "avcc") {
+          const fresh = extractInbandAvcC(s.payload);
+          if (fresh && fresh.length > 7) this.description = fresh;
+        }
         this.pendingConfigure = true;
         this.resynced = true;
         void this.configureDecoder();
