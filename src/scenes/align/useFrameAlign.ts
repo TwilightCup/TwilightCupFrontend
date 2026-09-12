@@ -11,6 +11,7 @@ import { reactive, ref, type Ref } from "vue";
 import { RateController } from "./rateControl";
 import { FrameLockStream } from "./frameLock";
 import { createFrameSource } from "./transport";
+import { emptyHealth, type StreamHealth } from "./types";
 
 export type Side = "A" | "B";
 
@@ -36,6 +37,7 @@ class AlignEngine {
   private raf = 0;
   private last = 0;
   private running = false;
+  private healthTimer: ReturnType<typeof setInterval> | null = null;
   /** 跨文档一致性：被权威页（舞台）经 WS director_cmd(frame_align) 广播的外部 T（µs）。
    *   setExternalTUs 置位后本实例以外部 T 为准（观众页不跑自己的速率控制，取同帧<→像素一致）。 */
   private externalTUs: number | null = null;
@@ -46,6 +48,8 @@ class AlignEngine {
   readonly modes = reactive<Record<Side, "aligned" | "off">>({ A: "off", B: "off" });
   /** 各侧最近拉流错误（可读文案；有内容后清空）。供导播界面直接提示，不必翻 console */
   readonly streamError = reactive<Record<Side, string | null>>({ A: null, B: null });
+  /** 各侧连通性/健康指标（对齐 SEIInjector 冒烟工具；~2.5Hz 刷新） */
+  readonly health = reactive<Record<Side, StreamHealth>>({ A: emptyHealth(), B: emptyHealth() });
 
   get ready(): boolean {
     return this.cfg.ready;
@@ -109,10 +113,19 @@ class AlignEngine {
     if (arr.length === 0) this.canvases.delete(side);
   }
   /* ---- 主循环 ---- */
+  private refreshHealth(): void {
+    for (const side of ["A", "B"] as Side[]) {
+      const s = this.streams.get(side);
+      this.health[side] = s ? s.stats() : emptyHealth();
+    }
+  }
+
   start(): void {
     if (this.running) return;
     this.running = true;
     this.last = performance.now();
+    this.refreshHealth();
+    this.healthTimer = setInterval(() => this.refreshHealth(), 400);
     const loop = (now: number) => {
       if (!this.running) return;
       const elapsed = Math.max(now - this.last, 0);
@@ -150,6 +163,8 @@ class AlignEngine {
     this.running = false;
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
+    if (this.healthTimer) clearInterval(this.healthTimer);
+    this.healthTimer = null;
   }
 
   private drawFrame(canvas: HTMLCanvasElement, frame: CanvasImageSource): void {

@@ -227,6 +227,30 @@ watch(
   },
 );
 
+// 连通性指标条（维度对齐 SEIInjector 冒烟工具，刷新由 alignEngine.health ~2.5Hz）
+function healthText(side: "A" | "B"): string {
+  const err = alignEngine.streamError[side];
+  if (err) return `拉不到流 · ${err}`;
+  const on = side === "A" ? cfgConfig.alignA : cfgConfig.alignB;
+  const url = side === "A" ? cfgConfig.hlsA : cfgConfig.hlsB;
+  if (!on || !url) return "对齐未启用（MSE 播放）";
+  const h = alignEngine.health[side];
+  if (h.frames === 0 && !h.hasContent) return "等待内容…";
+  const fps = h.fps ? h.fps.toFixed(0) : "—";
+  let s = `${h.codec.toUpperCase()} · ${fps} fps · ${h.frames} 帧 · NTP ${h.ntp}/${h.frames}`;
+  if (h.droppedSeq) s += ` · 丢帧 ${h.droppedSeq}`;
+  if (h.missing) s += ` · 缺SEI ${h.missing}`;
+  s += ` · K ${h.key}`;
+  return s;
+}
+function healthCls(side: "A" | "B"): "h-ok" | "h-err" | "" {
+  if (alignEngine.streamError[side]) return "h-err";
+  const on = side === "A" ? cfgConfig.alignA : cfgConfig.alignB;
+  const url = side === "A" ? cfgConfig.hlsA : cfgConfig.hlsB;
+  if (!on || !url) return "";
+  return alignEngine.health[side].frames > 0 ? "h-ok" : "";
+}
+
 /** 应急重拉流：计数自增 → 舞台该侧播放器重挂（重新取 manifest） */
 function refreshStream(side: "A" | "B"): void {
   const key = side === "A" ? "refreshA" : "refreshB";
@@ -757,6 +781,16 @@ onUnmounted(() => {
               </el-button>
             </div>
           </div>
+          <div class="align-health">
+            <div class="h-row">
+              <span class="h-side tc-a">A</span>
+              <span class="h-val" :class="healthCls('A')">{{ healthText('A') }}</span>
+            </div>
+            <div class="h-row">
+              <span class="h-side tc-b">B</span>
+              <span class="h-val" :class="healthCls('B')">{{ healthText('B') }}</span>
+            </div>
+          </div>
           <div class="stream-preview">
             <div class="sp-col">
               <!-- 隐藏态仅作视觉提示（画面本身仍实时播放供监控），舞台已切等待占位 -->
@@ -1260,6 +1294,31 @@ onUnmounted(() => {
   gap: 8px;
   margin-bottom: 10px;
 }
+/* 连通性/健康指标条：预览画面上方，A/B 各一行 */
+.align-health {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #11152a;
+  border: 1px solid var(--el-border-color-light, #2b3456);
+}
+.h-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
+}
+.h-side {
+  font-weight: 800;
+  flex: none;
+}
+.h-val { color: var(--el-text-color-secondary, #8b94bd); word-break: break-all; }
+.h-val.h-ok { color: #37d67a; }
+.h-val.h-err { color: #ff5f7a; font-weight: 700; }
 .delay-grid {
   display: grid;
   grid-template-columns: auto auto auto auto;

@@ -49,3 +49,39 @@ export interface AlignedFrame {
   rtUs: number; // signed 秒内绝对（epoch 微秒，Number 可表 <2^53）
   isKey: boolean;
 }
+
+/** 单路连通性/健康指标（导播控制台观察连接问题用，维度对齐 SEIInjector 冒烟工具） */
+export interface StreamHealth {
+  codec: Codec;
+  /** 含 SEI 的样本数（已解析帧） */
+  frames: number;
+  /** 无 SEI 的样本数 */
+  missing: number;
+  /** NTP 校准帧数 */
+  ntp: number;
+  /** 关键帧数 */
+  key: number;
+  /** seq 跳变次数（>1 即丢帧） */
+  droppedSeq: number;
+  /** 近端帧率（fps），无足够样本 null */
+  fps: number | null;
+  hasContent: boolean;
+  mode: "aligned" | "off";
+  /** 最近到货 rt（µs） */
+  frontRtUs: number | null;
+}
+
+export function emptyHealth(): StreamHealth {
+  return {
+    codec: "h264",
+    frames: 0,
+    missing: 0,
+    ntp: 0,
+    key: 0,
+    droppedSeq: 0,
+    fps: null,
+    hasContent: false,
+    mode: "off",
+    frontRtUs: null,
+  };
+}

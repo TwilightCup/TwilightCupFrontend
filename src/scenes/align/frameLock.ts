@@ -13,7 +13,7 @@ import { extractFmp4Samples } from "./fmp4";
 import { parseSampleSei, parseAnnexbFrames } from "./sei";
 import { FrameQueue } from "./frameQueue";
 import type { FrameSource, RawSegment } from "./transport";
-import type { Codec } from "./types";
+import type { Codec, SeiFrameInfo, StreamHealth } from "./types";
 
 /** 解码器薄接口（可替换/测试） */
 export interface Decoder {
@@ -161,6 +161,10 @@ export class FrameLockStream {
   /** 本路最近解码/到达的 rt（供自锚时钟） */
   lastArrivedRtUs: number | null = null;
 
+  // ---- 连通性指标（维度对齐 SEIInjector 冒烟工具；供导播控制台观察） ----
+  private st = { frames: 0, missing: 0, ntp: 0, key: 0, droppedSeq: 0, lastSeq: null as number | null, lastRtUs: null as number | null };
+  private dtRing: number[] = [];
+
   constructor(source: FrameSource, opts: FrameLockStreamOptions = {}) {
     this.opts = opts;
     this.rawSpanUs = opts.rawSpanUs ?? 600_000_000; // 10 min in µs
@@ -198,14 +202,27 @@ export class FrameLockStream {
         if (r.avcC) this.description = r.avcC;
         if (r.hvcC) this.description = r.hvcC;
         if (seg.kind === "init" || r.avcC || r.hvcC) await this.configureDecoder();
-        for (const s of r.samples) this.ingestSample(s);
+        for (const s of r.samples) {
+          const info = this.onSample(s);
+          if (info && this.ready && this.mode === "aligned") {
+            const rtUs = Number(info.realtime_us);
+            this.raw.push({ rtUs, isKey: info.keyframe || s.isKey, payload: new Uint8Array(s.payload) });
+            this.decoder.decodeSample(rtUs, info.keyframe || s.isKey, s.payload);
+            this.trimRaw(rtUs);
+          }
+        }
         if (r.samples.length > 0) this.hasContent = true;
         return;
       }
       // annexb（原始 ES / RTSP 代理单拉落点）：只解析 SEI 更新前沿锚（供速率控制 T 与
       // 延迟测量），不渲染解码——真解需转 AVCC 或 PES 重装（另一解码分支，后续按需）。
       const infos = parseAnnexbFrames(seg.payload, this.codec);
-      for (const info of infos) this.lastArrivedRtUs = Number(info.realtime_us);
+      for (const info of infos) {
+        this.st.frames++;
+        this.st.ntp += info.clock_ntp ? 1 : 0;
+        this.st.key += info.keyframe ? 1 : 0;
+        this.lastArrivedRtUs = Number(info.realtime_us);
+      }
       if (infos.length > 0) this.hasContent = true;
     } catch (e) {
       this.lastErr = e;
@@ -230,18 +247,50 @@ export class FrameLockStream {
     this.opts.onModeChange?.(this.mode);
   }
 
-  private ingestSample(s: { payload: Uint8Array; isKey: boolean }): void {
-    if (!this.ready) return;
+  /** 逐样本统计（无论是否可解码都记，供连通性观察）；返回 SEI 信息（无则 null） */
+  private onSample(s: { payload: Uint8Array; isKey: boolean }): SeiFrameInfo | null {
     const info = parseSampleSei(s.payload, this.codec);
-    if (!info) return; // 无 SEI 的样本（无 uuid 不算锚）——不喂解码（不是我们的锚流）
+    if (!info) {
+      this.st.missing++;
+      return null;
+    }
     const rtUs = Number(info.realtime_us);
+    this.st.frames++;
+    this.st.ntp += info.clock_ntp ? 1 : 0;
+    this.st.key += info.keyframe || s.isKey ? 1 : 0;
+    if (this.st.lastSeq != null) {
+      const d = (info.seq - this.st.lastSeq + 0x100000000) % 0x100000000;
+      if (d !== 1 && d > 1) this.st.droppedSeq++;
+    }
+    this.st.lastSeq = info.seq;
+    if (this.st.lastRtUs != null) {
+      const dt = rtUs - this.st.lastRtUs;
+      if (dt > 0 && dt < 100_000) {
+        this.dtRing.push(dt);
+        if (this.dtRing.length > 30) this.dtRing.shift();
+      }
+    }
+    this.st.lastRtUs = rtUs;
     this.lastArrivedRtUs = rtUs;
-    // 存 raw（指向同一 payload 复制，避免 subarray 生命周期问题）
-    this.raw.push({ rtUs, isKey: info.keyframe || s.isKey, payload: new Uint8Array(s.payload) });
-    // 解码（WebCodecs 顺序、uv 同步足够快；慢则挂队列）
-    this.decoder.decodeSample(rtUs, info.keyframe || s.isKey, s.payload);
-    // raw 环按 rt 跨度裁剪旧样本（释放原始字节）
-    this.trimRaw(rtUs);
+    return info;
+  }
+
+  /** 连通性/健康快照 */
+  stats(): StreamHealth {
+    const n = this.dtRing.length;
+    const mean = n ? this.dtRing.reduce((a, b) => a + b, 0) / n : null;
+    return {
+      codec: this.codec,
+      frames: this.st.frames,
+      missing: this.st.missing,
+      ntp: this.st.ntp,
+      key: this.st.key,
+      droppedSeq: this.st.droppedSeq,
+      fps: mean ? 1_000_000 / mean : null,
+      hasContent: this.hasContent,
+      mode: this.mode,
+      frontRtUs: this.lastArrivedRtUs,
+    };
   }
 
   private trimRaw(frontUs: number): void {
