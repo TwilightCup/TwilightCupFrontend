@@ -30,6 +30,19 @@ export class FrameQueue {
     return this.entries.length;
   }
 
+  /** 是否已存在某 rtUs 的帧（去重时用） */
+  has(rtUs: number): boolean {
+    let lo = 0, hi = this.entries.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const r = this.entries[mid]!.rtUs;
+      if (r === rtUs) return true;
+      if (r < rtUs) lo = mid + 1;
+      else hi = mid - 1;
+    }
+    return false;
+  }
+
   add(e: FrameEntry): void {
     // 二分插入（rtUs 升序；同 rt 去重）
     let lo = 0, hi = this.entries.length;

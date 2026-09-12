@@ -190,7 +190,14 @@ export class FrameLockStream {
     this.rawSpanUs = opts.rawSpanUs ?? 600_000_000; // 10 min in µs
     this.source = source;
     this.decoder = new WebCodecsDecoder(
-      (rtUs, isKey, frame) => this.queue.add({ rtUs, isKey, handle: frame }),
+      (rtUs, isKey, frame) => {
+        // 去重：该 rt 已有帧 → 新的 VideoFrame 必须 close，否则 GC 未 close 泄漏
+        if (this.queue.has(rtUs)) {
+          try { frame.close(); } catch { /* noop */ }
+          return;
+        }
+        this.queue.add({ rtUs, isKey, handle: frame });
+      },
       (e) => {
         const m = e instanceof Error ? e.message : String(e);
         console.error("[align decode]", m);

@@ -146,7 +146,11 @@ export class HlsHarvester {
         if (this.seen.has(it.uri)) continue;
         if (it.kind === "part" && !this.opts.followParts) continue;
         this.seen.add(it.uri);
-        this.onContent(await fetchBytes(it.uri), it.kind);
+        try {
+          this.onContent(await fetchBytes(it.uri), it.kind);
+        } catch {
+          // 单个分片 404/过期（live 轮动，靠前的旧段服务端已删）属正常，不记为流错误
+        }
       }
     } catch (e) {
       this.opts.onError?.(e);
