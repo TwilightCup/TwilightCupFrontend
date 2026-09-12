@@ -202,6 +202,7 @@ export class FrameLockStream {
         const m = e instanceof Error ? e.message : String(e);
         console.error("[align decode]", m);
         this.decodeError = m;
+        this.needKey = true; // 报错 → 下个关键帧重同步，而非永久卡死
         this.opts.onError?.(e);
       },
     );
@@ -363,6 +364,13 @@ export class FrameLockStream {
   //      解出的帧进小窗口队列；原始环按 10min 缓存。避免"解码即上屏被 advance 全丢"。----
   private decPos = 0; // raw 环里下一个要喂给解码器的样本下标
   private pendingConfigure = false;
+  private lastFedRtUs: number | null = null;
+  /** 断流/解码报错后需要等下一个关键帧重同步 */
+  private needKey = false;
+  /** 判定跳段（断流丢分片等）的 rt 间隔阈值（µs） */
+  private static readonly GAP_US = 1_000_000;
+  /** 断流重同步后清零解码错误提示 */
+  private resynced = false;
 
   /** T 之前最近的可用关键帧下标（解码需从关键帧起），无则 -1 */
   private findStartKeyframe(targetUs: number): number {
@@ -391,9 +399,26 @@ export class FrameLockStream {
     if (this.pendingConfigure) {
       if (this.mode !== "aligned" || !this.ready) return;
       this.pendingConfigure = false;
+      if (this.resynced) { this.resynced = false; this.decodeError = null; }
     }
     while (this.decPos < this.raw.length && this.raw[this.decPos]!.rtUs <= targetUs + lookaheadUs) {
       const s = this.raw[this.decPos]!;
+      // 断流/跳段（间隔超 GAP_US）→ 标记需要到下一个关键帧重同步
+      if (this.lastFedRtUs !== null && s.rtUs - this.lastFedRtUs > FrameLockStream.GAP_US) {
+        this.needKey = true;
+      }
+      if (this.needKey) {
+        if (!s.isKey) { this.decPos++; continue; } // 跳过到关键帧
+        // 到关键帧 → 重置解码器重配（从干净点起播）
+        this.decoder.close();
+        this.pendingConfigure = true;
+        this.resynced = true;
+        void this.configureDecoder();
+        this.needKey = false;
+        this.lastFedRtUs = null;
+        break; // 配置异步，下一轮 pump 再喂本关键帧
+      }
+      this.lastFedRtUs = s.rtUs;
       this.decPos++;
       this.decoder.decodeSample(s.rtUs, s.isKey, s.payload);
     }
