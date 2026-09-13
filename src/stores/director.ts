@@ -501,9 +501,16 @@ export const useDirectorStore = defineStore("director", () => {
     t_us: number;
     ready_a?: boolean;
     ready_b?: boolean;
+    src?: string;
   }
   const frameAlign = ref<{ tUs: number | null; readyA: boolean; readyB: boolean } | null>(null);
+  /** 观众页当前跟随的唯一权威 id——多个舞台各算各 T 时，只认第一个/当前，避免两个 T 对撞 */
+  const currentAlignSrc = ref<string | null>(null);
   function applyFrameAlign(p: FrameAlignPayload): void {
+    if (p.src) {
+      if (currentAlignSrc.value && currentAlignSrc.value !== p.src) return; // 忽略其他权威
+      if (!currentAlignSrc.value) currentAlignSrc.value = p.src;
+    }
     frameAlign.value = { tUs: p.t_us, readyA: !!p.ready_a, readyB: !!p.ready_b };
     // 观众页覆盖本地时钟到权威 T；权威页（舞台）自己推进，不覆盖（否则卡死）
     alignEngine.setExternalTUs(p.t_us);
@@ -589,12 +596,12 @@ export const useDirectorStore = defineStore("director", () => {
   /** 节流广播虚拟时间 T + A/B 就绪（帧对齐跨文档一致性；发送者=舞台被后端排除不收到自己）。
    *  由权威页（舞台）调用；观众页不调只收。ready 反映舞台真实上屏态，观众就绪胶囊据此显示。 */
   let lastAlignT = 0;
-  function sendFrameAlign(tUs: number, readyA?: boolean, readyB?: boolean): void {
+  function sendFrameAlign(tUs: number, readyA?: boolean, readyB?: boolean, src = ""): void {
     if (matchEnded.value) return;
     const now = Date.now();
     if (now - lastAlignT < 400) return; // ~2.5Hz 足够（帧锁同帧由 30s 缓冲兜底）
     lastAlignT = now;
-    sendDirectorCommand("frame_align", { t_us: tUs, ready_a: readyA ?? false, ready_b: readyB ?? false });
+    sendDirectorCommand("frame_align", { t_us: tUs, ready_a: readyA ?? false, ready_b: readyB ?? false, src });
   }
 
   function nameOf(side: "A" | "B"): string {

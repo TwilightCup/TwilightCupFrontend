@@ -68,10 +68,12 @@ function ensureAlignPreload(): void {
 
 // 作为对齐权威持续广播统一虚拟时间 T + A/B 就绪（节流由 store.sendFrameAlign 控制），
 // 供控制台/预览四路同一 T、就绪反映舞台真实态；后端排除发送方，舞台自己不进回环。
+// src=本文档唯一 id：多个舞台并存时观众页只跟随第一个/当前权威的 T，避免两套 T 对撞。
+const alignSrcId = Math.random().toString(36).slice(2);
 watch(
   () => alignEngine.tUs.value,
   (t) => {
-    if (t != null) director.sendFrameAlign(t, alignEngine.presented.A, alignEngine.presented.B);
+    if (t != null) director.sendFrameAlign(t, alignEngine.presented.A, alignEngine.presented.B, alignSrcId);
   },
 );
 
