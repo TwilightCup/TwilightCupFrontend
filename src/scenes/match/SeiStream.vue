@@ -143,12 +143,13 @@ canvas.video {
 .ph-abs .err {
   z-index: 1;
 }
-/* 扫描线：与 StreamFrame 占位同款，恢复原有风格 */
+/* 扫描线：与 StreamFrame 占位同款，恢复原有风格；压在对齐文字之上（字被扫过） */
 .ph-abs::after,
 .placeholder::after {
   content: "";
   position: absolute;
   inset: 0;
+  z-index: 3;
   background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.18) 0 1px, transparent 1px 3px);
   pointer-events: none;
 }
