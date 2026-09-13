@@ -92,6 +92,8 @@ export class HlsHarvester {
   private stopped = false;
   /** 最近一次空列表诊断（去重：同一原因只报一次，恢复有分片即重置） */
   private lastEmptyDiag: string | null = null;
+  /** 分片瞬时失败重试表：key(去query) → {tries, atMs}；404 不立即标 seen，延迟重试，限次后放弃 */
+  private retryMap = new Map<string, { tries: number; at: number }>();
 
   constructor(
     private url: string,
@@ -144,11 +146,23 @@ export class HlsHarvester {
         const key = it.uri.split("?")[0];
         if (this.seen.has(key)) continue;
         if (it.kind === "part" && !this.opts.followParts) continue;
-        this.seen.add(key);
+        // 瞬时时 404（m3u8 列出但文件还没就绪）：不立即标 seen，延迟重试，避免永久洞→解码报错
+        const pendingRetry = this.retryMap.get(key);
+        if (pendingRetry && Date.now() - pendingRetry.at < 1500) continue;
         try {
           this.onContent(await fetchBytes(it.uri), it.kind);
+          this.seen.add(key);
+          this.retryMap.delete(key);
         } catch {
-          // 单个分片 404/过期（live 轮动，靠前的旧段服务端已删）属正常，不记为流错误
+          const prev = this.retryMap.get(key);
+          const tries = (prev?.tries ?? 0) + 1;
+          if (tries >= 3) {
+            this.seen.add(key); // 三次仍失败 → 放弃（该段确实不可得，避免无限重试刷屏）
+            this.retryMap.delete(key);
+          } else {
+            this.retryMap.set(key, { tries, at: Date.now() });
+          }
+          // 单个分片 404/过期（live 轮动/瞬时）属正常，不记为流错误
         }
       }
     } catch (e) {
