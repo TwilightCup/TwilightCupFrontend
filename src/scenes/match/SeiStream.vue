@@ -49,16 +49,8 @@ const pullErr = computed(() => alignEngine.streamError[props.side]);
 const hasFrames = computed(() => alignEngine.health[props.side].frames > 0);
 /** 本侧解码错误（WebCodecs 实际报错，明文） */
 const decodeErr = computed(() => alignEngine.health[props.side].decodeError);
-/** 本侧是否已真正上屏过一帧（攒够约 30s 缓冲后才 True） */
+/** 本侧是否已真正上屏过一帧（用于决定舞台显示等待信号还是画面） */
 const presented = computed(() => alignEngine.presented[props.side]);
-/** 刚就绪的短暂"✓ 已就绪"提示（约 3s 后消失） */
-const readyFlash = ref(false);
-watch(presented, (p) => {
-  if (p) {
-    readyFlash.value = true;
-    setTimeout(() => { readyFlash.value = false; }, 3000);
-  }
-});
 
 function refresh(): void {
   if (props.enabled && props.url) {
@@ -102,8 +94,12 @@ watch(cv, (c) => {
   <div class="frame" :class="[side, { uncropped: !props.crop4to3 }]">
     <div ref="rootEl" v-if="aligned && !props.hidden" class="stage">
       <canvas ref="cv" class="video" />
-      <div v-if="!presented" class="phase">⏳ 攒缓冲中（需约 30s）…</div>
-      <div v-else-if="readyFlash" class="phase ok">✓ 已就绪</div>
+      <!-- 舞台在真正出画面(已上屏)前一律显示等待信号 Awaiting；不显示"攒缓冲中/已就绪"这类对齐相位 -->
+      <div v-if="!presented" class="ph-abs">
+        <div v-if="pullErr" class="err">⚠ 拉不到流 · {{ pullErr }}</div>
+        <div v-else-if="decodeErr" class="err">解码出错 · {{ decodeErr }}</div>
+        <div v-else class="live">● {{ bi("scenes.match.waitingSignal") }}</div>
+      </div>
     </div>
     <div v-else class="placeholder">
       <div v-if="pullErr" class="err">⚠ 拉不到流 · {{ pullErr }}</div>
@@ -136,23 +132,23 @@ canvas.video {
   height: 100%;
   background: #000;
 }
-.phase {
+/* 舞台在未上屏前叠加的等待信号层 */
+.ph-abs {
   position: absolute;
-  inset: auto 0 8% 0;
-  margin: 0 auto;
-  width: max-content;
-  max-width: 92%;
-  padding: 6px 14px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.55);
-  color: #fff;
-  font-size: clamp(12px, 1.3vw, 18px);
-  font-weight: 700;
-  text-align: center;
-  z-index: 3;
-  pointer-events: none;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: linear-gradient(135deg, #1a0633, #2d0b4e, #1a0633);
+  background-size: 200% 200%;
+  animation: shift 6s ease infinite;
 }
-.phase.ok { color: #37d67a; }
+.ph-abs .live,
+.ph-abs .err {
+  z-index: 1;
+}
 .placeholder {
   position: absolute;
   inset: 0;
