@@ -586,6 +586,7 @@ onUnmounted(() => {
             :url="config.hlsA"
             :enabled="seiA"
             :hidden="config.hideA"
+            bare
           />
           <StreamFrame
             v-else
@@ -603,6 +604,7 @@ onUnmounted(() => {
             :url="config.hlsB"
             :enabled="seiB"
             :hidden="config.hideB"
+            bare
           />
           <StreamFrame
             v-else

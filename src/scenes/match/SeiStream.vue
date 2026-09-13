@@ -21,8 +21,10 @@ const props = withDefaults(
     crop4to3?: boolean;
     /** 隐藏（等待信号占位；应急） */
     hidden?: boolean;
+    /** 裸模式（舞台对外播出用）：任何情况只显示扫描器式"等待信号"，不写错误码/解码/地址 */
+    bare?: boolean;
   }>(),
-  { crop4to3: true, hidden: false },
+  { crop4to3: true, hidden: false, bare: false },
 );
 
 const cv = ref<HTMLCanvasElement | null>(null);
@@ -75,16 +77,27 @@ watch(cv, (c) => {
       <canvas ref="cv" class="video" />
       <!-- 舞台在真正出画面(已上屏)前一律显示等待信号 Awaiting；不显示"攒缓冲中/已就绪"这类对齐相位 -->
       <div v-if="!presented" class="ph-abs">
-        <div v-if="pullErr" class="err">⚠ 拉不到流 · {{ pullErr }}</div>
-        <div v-else-if="decodeErr" class="err">解码出错 · {{ decodeErr }}</div>
-        <div v-else class="live">● {{ bi("scenes.match.waitingSignal") }}</div>
+        <!-- bare(舞台)：任何情况下只露扫描器式等待，错误码/解码/地址一律不写 -->
+        <template v-if="bare">
+          <div class="live">● {{ bi("scenes.match.waitingSignal") }}</div>
+        </template>
+        <template v-else>
+          <div v-if="pullErr" class="err">⚠ 拉不到流 · {{ pullErr }}</div>
+          <div v-else-if="decodeErr" class="err">解码出错 · {{ decodeErr }}</div>
+          <div v-else class="live">● {{ bi("scenes.match.waitingSignal") }}</div>
+        </template>
       </div>
     </div>
     <div v-else class="placeholder">
-      <div v-if="pullErr" class="err">⚠ 拉不到流 · {{ pullErr }}</div>
-      <div v-else-if="decodeErr" class="err">解码出错 · {{ decodeErr }}</div>
-      <div v-else-if="hasFrames" class="err">画面已解析 {{ hasFrames }} 帧，但解码未就绪 / 环境不支持 WebCodecs</div>
-      <div v-else class="live">● {{ bi("scenes.match.waitingSignal") }}</div>
+      <template v-if="bare">
+        <div class="live">● {{ bi("scenes.match.waitingSignal") }}</div>
+      </template>
+      <template v-else>
+        <div v-if="pullErr" class="err">⚠ 拉不到流 · {{ pullErr }}</div>
+        <div v-else-if="decodeErr" class="err">解码出错 · {{ decodeErr }}</div>
+        <div v-else-if="hasFrames" class="err">画面已解析 {{ hasFrames }} 帧，但解码未就绪 / 环境不支持 WebCodecs</div>
+        <div v-else class="live">● {{ bi("scenes.match.waitingSignal") }}</div>
+      </template>
     </div>
   </div>
 </template>
