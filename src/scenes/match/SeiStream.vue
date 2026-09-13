@@ -26,7 +26,23 @@ const props = withDefaults(
 );
 
 const cv = ref<HTMLCanvasElement | null>(null);
+const rootEl = ref<HTMLElement | null>(null);
 const aligned = ref(false);
+
+// 画布像素尺寸 = 容器 CSS 尺寸（不随帧、不拉伸），供引擎按容器做"高度铺满+裁左右"
+function fitCanvas(): void {
+  const r = rootEl.value;
+  const c = cv.value;
+  if (!r || !c) return;
+  const w = r.clientWidth;
+  const h = r.clientHeight;
+  if (w > 0 && h > 0 && (c.width !== w || c.height !== h)) {
+    c.width = w;
+    c.height = h;
+    c.getContext("2d")?.clearRect(0, 0, w, h);
+  }
+}
+let ro: ResizeObserver | null = null;
 /** 本侧拉流错误（可读文案；无则 null）。来自 alignEngine.streamError（响应式） */
 const pullErr = computed(() => alignEngine.streamError[props.side]);
 /** 本侧是否已解析出 SEI 帧（区分"在解码"与"待解码/不支持"） */
@@ -54,10 +70,15 @@ function refresh(): void {
 onMounted(() => {
   refresh();            // 启动本侧权威流 + 定 aligned
   alignEngine.start();  // 确保主循环运行（幂等）
+  ro = new ResizeObserver(fitCanvas);
+  if (rootEl.value) ro.observe(rootEl.value);
+  fitCanvas();
 });
 
 let unreg: (() => void) | null = null;
 onBeforeUnmount(() => {
+  ro?.disconnect();
+  ro = null;
   unreg?.();
   if (props.enabled && props.url) alignEngine.stopStream(props.side);
 });
@@ -79,7 +100,7 @@ watch(cv, (c) => {
 
 <template>
   <div class="frame" :class="[side, { uncropped: !props.crop4to3 }]">
-    <div v-if="aligned && !props.hidden" class="stage">
+    <div ref="rootEl" v-if="aligned && !props.hidden" class="stage">
       <canvas ref="cv" class="video" />
       <div v-if="!presented" class="phase">⏳ 攒缓冲中（需约 30s）…</div>
       <div v-else-if="readyFlash" class="phase ok">✓ 已就绪</div>
@@ -106,15 +127,15 @@ watch(cv, (c) => {
   position: relative;
   width: 100%;
   height: 100%;
-}
-canvas.video {
-  width: 100%;
-  height: 100%;
-  display: block;
-  /* object-fit 裁切由 canvas 内容在引擎内已按全幅绘制；此处保持铺满 */
+  overflow: hidden;
   background: #000;
 }
-.frame.uncropped canvas.video { object-fit: contain; }
+canvas.video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #000;
+}
 .phase {
   position: absolute;
   inset: auto 0 8% 0;
