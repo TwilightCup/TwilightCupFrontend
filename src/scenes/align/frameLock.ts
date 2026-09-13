@@ -389,6 +389,8 @@ export class FrameLockStream {
       decPos: this.decPos,
       enc: this.encapsulation ?? "",
       decOutput: this.decOutput,
+      qc: this.decoder.queueSize,
+      pendCfg: this.pendingConfigure,
     };
   }
 

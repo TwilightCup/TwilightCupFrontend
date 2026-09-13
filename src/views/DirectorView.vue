@@ -234,7 +234,7 @@ function healthText(side: "A" | "B"): string {
   }
   const diag = ` · ×${pb.speed.toFixed(2)} · 追${pb.behindS.toFixed(1)}s · 队列${h.queueLen} · 重${h.resyncs}`;
   // 解码流水线：原始环/解码游标/封装/解码累计输出（定位"队列0/没画面"）
-  const pipe = ` · raw${h.rawLen}/pos${h.decPos}/${h.enc || "-"}/出${h.decOutput}`;
+  const pipe = ` · raw${h.rawLen}/pos${h.decPos}/${h.enc || "-"}/出${h.decOutput}/qc${h.qc}/pn${h.pendCfg ? "1" : "0"}`;
   if (h.frames === 0 && !h.hasContent) {
     return h.segs > 0
       ? `已收到 ${h.segs} 段但无 SEI 时间戳——该流需用 SEI Timestamp 编码器推`

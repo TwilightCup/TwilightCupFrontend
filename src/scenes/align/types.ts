@@ -89,6 +89,10 @@ export interface StreamHealth {
   enc: string;
   /** 解码器累计输出的帧数（0 = 解码从未产帧） */
   decOutput: number;
+  /** 当前解码队列深度（≥12 恒满 = 解码器堵住不消化） */
+  qc: number;
+  /** 解码配置是否卡在等待（true 恒 = configure 没完成 → pump 一直 return 不分发） */
+  pendCfg: boolean;
 }
 
 export function emptyHealth(): StreamHealth {
@@ -112,5 +116,7 @@ export function emptyHealth(): StreamHealth {
     decPos: 0,
     enc: "",
     decOutput: 0,
+    qc: 0,
+    pendCfg: false,
   };
 }
