@@ -17,12 +17,15 @@ export interface RateConfig {
   capSpeed: number;
   /** 追赶时间常数（µs）：drift 达该量时速度逼近 capSpeed */
   horizonUs: number;
+  /** 脱离自愈阈值（µs）：drift 超此量（远超缓冲深度，如 >60s）→ 重锚 T=前沿−backUs */
+  resyncThresholdUs: number;
 }
 
 export const DEFAULT_RATE: RateConfig = {
   backUs: 30_000_000, // 30s
   capSpeed: 1.35,
   horizonUs: 25_000_000,
+  resyncThresholdUs: 60_000_000, // 60s：远大于设计 30s，仅 T 脱离(>缓冲深度)时触发
 };
 
 export class RateController {
@@ -67,6 +70,13 @@ export class RateController {
     }
 
     const drift = Math.max(0, required - this.tUs);
+    // 脱离自愈：T 落后远超缓冲深度（如 10min 原始环容不下 T 时刻）→ 重锚到 前沿−backUs，
+    // 让 T 回到原始环可解区间，否则解码器找不到 T 附近关键帧 → 队列恒空 → 永远没画面
+    if (drift > this.cfg.resyncThresholdUs) {
+      this.tUs = required;
+      this.speed = 1;
+      return this.tUs;
+    }
     // 落后越多加速越多：落后 horizonUs 时达到 [1+1]=2→封顶 capSpeed
     const want = 1 + drift / this.cfg.horizonUs;
     this.speed = Math.min(this.cfg.capSpeed, want);
