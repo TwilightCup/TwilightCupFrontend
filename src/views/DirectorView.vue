@@ -227,6 +227,8 @@ function healthText(side: "A" | "B"): string {
   // 关键诊断：倍速(>1=在追/快进)/落后秒数/可上屏队列/重同步次数
   const pb = alignEngine.playback;
   const diag = ` · ×${pb.speed.toFixed(2)} · 追${pb.behindS.toFixed(1)}s · 队列${h.queueLen} · 重${h.resyncs}`;
+  // 解码流水线：原始环/解码游标/封装/解码累计输出（定位"队列0/没画面"）
+  const pipe = ` · raw${h.rawLen}/pos${h.decPos}/${h.enc || "-"}/出${h.decOutput}`;
   if (h.frames === 0 && !h.hasContent) {
     return h.segs > 0
       ? `已收到 ${h.segs} 段但无 SEI 时间戳——该流需用 SEI Timestamp 编码器推`
@@ -234,7 +236,7 @@ function healthText(side: "A" | "B"): string {
   }
   if (h.frames > 0 && !alignEngine.presented[side]) {
     // 攒缓冲阶段也带诊断：看「追」是否在缩（能上屏）、队列是否有帧、主循环是否活
-    return `⏳ 攒缓冲中（总 ${h.frames} 帧 · 活 ${h.liveFps} fps）${diag}`;
+    return `⏳ 攒缓冲中（总 ${h.frames} 帧 · 活 ${h.liveFps} fps）${diag}${pipe}`;
   }
   // 实时 fps 用近 1s 速率（liveFps），累计总数用 帧
   const fps = (h.liveFps || h.fps || 0).toFixed(0);
@@ -243,6 +245,7 @@ function healthText(side: "A" | "B"): string {
   if (h.missing) s += ` · 缺SEI ${h.missing}`;
   s += ` · K ${h.key}`;
   s += diag;
+  s += pipe;
   return s;
 }
 function healthCls(side: "A" | "B"): "h-ok" | "h-err" | "" {

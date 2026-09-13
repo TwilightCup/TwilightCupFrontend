@@ -81,6 +81,14 @@ export interface StreamHealth {
   queueLen: number;
   /** 断流/解码重同步累计次数（上升 = 断流在反复 → 卡/跳元凶） */
   resyncs: number;
+  /** 原始环内样本数（fmp4 SEI 样本） */
+  rawLen: number;
+  /** 解码游标已喂到的原始样本下标（== rawLen 且队列空 = 喂完但无可呈现帧） */
+  decPos: number;
+  /** 样本封装（avcc/annexb；空=解码从未启动） */
+  enc: string;
+  /** 解码器累计输出的帧数（0 = 解码从未产帧） */
+  decOutput: number;
 }
 
 export function emptyHealth(): StreamHealth {
@@ -100,5 +108,9 @@ export function emptyHealth(): StreamHealth {
     decodeError: null,
     queueLen: 0,
     resyncs: 0,
+    rawLen: 0,
+    decPos: 0,
+    enc: "",
+    decOutput: 0,
   };
 }

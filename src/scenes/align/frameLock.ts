@@ -218,6 +218,7 @@ export class FrameLockStream {
     this.source = source;
     this.decoder = new WebCodecsDecoder(
       (rtUs, isKey, frame) => {
+        this.decOutput++; // 解码器确实产出了帧
         // 去重：该 rt 已有帧 → 新的 VideoFrame 必须 close，否则 GC 未 close 泄漏
         if (this.queue.has(rtUs)) {
           try { frame.close(); } catch { /* noop */ }
@@ -379,6 +380,10 @@ export class FrameLockStream {
       decodeError: this.decodeError,
       queueLen: this.queue.length,
       resyncs: this.resyncs,
+      rawLen: this.raw.length,
+      decPos: this.decPos,
+      enc: this.encapsulation ?? "",
+      decOutput: this.decOutput,
     };
   }
 
@@ -403,6 +408,8 @@ export class FrameLockStream {
   private resyncCount = 0;
   /** 断流/解码重同步累计（监控用：上升 = 断流反复） */
   resyncs = 0;
+  /** 解码器累计输出帧数（监控：0=从未产帧） */
+  decOutput = 0;
   /** 判定跳段（断流丢分片等）的 rt 间隔阈值（µs）——0.2s 抓更小的孔洞 */
   private static readonly GAP_US = 200_000;
   /** 断流重同步后清零解码错误提示 */
