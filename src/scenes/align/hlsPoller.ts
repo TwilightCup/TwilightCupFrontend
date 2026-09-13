@@ -59,11 +59,7 @@ export function parseM3u8(text: string, base: string): HlsPlaylist {
 
 export async function fetchBytes(url: string): Promise<Uint8Array> {
   const r = await fetch(url, { cache: "no-store" });
-  if (!r.ok) {
-    const e = new Error(`fetch ${url} -> ${r.status}`) as Error & { status?: number };
-    e.status = r.status;
-    throw e;
-  }
+  if (!r.ok) throw new Error(`fetch ${url} -> ${r.status}`);
   return new Uint8Array(await r.arrayBuffer());
 }
 
@@ -96,8 +92,8 @@ export class HlsHarvester {
   private stopped = false;
   /** 最近一次空列表诊断（去重：同一原因只报一次，恢复有分片即重置） */
   private lastEmptyDiag: string | null = null;
-  /** 分片瞬时失败重试表：key(去query) → {tries, atMs}；404 不立即标 seen，延迟重试，限次后放弃 */
-  private retryMap = new Map<string, { tries: number; at: number }>();
+  /** master 解析后锁定的 media 播放列表 URI（null = 尚未解析） */
+  private mediaUrl: string | null = null;
 
   constructor(
     private url: string,
@@ -122,11 +118,13 @@ export class HlsHarvester {
   private async poll(): Promise<void> {
     if (this.stopped) return;
     try {
-      // 每轮都从根 master 重新取（刷新 hlsEncryption 防盗链 session，避免 session 过期 → 401
-      // 导致 m3u8 拿不到、流像重新拉取），再取该轮最优 variant 的 media 列表。
-      const masterText = await (await fetch(this.url, { cache: "no-store" })).text();
-      const master = parseM3u8(masterText, this.url);
-      const url = master.variantUri ?? this.url;
+      // 首次：拉 master，若有变体锁最优 media（之后直接轮询 media，避免重复探测 master）
+      if (!this.mediaUrl) {
+        const masterText = await (await fetch(this.url, { cache: "no-store" })).text();
+        const master = parseM3u8(masterText, this.url);
+        this.mediaUrl = master.variantUri ?? this.url;
+      }
+      const url = this.mediaUrl;
       const text = await (await fetch(url, { cache: "no-store" })).text();
       const pl = parseM3u8(text, url);
       // 空列表诊断：把"拿到但没分片"的真实原因上报一次（master / 非HLS / 空闲）
@@ -150,30 +148,11 @@ export class HlsHarvester {
         const key = it.uri.split("?")[0];
         if (this.seen.has(key)) continue;
         if (it.kind === "part" && !this.opts.followParts) continue;
-        // 瞬时时 404（m3u8 列出但文件还没就绪）：不立即标 seen，延迟重试，避免永久洞→解码报错
-        const pendingRetry = this.retryMap.get(key);
-        if (pendingRetry && Date.now() - pendingRetry.at < 1500) continue;
+        this.seen.add(key);
         try {
           this.onContent(await fetchBytes(it.uri), it.kind);
-          this.seen.add(key);
-          this.retryMap.delete(key);
-        } catch (e) {
-          const status = (e as { status?: number } | undefined)?.status;
-          if (status === 401 || status === 403) {
-            // 鉴权被拒（session/防盗链无效）：重试无用 → 立即永久放弃，避免刷屏&更多401
-            this.seen.add(key);
-            this.retryMap.delete(key);
-          } else {
-            const prev = this.retryMap.get(key);
-            const tries = (prev?.tries ?? 0) + 1;
-            if (tries >= 3) {
-              this.seen.add(key); // 三次仍失败 → 放弃（该段确实不可得，避免无限重试刷屏）
-              this.retryMap.delete(key);
-            } else {
-              this.retryMap.set(key, { tries, at: Date.now() }); // 延迟重试(404 瞬时可等)
-            }
-          }
-          // 单个分片 404/过期（live 轮动/瞬时）属正常，不记为流错误
+        } catch {
+          // 单个分片 404/过期（live 轮动，靠前的旧段服务端已删）属正常，不记为流错误
         }
       }
     } catch (e) {
