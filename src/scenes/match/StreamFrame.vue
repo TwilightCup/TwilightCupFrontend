@@ -152,6 +152,9 @@ async function attach(): Promise<void> {
 
   // 方案①：自有服务器 HLS
   if (props.hlsUrl) {
+    // 硬约束：直播流一律禁音（即使 muted 属性被剥离也强制），只出画面不出声
+    v.muted = true;
+    v.playsInline = true;
     if (nativeHls(v)) {
       v.src = props.hlsUrl;
       void v.play().catch(() => {/* muted autoplay 被拦时静默，画面仍渲染 */});
