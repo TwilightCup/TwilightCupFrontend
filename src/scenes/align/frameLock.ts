@@ -13,6 +13,7 @@ import { extractFmp4Samples } from "./fmp4";
 import { extractTsVideo } from "./ts";
 import { parseSampleSei, parseAnnexbFrames, splitAvcc } from "./sei";
 import { FrameQueue } from "./frameQueue";
+import { logSeg, logDec, logResync } from "./debugLog";
 import type { FrameSource, RawSegment } from "./transport";
 import type { Codec, SeiFrameInfo, StreamHealth } from "./types";
 
@@ -234,6 +235,7 @@ export class FrameLockStream {
       (e) => {
         const m = e instanceof Error ? e.message : String(e);
         console.error("[align decode]", m);
+        logResync("dec-err", `解码报错：${m}｜上帧rt=${this.lastFedRtUs != null ? `${(this.lastFedRtUs / 1e6) % 10000}s` : "无"} → 下个关键帧重同步`);
         this.decodeError = m;
         this.needKey = true; // 报错 → 下个关键帧重同步，而非永久卡死
         this.opts.onError?.(e);
@@ -268,12 +270,15 @@ export class FrameLockStream {
         if (r.codec) this.codec = r.codec;
         if (r.avcC) this.description = r.avcC;
         if (r.hvcC) this.description = r.hvcC;
+        let seiHits = 0;
         for (const s of r.samples) {
           const info = this.onSample(s);
           if (!info) continue; // 无 SEI 戳的样本不参与（没有 rt 锚也无需呈现）
+          seiHits++;
           // 延迟解码：到货只入原始环（10min 字节级缓存），解码由 pump(T) 按虚拟时间节流
           this.raw.push({ rtUs: Number(info.realtime_us), isKey: s.isKey || info.keyframe, payload: new Uint8Array(s.payload) });
         }
+        logSeg("seg", `${seg.kind} ${seg.payload.length}B → 样本${r.samples.length} SEI命中${seiHits} 原始环${this.raw.length} 前沿${((this.lastArrivedRtUs ?? 0) / 1e6) % 10000}s`);
         this.trimRaw(this.lastArrivedRtUs ?? 0);
         if (r.samples.length > 0) {
           this.hasContent = true;
@@ -421,8 +426,6 @@ export class FrameLockStream {
   private static readonly GAP_US = 200_000;
   /** 断流重同步后清零解码错误提示 */
   private resynced = false;
-  /** 连续 resync 仍失败的上限（防止反复崩在同一坏区） */
-  private static readonly MAX_RESYNC = 3;
 
   /** T 之前最近的可用关键帧下标（解码需从关键帧起），无则 -1 */
   private findStartKeyframe(targetUs: number): number {
@@ -444,6 +447,7 @@ export class FrameLockStream {
       if (start < 0) return;
       this.decPos = start;
       this.encapsulation = detectEncapsulation(this.raw[start]!.payload);
+      logDec("first", `首解：raw[${start}] rt=${(this.raw[start]!.rtUs / 1e6) % 10000}s T=${(targetUs / 1e6) % 10000}s 封装=${this.encapsulation}`);
       this.pendingConfigure = true;
       void this.configureDecoder(); // mode/ready 异步落定
       return;
@@ -455,6 +459,9 @@ export class FrameLockStream {
     }
     // 解码背压：decodeQueueSize 满则等，避免一次喂上千 chunk → decode 队列爆满抛异常被静默丢帧
     const MAX_DECODE_QUEUE = 12;
+    const t0 = this.decPos;
+    let fed = 0;
+    let blockedByQueue = false;
     while (
       this.decPos < this.raw.length &&
       this.raw[this.decPos]!.rtUs <= targetUs + lookaheadUs &&
@@ -464,14 +471,16 @@ export class FrameLockStream {
       // 断流/跳段（间隔超 GAP_US）→ 标记需要到下一个关键帧重同步
       if (this.lastFedRtUs !== null && s.rtUs - this.lastFedRtUs > FrameLockStream.GAP_US) {
         this.needKey = true;
+        logResync("gap", `跳段检测：上帧${(this.lastFedRtUs / 1e6) % 10000}s → 下帧${(s.rtUs / 1e6) % 10000}s（差${((s.rtUs - this.lastFedRtUs) / 1e6).toFixed(2)}s > 0.2s）→ 等关键帧重同步`);
       }
       if (this.needKey) {
-        if (!s.isKey) { this.decPos++; continue; } // 跳过到关键帧
+        if (!s.isKey) { this.decPos++; continue; } // 跳过到关键帧（无触发不硬喂）
         // 到关键帧 → 重置解码器重配（从干净点起播）；若带内能取到新 SPS/PPS 用新 description，
-        // 应对编码器中途改参数/丢参数（否则多次 resync 仍崩在同一坏区）
+        // 应对编码器中途改参数/丢参数。注意：绝不强制硬喂非关键帧——遇到解不动的坏区
+        // 持续跳到下一个关键帧（宁可该区不呈现也不反复报错风暴）
         this.resyncCount++;
         this.resyncs++;
-        if (this.resyncCount > FrameLockStream.MAX_RESYNC) { this.needKey = false; this.resyncCount = 0; }
+        logResync("resync", `#${this.resyncs} 到关键帧 rt=${(s.rtUs / 1e6) % 10000}s 重配解码器（坏区跳过 ${this.decPos - t0} 样本）`);
         this.decoder.close();
         if (this.encapsulation === "avcc") {
           const fresh = extractInbandAvcC(s.payload);
@@ -485,8 +494,16 @@ export class FrameLockStream {
         break; // 配置异步，下一轮 pump 再喂本关键帧
       }
       this.lastFedRtUs = s.rtUs;
+      this.resyncCount = 0; // 成功喂入 → 脱离坏区，重置 resync 计数
       this.decPos++;
+      fed++;
       this.decoder.decodeSample(s.rtUs, s.isKey, s.payload);
+    }
+    if (this.decPos < this.raw.length && this.raw[this.decPos]!.rtUs <= targetUs + lookaheadUs) {
+      blockedByQueue = true; // while 因队列满退出（还有该喂的没喂）
+    }
+    if (fed > 0 || blockedByQueue) {
+      logDec("pump", `T=${(targetUs / 1e6) % 10000}s 喂${fed}（${t0}→${this.decPos}/${this.raw.length}）出${this.decOutput} 队列${this.queue.length} qc${this.decoder.queueSize}${blockedByQueue ? " ⏸背压等消化" : ""}`);
     }
   }
 

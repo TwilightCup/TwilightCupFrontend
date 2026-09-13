@@ -4,6 +4,7 @@
  * 含 #EXT-X-MAP init 段。fetch 可用在主线程也可在 Web Worker 内。
  */
 import type { HlsPlaylist, HlsSegmentItem } from "./types";
+import { logSeg } from "./debugLog";
 
 /** 解析 m3u8 文本 → init + items + master 变体选择（镜像冒烟工具 parseM3u8，扩展 master） */
 export function parseM3u8(text: string, base: string): HlsPlaylist {
@@ -68,7 +69,11 @@ export async function hlsFetch(url: string): Promise<Response> {
 
 export async function fetchBytes(url: string): Promise<Uint8Array> {
   const r = await hlsFetch(url);
-  if (!r.ok) throw new Error(`fetch ${url} -> ${r.status}`);
+  if (!r.ok) {
+    const e = new Error(`fetch ${url} -> ${r.status}`) as Error & { status?: number };
+    e.status = r.status;
+    throw e;
+  }
   return new Uint8Array(await r.arrayBuffer());
 }
 
@@ -103,6 +108,8 @@ export class HlsHarvester {
   private lastEmptyDiag: string | null = null;
   /** master 解析后锁定的 media 播放列表 URI（null = 尚未解析） */
   private mediaUrl: string | null = null;
+  /** 分片瞬时失败重试表：key(去query) → {tries, at}；404 不立即标 seen，延迟重试，限次后放弃 */
+  private retryMap = new Map<string, { tries: number; at: number }>();
 
   constructor(
     private url: string,
@@ -157,11 +164,35 @@ export class HlsHarvester {
         const key = it.uri.split("?")[0];
         if (this.seen.has(key)) continue;
         if (it.kind === "part" && !this.opts.followParts) continue;
-        this.seen.add(key);
+        // 瞬时 404（m3u8 已列出但文件还没落盘/就绪）：成功才标 seen，失败进延迟重试，
+        // 否则该段成为原始环永久洞 → 解码到洞报错。限 3 次后放弃（live 轮动靠前的旧段
+        // 服务端已删也属正常，不能无限重试刷屏）。
+        const pendingRetry = this.retryMap.get(key);
+        if (pendingRetry && Date.now() - pendingRetry.at < 1500) continue;
         try {
           this.onContent(await fetchBytes(it.uri), it.kind);
-        } catch {
-          // 单个分片 404/过期（live 轮动，靠前的旧段服务端已删）属正常，不记为流错误
+          this.seen.add(key);
+          this.retryMap.delete(key);
+        } catch (e) {
+          const status = (e as { status?: number } | undefined)?.status;
+          if (status === 401 || status === 403) {
+            // 鉴权被拒（secret 无效）：重试无用 → 永久放弃，避免每轮 3 连刷屏
+            logSeg("seg-401", `⚠ ${key} ${status} 永久放弃`);
+            this.seen.add(key);
+            this.retryMap.delete(key);
+          } else {
+            const prev = this.retryMap.get(key);
+            const tries = (prev?.tries ?? 0) + 1;
+            if (tries >= 3) {
+              logSeg("seg-giveup", `⚠ ${key} 重试 3 次失败 → 放弃（原始环缺该段）`);
+              this.seen.add(key); // 三次仍失败 → 放弃（该段确实不可得）
+              this.retryMap.delete(key);
+            } else {
+              logSeg("seg-retry", `… ${key} 拉取失败(${status ?? "?"})，1.5s 后重试 ${tries}/3`);
+              this.retryMap.set(key, { tries, at: Date.now() });
+            }
+          }
+          // 单个分片 404/过期（live 轮动/瞬时）属正常，不记为流错误
         }
       }
     } catch (e) {

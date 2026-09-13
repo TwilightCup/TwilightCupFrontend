@@ -10,6 +10,8 @@
  *
  * 纯函数/可单测：所有时间都用微秒；elapsed 由调用方以 rAF 传入真实流逝。
  */
+import { logT } from "./debugLog";
+
 export interface RateConfig {
   /** T 落后最慢侧前沿的最小秒数（µs） */
   backUs: number;
@@ -67,12 +69,14 @@ export class RateController {
       // 初始化：T = required（= S_慢 − 30s），让呈现从可垫稳的时刻起步
       this.tUs = required;
       this.speed = 1;
+      logT("init", `T 初始化 = required = ${(required / 1e6) % 10000}s（最慢前沿−30s）`);
       return this.tUs;
     }
 
     // 脱离自愈：T 落后远超缓冲深度（如源瞬断/ gap 后前沿前跳）→ 重锚到 required，
     // 否则 T 指向原始环已不存在的时刻 → 解码找不到帧 → 画面永久冻结
     if (required - this.tUs > REANCHOR_US) {
+      logT("reanchor", `⚠ T 脱离自愈：drift=${((required - this.tUs) / 1e6).toFixed(1)}s > 60s → 重锚 T=required=${(required / 1e6) % 10000}s`);
       this.tUs = required;
       this.speed = 1;
       this.burstLeftMs = 0;
@@ -83,9 +87,12 @@ export class RateController {
       // 1x 推进，但永不超过 required；且只前向单调——required 回落（新慢流加入后首拉
       // 整窗 backlog、编码器重启致前沿回跳）不回拽 T，否则已淘汰的解码帧补不回来、
       // decPos 也不回卷 → 画面长时间冻结（"B 先出来又暂停"的元凶）
+      const before = this.tUs;
       this.tUs = Math.max(this.tUs, Math.min(this.tUs + elapsedUs, required));
+      if (required < before) logT("required-drop", `⚠ required 回落 ${(before / 1e6) % 10000}s → ${(required / 1e6) % 10000}s，T 保持不回拽`);
       const drift = required - this.tUs;
       if (drift >= this.cfg.thresholdUs) {
+        logT("catchup", `drift=${(drift / 1e6).toFixed(1)}s ≥ 30s → 转 2× 追回 15s`);
         this.speed = 2;
         // 2x 相对 1x 净多走 1x；要净追回 catchUs，需真实推进 catchUs/1000/1 ms
         this.burstLeftMs = this.cfg.catchUs / 1000; // 2x 播 catchRealMs 秒净追 catchUs
@@ -97,6 +104,7 @@ export class RateController {
     this.tUs = Math.max(this.tUs, Math.min(this.tUs + elapsedUs * 2, required));
     this.burstLeftMs -= elapsedMs;
     if (this.burstLeftMs <= 0 || this.tUs >= required) {
+      logT("catchup-done", `2× 追回结束：${this.tUs >= required ? "贴住 required" : "净追回 15s 完成"}，回 1x（剩 drift=${((required - this.tUs) / 1e6).toFixed(1)}s）`);
       this.speed = 1;
       this.burstLeftMs = 0;
     }

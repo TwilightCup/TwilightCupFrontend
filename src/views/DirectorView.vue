@@ -11,6 +11,7 @@ import ColorField from "@/components/ColorField.vue";
 import StreamFrame from "@/scenes/match/StreamFrame.vue";
 import SeiStream from "@/scenes/match/SeiStream.vue";
 import { alignEngine } from "@/scenes/align/useFrameAlign";
+import { alignDebugEnabled } from "@/scenes/align/debugLog";
 import AuthFailMask from "@/components/AuthFailMask.vue";
 import { requestSpeedrunRefresh } from "@/api/speedrun";
 import { AttemptStatus, MatchPhase } from "@/api/types";
@@ -263,6 +264,13 @@ function healthCls(side: "A" | "B"): "h-ok" | "h-err" | "" {
   const url = side === "A" ? cfgConfig.hlsA : cfgConfig.hlsB;
   if (!on || !url) return "";
   return alignEngine.health[side].frames > 0 ? "h-ok" : "";
+}
+
+/** 联调期一键开对齐 debug 日志（localStorage，本浏览器持久；控制台 Verbose 级可见） */
+function enableAlignDebug(): void {
+  localStorage.setItem("debug:align", "1");
+  ElMessage.success("对齐诊断日志已开——console.debug 带 [align] 前缀（需开 Verbose），刷新后仍生效");
+  location.reload();
 }
 
 /** 该侧"切到比赛场景能否直接出画"的就绪标记（放 A/B 信息行）。
@@ -819,6 +827,12 @@ onUnmounted(() => {
             <div v-if="!alignEngine.loopAlive.value || alignEngine.loopErr.value" class="h-row loop">
               <span class="h-ready err">
                 {{ alignEngine.loopAlive.value ? "循环异常" : "主循环卡死" }}：{{ alignEngine.loopErr.value || "无报错（看门狗）" }}
+              </span>
+            </div>
+            <!-- 联调期提示：debug 日志没开时告诉现场怎么开（开了不占行） -->
+            <div v-if="!alignDebugEnabled" class="h-row loop" @click="enableAlignDebug">
+              <span class="h-ready wait" style="cursor: pointer">
+                诊断日志未开 · 点此开启（或 URL 加 ?debug=align / localStorage debug:align=1）
               </span>
             </div>
             <div class="h-row">

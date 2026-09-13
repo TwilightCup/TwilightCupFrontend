@@ -11,6 +11,7 @@ import { reactive, ref, type Ref } from "vue";
 import { RateController } from "./rateControl";
 import { FrameLockStream } from "./frameLock";
 import { createFrameSource } from "./transport";
+import { logAuth } from "./debugLog";
 import { emptyHealth, type StreamHealth } from "./types";
 
 export type Side = "A" | "B";
@@ -194,6 +195,9 @@ class AlignEngine {
       const externalFresh = this.externalTUs != null && performance.now() - this.externalTAt <= 5000;
       let T: number | null = null;
       if (this.isAuthority || !externalFresh) {
+        if (!this.isAuthority && this.externalTUs != null) {
+          logAuth("ext-stale", `⚠ 外部权威 T 停更 ${((performance.now() - this.externalTAt) / 1000).toFixed(1)}s > 5s（舞台隐藏节流/WS断/被关）→ 回退本地推进`);
+        }
         if (frontiers.length > 0) T = this.cfg.step(elapsed, frontiers);
       } else {
         T = this.externalTUs;
