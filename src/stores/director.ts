@@ -389,11 +389,18 @@ export const useDirectorStore = defineStore("director", () => {
         // 以及服务端连接回放（state_sync：舞台/控制台晚打开也能对齐状态）
         if (msg.action === "state_sync") {
           applyStateSync(msg.payload ?? {});
-          // 后端把最近一次 frame_align 作为 state_sync 的独立子键补发（权威 T + 就绪）
-          const fa = (msg.payload as { frame_align?: unknown } | undefined)?.frame_align as
+          // 后端把最近一次 frame_align 作为 state_sync 的独立子键补发（权威 T + 就绪），
+          // 并带 align_authority_src 指明该跟谁（晚连一致跟随）
+          const s = msg.payload as { frame_align?: unknown; align_authority_src?: unknown } | undefined;
+          const asrc = s?.align_authority_src;
+          if (typeof asrc === "string") currentAlignSrc.value = asrc;
+          const fa = s?.frame_align as
             | { t_us?: unknown; ready_a?: unknown; ready_b?: unknown }
             | undefined;
           if (fa && typeof fa.t_us === "number") applyFrameAlign(fa as FrameAlignPayload);
+        } else if (msg.action === "align_authority" && typeof msg.payload?.src === "string") {
+          // 后端权威接任时广播该跟谁
+          currentAlignSrc.value = msg.payload.src as string;
         } else if (msg.action === "switch_scene") {
           currentSceneCmd.value = (msg.payload?.scene as string) ?? null;
         } else if (msg.action === "soon_set_target" && msg.payload?.target_ms) {
@@ -504,13 +511,10 @@ export const useDirectorStore = defineStore("director", () => {
     src?: string;
   }
   const frameAlign = ref<{ tUs: number | null; readyA: boolean; readyB: boolean } | null>(null);
-  /** 观众页当前跟随的唯一权威 id——多个舞台各算各 T 时，只认第一个/当前，避免两个 T 对撞 */
+  /** 当前唯一权威 id——由后端选举决定（align_authority 通知 / state_sync.align_authority_src）。
+   *  后端已只扇出权威的 frame_align，前端不再自己锁 src，避免拒绝后端合法接管的新权威。 */
   const currentAlignSrc = ref<string | null>(null);
   function applyFrameAlign(p: FrameAlignPayload): void {
-    if (p.src) {
-      if (currentAlignSrc.value && currentAlignSrc.value !== p.src) return; // 忽略其他权威
-      if (!currentAlignSrc.value) currentAlignSrc.value = p.src;
-    }
     frameAlign.value = { tUs: p.t_us, readyA: !!p.ready_a, readyB: !!p.ready_b };
     // 观众页覆盖本地时钟到权威 T；权威页（舞台）自己推进，不覆盖（否则卡死）
     alignEngine.setExternalTUs(p.t_us);
