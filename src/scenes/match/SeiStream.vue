@@ -143,6 +143,15 @@ canvas.video {
 .ph-abs .err {
   z-index: 1;
 }
+/* 扫描线：与 StreamFrame 占位同款，恢复原有风格 */
+.ph-abs::after,
+.placeholder::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.18) 0 1px, transparent 1px 3px);
+  pointer-events: none;
+}
 .placeholder {
   position: absolute;
   inset: 0;
