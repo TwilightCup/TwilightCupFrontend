@@ -421,9 +421,7 @@ export class FrameLockStream {
   private static readonly GAP_US = 200_000;
   /** 断流重同步后清零解码错误提示 */
   private resynced = false;
-  /** 连续 resync 仍失败的上限（防止反复崩在同一坏区） */
-  private static readonly MAX_RESYNC = 3;
-
+  
   /** T 之前最近的可用关键帧下标（解码需从关键帧起），无则 -1 */
   private findStartKeyframe(targetUs: number): number {
     let idx = -1;
@@ -466,12 +464,11 @@ export class FrameLockStream {
         this.needKey = true;
       }
       if (this.needKey) {
-        if (!s.isKey) { this.decPos++; continue; } // 跳过到关键帧
+        if (!s.isKey) { this.decPos++; continue; } // 跳过到关键帧（无触发不硬喂）
         // 到关键帧 → 重置解码器重配（从干净点起播）；若带内能取到新 SPS/PPS 用新 description，
-        // 应对编码器中途改参数/丢参数（否则多次 resync 仍崩在同一坏区）
+        // 应对编码器中途改参数/丢参数。注意：绝不返回强制继续喂非关键帧，避免在坏区反复报错
         this.resyncCount++;
         this.resyncs++;
-        if (this.resyncCount > FrameLockStream.MAX_RESYNC) { this.needKey = false; this.resyncCount = 0; }
         this.decoder.close();
         if (this.encapsulation === "avcc") {
           const fresh = extractInbandAvcC(s.payload);
@@ -485,6 +482,7 @@ export class FrameLockStream {
         break; // 配置异步，下一轮 pump 再喂本关键帧
       }
       this.lastFedRtUs = s.rtUs;
+      this.resyncCount = 0; // 成功喂入 → 脱离坏区，重置 resync 计数
       this.decPos++;
       this.decoder.decodeSample(s.rtUs, s.isKey, s.payload);
     }
