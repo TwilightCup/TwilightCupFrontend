@@ -801,6 +801,11 @@ onUnmounted(() => {
             </div>
           </div>
           <div class="align-health">
+            <div v-if="!alignEngine.loopAlive.value || alignEngine.loopErr.value" class="h-row loop">
+              <span class="h-ready err">
+                {{ alignEngine.loopAlive.value ? "循环异常" : "主循环卡死" }}：{{ alignEngine.loopErr.value || "无报错（看门狗）" }}
+              </span>
+            </div>
             <div class="h-row">
               <span class="h-side tc-a">A</span>
               <span class="h-ready" :class="readyA.cls">{{ readyA.label }}</span>

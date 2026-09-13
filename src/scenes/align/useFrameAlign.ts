@@ -56,6 +56,10 @@ class AlignEngine {
   readonly presented = reactive<Record<Side, boolean>>({ A: false, B: false });
   /** 全局播放诊断：当前 T 播放倍速（×>1 → 在追/快进）与 T 落后最慢前沿的秒数（追 Xs） */
   readonly playback = reactive({ speed: 1, behindS: 0 });
+  /** 主循环（rAF）是否正常推进——死循环 = 画面卡住、队列不清理（追在涨但画面停） */
+  readonly loopAlive = ref(true);
+  readonly loopErr = ref<string | null>(null);
+  private lastTickTime = performance.now();
 
   get ready(): boolean {
     return this.cfg.ready;
@@ -135,6 +139,10 @@ class AlignEngine {
       const s = this.streams.get(side);
       this.health[side] = s ? s.stats() : emptyHealth();
     }
+    // 主循环存活看门狗：2s 无 tick → 判定循环卡死（画面会卡住但拉流/统计还在走）
+    if (performance.now() - this.lastTickTime > 2000) {
+      this.loopAlive.value = false;
+    }
   }
 
   start(): void {
@@ -145,6 +153,21 @@ class AlignEngine {
     this.healthTimer = setInterval(() => this.refreshHealth(), 400);
     const loop = (now: number) => {
       if (!this.running) return;
+      // 主循环无论单帧是否抛错都继续（此前一旦某帧绘制异常就会掐断 rAF → 画面永久卡死）
+      try {
+        this.tickLoop(now);
+      } catch (e) {
+        console.error("[align loop]", e);
+        this.loopErr.value = e instanceof Error ? e.message : String(e);
+      }
+      this.loopAlive.value = true;
+      this.lastTickTime = now;
+      this.raf = requestAnimationFrame(loop);
+    };
+    this.raf = requestAnimationFrame(loop);
+  }
+
+  private tickLoop(now: number): void {
       const elapsed = Math.max(now - this.last, 0);
       this.last = now;
       // 各侧前沿（µs）
@@ -179,9 +202,6 @@ class AlignEngine {
           }
         }
       }
-      this.raf = requestAnimationFrame(loop);
-    };
-    this.raf = requestAnimationFrame(loop);
   }
   stop(): void {
     this.running = false;
@@ -204,7 +224,11 @@ class AlignEngine {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.clearRect(0, 0, sw, sh);
-    ctx.drawImage(frame, 0, 0, sw, sh);
+    try {
+      ctx.drawImage(frame, 0, 0, sw, sh);
+    } catch {
+      // 帧可能已被 queue.advance 提前 close（竞态）→ 跳过本帧，不拖垮主循环
+    }
   }
 }
 
