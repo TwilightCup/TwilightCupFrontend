@@ -371,6 +371,8 @@ export class FrameLockStream {
       mode: this.mode,
       frontRtUs: this.lastArrivedRtUs,
       decodeError: this.decodeError,
+      queueLen: this.queue.length,
+      resyncs: this.resyncs,
     };
   }
 
@@ -393,6 +395,8 @@ export class FrameLockStream {
   /** 断流/解码报错后需要等下一个关键帧重同步 */
   private needKey = false;
   private resyncCount = 0;
+  /** 断流/解码重同步累计（监控用：上升 = 断流反复） */
+  resyncs = 0;
   /** 判定跳段（断流丢分片等）的 rt 间隔阈值（µs）——0.2s 抓更小的孔洞 */
   private static readonly GAP_US = 200_000;
   /** 断流重同步后清零解码错误提示 */
@@ -440,6 +444,7 @@ export class FrameLockStream {
         // 到关键帧 → 重置解码器重配（从干净点起播）；若带内能取到新 SPS/PPS 用新 description，
         // 应对编码器中途改参数/丢参数（否则多次 resync 仍崩在同一坏区）
         this.resyncCount++;
+        this.resyncs++;
         if (this.resyncCount > FrameLockStream.MAX_RESYNC) { this.needKey = false; this.resyncCount = 0; }
         this.decoder.close();
         if (this.encapsulation === "avcc") {

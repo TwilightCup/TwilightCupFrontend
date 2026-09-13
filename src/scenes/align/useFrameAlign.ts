@@ -54,6 +54,8 @@ class AlignEngine {
   readonly health = reactive<Record<Side, StreamHealth>>({ A: emptyHealth(), B: emptyHealth() });
   /** 各侧是否已真正上屏过一帧（攒够缓冲的判据；供 A/B 画面提示"攒缓冲中/已就绪"） */
   readonly presented = reactive<Record<Side, boolean>>({ A: false, B: false });
+  /** 全局播放诊断：当前 T 播放倍速（×>1 → 在追/快进）与 T 落后最慢前沿的秒数（追 Xs） */
+  readonly playback = reactive({ speed: 1, behindS: 0 });
 
   get ready(): boolean {
     return this.cfg.ready;
@@ -160,6 +162,10 @@ class AlignEngine {
       }
       if (T != null) {
         this.tUs.value = T;
+        // 播放诊断：当前倍速 + T 落后最慢前沿的秒数（追回量→跳动的解释）
+        this.playback.speed = this.cfg.speed;
+        const slow = Math.min(...frontiers);
+        this.playback.behindS = (slow - this.cfg.backUs - T) / 1e6;
         // 逐流 advance + 上屏到所有注册 canvas
         for (const [side, s] of this.streams) {
           // 只要有内容就视为"已在拉"→ 清掉"拉不到流"提示（恢复后自动收敛）

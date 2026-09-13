@@ -40,6 +40,11 @@ export class RateController {
     return this.tUs !== null;
   }
 
+  /** 呈现滞后（µs）= 最慢前沿 − 30s 的"30s" */
+  get backUs(): number {
+    return this.cfg.backUs;
+  }
+
   /**
    * 每帧推进。newestPerSideUs：各侧缓冲内最新可用帧 realtime_us（µs）。
    * elapsedMs：本帧距上帧真实流逝（ms，rAF 差分）。

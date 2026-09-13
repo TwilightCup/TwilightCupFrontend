@@ -75,6 +75,10 @@ export interface StreamHealth {
   frontRtUs: number | null;
   /** 最近 WebCodecs 解码错误（明文；无则 null） */
   decodeError: string | null;
+  /** 可上屏队列中的已解帧数（0 = 无帧可放 → 画面卡住） */
+  queueLen: number;
+  /** 断流/解码重同步累计次数（上升 = 断流在反复 → 卡/跳元凶） */
+  resyncs: number;
 }
 
 export function emptyHealth(): StreamHealth {
@@ -91,5 +95,7 @@ export function emptyHealth(): StreamHealth {
     mode: "off",
     frontRtUs: null,
     decodeError: null,
+    queueLen: 0,
+    resyncs: 0,
   };
 }

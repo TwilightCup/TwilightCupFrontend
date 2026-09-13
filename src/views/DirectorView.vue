@@ -237,6 +237,9 @@ function healthText(side: "A" | "B"): string {
   if (h.droppedSeq) s += ` · 丢帧 ${h.droppedSeq}`;
   if (h.missing) s += ` · 缺SEI ${h.missing}`;
   s += ` · K ${h.key}`;
+  // 关键诊断：倍速(>1=在追/快进)/落后秒数/可上屏队列/重同步次数
+  const pb = alignEngine.playback;
+  s += ` · ×${pb.speed.toFixed(2)} · 追${pb.behindS.toFixed(1)}s · 队列${h.queueLen} · 重${h.resyncs}`;
   return s;
 }
 function healthCls(side: "A" | "B"): "h-ok" | "h-err" | "" {
