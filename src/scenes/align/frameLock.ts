@@ -453,7 +453,13 @@ export class FrameLockStream {
       this.pendingConfigure = false;
       if (this.resynced) { this.resynced = false; this.decodeError = null; }
     }
-    while (this.decPos < this.raw.length && this.raw[this.decPos]!.rtUs <= targetUs + lookaheadUs) {
+    // 解码背压：decodeQueueSize 满则等，避免一次喂上千 chunk → decode 队列爆满抛异常被静默丢帧
+    const MAX_DECODE_QUEUE = 12;
+    while (
+      this.decPos < this.raw.length &&
+      this.raw[this.decPos]!.rtUs <= targetUs + lookaheadUs &&
+      this.decoder.queueSize < MAX_DECODE_QUEUE
+    ) {
       const s = this.raw[this.decPos]!;
       // 断流/跳段（间隔超 GAP_US）→ 标记需要到下一个关键帧重同步
       if (this.lastFedRtUs !== null && s.rtUs - this.lastFedRtUs > FrameLockStream.GAP_US) {
