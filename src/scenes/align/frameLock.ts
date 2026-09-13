@@ -100,6 +100,11 @@ class WebCodecsDecoder implements Decoder {
     this.onErr = onErr;
   }
 
+  /** 解码器待处理队列深度（背压：满则别再喂，等消化） */
+  get queueSize(): number {
+    return this.dec?.decodeQueueSize ?? 0;
+  }
+
   async configure(codecStr: string, description: Uint8Array | null): Promise<boolean> {
     this.close();
     if (typeof VideoDecoder === "undefined" || typeof VideoEncoder === "undefined") return false;
@@ -446,7 +451,13 @@ export class FrameLockStream {
       this.pendingConfigure = false;
       if (this.resynced) { this.resynced = false; this.decodeError = null; }
     }
-    while (this.decPos < this.raw.length && this.raw[this.decPos]!.rtUs <= targetUs + lookaheadUs) {
+    // 背压：解码器待处理队列满时别再喂（否则一次喂上千 chunk → decode 爆队列被静默丢帧）
+    const MAX_DECODE_QUEUE = 12;
+    while (
+      this.decPos < this.raw.length &&
+      this.raw[this.decPos]!.rtUs <= targetUs + lookaheadUs &&
+      this.decoder.queueSize < MAX_DECODE_QUEUE
+    ) {
       const s = this.raw[this.decPos]!;
       // 断流/跳段（间隔超 GAP_US）→ 标记需要到下一个关键帧重同步
       if (this.lastFedRtUs !== null && s.rtUs - this.lastFedRtUs > FrameLockStream.GAP_US) {
