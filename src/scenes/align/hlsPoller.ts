@@ -92,8 +92,6 @@ export class HlsHarvester {
   private stopped = false;
   /** 最近一次空列表诊断（去重：同一原因只报一次，恢复有分片即重置） */
   private lastEmptyDiag: string | null = null;
-  /** master 解析后锁定的 media 播放列表 URI（null = 尚未解析） */
-  private mediaUrl: string | null = null;
 
   constructor(
     private url: string,
@@ -118,13 +116,11 @@ export class HlsHarvester {
   private async poll(): Promise<void> {
     if (this.stopped) return;
     try {
-      // 首次：拉 master，若有变体锁最优 media（之后直接轮询 media，避免重复探测 master）
-      if (!this.mediaUrl) {
-        const masterText = await (await fetch(this.url, { cache: "no-store" })).text();
-        const master = parseM3u8(masterText, this.url);
-        this.mediaUrl = master.variantUri ?? this.url;
-      }
-      const url = this.mediaUrl;
+      // 每轮都从根 master 重新取（刷新 hlsEncryption 防盗链 session，避免 session 过期 → 401
+      // 导致 m3u8 拿不到、流像重新拉取），再取该轮最优 variant 的 media 列表。
+      const masterText = await (await fetch(this.url, { cache: "no-store" })).text();
+      const master = parseM3u8(masterText, this.url);
+      const url = master.variantUri ?? this.url;
       const text = await (await fetch(url, { cache: "no-store" })).text();
       const pl = parseM3u8(text, url);
       // 空列表诊断：把"拿到但没分片"的真实原因上报一次（master / 非HLS / 空闲）
