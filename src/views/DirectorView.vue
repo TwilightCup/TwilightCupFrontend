@@ -11,7 +11,6 @@ import ColorField from "@/components/ColorField.vue";
 import StreamFrame from "@/scenes/match/StreamFrame.vue";
 import SeiStream from "@/scenes/match/SeiStream.vue";
 import { alignEngine } from "@/scenes/align/useFrameAlign";
-import { alignDebugEnabled } from "@/scenes/align/debugLog";
 import AuthFailMask from "@/components/AuthFailMask.vue";
 import { requestSpeedrunRefresh } from "@/api/speedrun";
 import { AttemptStatus, MatchPhase } from "@/api/types";
@@ -233,7 +232,7 @@ function healthText(side: "A" | "B"): string {
     const rtNow = Date.now() * 1000;
     stale = (rtNow - h.frontRtUs) / 1e6;
   }
-  const diag = ` · ×${pb.speed.toFixed(2)} · 追${pb.behindS.toFixed(1)}s · 队列${h.queueLen} · 重${h.resyncs}`;
+  const diag = ` · ×${pb.speed.toFixed(2)} · 追${pb.behindS.toFixed(1)}s · 队列${h.queueLen} · 重${h.resyncs}${h.resyncGap ? `段${h.resyncGap}` : ""}${h.resyncErr ? `错${h.resyncErr}` : ""}`;
   // 解码流水线：原始环/解码游标/封装/解码累计输出（定位"队列0/没画面"）
   const pipe = ` · raw${h.rawLen}/pos${h.decPos}/${h.enc || "-"}/出${h.decOutput}/qc${h.qc}/pn${h.pendCfg ? "1" : "0"}`;
   if (h.frames === 0 && !h.hasContent) {
@@ -253,6 +252,9 @@ function healthText(side: "A" | "B"): string {
   if (stale > 4) s = `⚠ 信号中断 ${stale.toFixed(0)}s` + s;
   if (h.droppedSeq) s += ` · 丢帧 ${h.droppedSeq}`;
   if (h.missing) s += ` · 缺SEI ${h.missing}`;
+  if (h.segAuth) s += ` · ⚠鉴权拒 ${h.segAuth}`;
+  if (h.segGaveUp) s += ` · 缺段 ${h.segGaveUp}`;
+  if (h.segRetries) s += ` · 补段中 ${h.segRetries}`;
   s += ` · K ${h.key}`;
   s += diag;
   s += pipe;
@@ -264,13 +266,6 @@ function healthCls(side: "A" | "B"): "h-ok" | "h-err" | "" {
   const url = side === "A" ? cfgConfig.hlsA : cfgConfig.hlsB;
   if (!on || !url) return "";
   return alignEngine.health[side].frames > 0 ? "h-ok" : "";
-}
-
-/** 联调期一键开对齐 debug 日志（localStorage，本浏览器持久；控制台 Verbose 级可见） */
-function enableAlignDebug(): void {
-  localStorage.setItem("debug:align", "1");
-  ElMessage.success("对齐诊断日志已开——console.debug 带 [align] 前缀（需开 Verbose），刷新后仍生效");
-  location.reload();
 }
 
 /** 该侧"切到比赛场景能否直接出画"的就绪标记（放 A/B 信息行）。
@@ -827,12 +822,6 @@ onUnmounted(() => {
             <div v-if="!alignEngine.loopAlive.value || alignEngine.loopErr.value" class="h-row loop">
               <span class="h-ready err">
                 {{ alignEngine.loopAlive.value ? "循环异常" : "主循环卡死" }}：{{ alignEngine.loopErr.value || "无报错（看门狗）" }}
-              </span>
-            </div>
-            <!-- 联调期提示：debug 日志没开时告诉现场怎么开（开了不占行） -->
-            <div v-if="!alignDebugEnabled" class="h-row loop" @click="enableAlignDebug">
-              <span class="h-ready wait" style="cursor: pointer">
-                诊断日志未开 · 点此开启（或 URL 加 ?debug=align / localStorage debug:align=1）
               </span>
             </div>
             <div class="h-row">

@@ -93,6 +93,16 @@ export interface StreamHealth {
   qc: number;
   /** 解码配置是否卡在等待（true 恒 = configure 没完成 → pump 一直 return 不分发） */
   pendCfg: boolean;
+  /** 正在延迟重试的分片数（404 瞬时未补回） */
+  segRetries: number;
+  /** 重试 3 次仍失败、永久放弃的分片总数（原始环将缺这些段） */
+  segGaveUp: number;
+  /** 鉴权被拒（401/403）永久放弃的分片总数（secret 配错时非零） */
+  segAuth: number;
+  /** 因跳段（分片洞，>0.2s）触发 resync 的次数 */
+  resyncGap: number;
+  /** 因解码报错触发 resync 的次数（坏流/参数变化） */
+  resyncErr: number;
 }
 
 export function emptyHealth(): StreamHealth {
@@ -118,5 +128,24 @@ export function emptyHealth(): StreamHealth {
     decOutput: 0,
     qc: 0,
     pendCfg: false,
+    segRetries: 0,
+    segGaveUp: 0,
+    segAuth: 0,
+    resyncGap: 0,
+    resyncErr: 0,
   };
+}
+
+/** 取源层（harvester）健康计数——拼进指标行 */
+export interface HarvesterStats {
+  /** 正在延迟重试的分片数 */
+  retries: number;
+  /** 永久放弃的分片总数 */
+  gaveUp: number;
+  /** 鉴权拒绝放弃的分片总数 */
+  authFail: number;
+}
+
+export function emptyHarvesterStats(): HarvesterStats {
+  return { retries: 0, gaveUp: 0, authFail: 0 };
 }

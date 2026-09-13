@@ -237,6 +237,7 @@ export class FrameLockStream {
         console.error("[align decode]", m);
         logResync("dec-err", `解码报错：${m}｜上帧rt=${this.lastFedRtUs != null ? `${(this.lastFedRtUs / 1e6) % 10000}s` : "无"} → 下个关键帧重同步`);
         this.decodeError = m;
+        this.resyncErr++; // 细分计数：解码错误引起的 resync（指标行显示）
         this.needKey = true; // 报错 → 下个关键帧重同步，而非永久卡死
         this.opts.onError?.(e);
       },
@@ -396,6 +397,11 @@ export class FrameLockStream {
       decOutput: this.decOutput,
       qc: this.decoder.queueSize,
       pendCfg: this.pendingConfigure,
+      segRetries: this.source.harvesterStats().retries,
+      segGaveUp: this.source.harvesterStats().gaveUp,
+      segAuth: this.source.harvesterStats().authFail,
+      resyncGap: this.resyncGap,
+      resyncErr: this.resyncErr,
     };
   }
 
@@ -420,6 +426,9 @@ export class FrameLockStream {
   private resyncCount = 0;
   /** 断流/解码重同步累计（监控用：上升 = 断流反复） */
   resyncs = 0;
+  /** resync 细分：因跳段（分片洞）触发 vs 因解码报错触发（指标行区分缺段/坏流） */
+  private resyncGap = 0;
+  private resyncErr = 0;
   /** 解码器累计输出帧数（监控：0=从未产帧） */
   decOutput = 0;
   /** 判定跳段（断流丢分片等）的 rt 间隔阈值（µs）——0.2s 抓更小的孔洞 */
@@ -471,6 +480,7 @@ export class FrameLockStream {
       // 断流/跳段（间隔超 GAP_US）→ 标记需要到下一个关键帧重同步
       if (this.lastFedRtUs !== null && s.rtUs - this.lastFedRtUs > FrameLockStream.GAP_US) {
         this.needKey = true;
+        this.resyncGap++; // 细分计数：跳段（分片洞）引起的 resync（指标行显示）
         logResync("gap", `跳段检测：上帧${(this.lastFedRtUs / 1e6) % 10000}s → 下帧${(s.rtUs / 1e6) % 10000}s（差${((s.rtUs - this.lastFedRtUs) / 1e6).toFixed(2)}s > 0.2s）→ 等关键帧重同步`);
       }
       if (this.needKey) {

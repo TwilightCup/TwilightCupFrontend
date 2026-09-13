@@ -4,6 +4,7 @@
  * 含 #EXT-X-MAP init 段。fetch 可用在主线程也可在 Web Worker 内。
  */
 import type { HlsPlaylist, HlsSegmentItem } from "./types";
+import type { HarvesterStats } from "./types";
 import { logSeg } from "./debugLog";
 
 /** 解析 m3u8 文本 → init + items + master 变体选择（镜像冒烟工具 parseM3u8，扩展 master） */
@@ -110,6 +111,9 @@ export class HlsHarvester {
   private mediaUrl: string | null = null;
   /** 分片瞬时失败重试表：key(去query) → {tries, at}；404 不立即标 seen，延迟重试，限次后放弃 */
   private retryMap = new Map<string, { tries: number; at: number }>();
+  // 指标行计数（导播非技术力也能读：正在重试数 / 放弃数 / 鉴权拒数）
+  private gaveUp = 0;
+  private authFail = 0;
 
   constructor(
     private url: string,
@@ -117,6 +121,11 @@ export class HlsHarvester {
     opts: HarvesterOptions,
   ) {
     this.opts = opts;
+  }
+
+  /** 取源层健康计数（拼进指标行：片段重试/放弃/鉴权拒） */
+  stats(): HarvesterStats {
+    return { retries: this.retryMap.size, gaveUp: this.gaveUp, authFail: this.authFail };
   }
 
   start(): void {
@@ -178,6 +187,7 @@ export class HlsHarvester {
           if (status === 401 || status === 403) {
             // 鉴权被拒（secret 无效）：重试无用 → 永久放弃，避免每轮 3 连刷屏
             logSeg("seg-401", `⚠ ${key} ${status} 永久放弃`);
+            this.authFail++;
             this.seen.add(key);
             this.retryMap.delete(key);
           } else {
@@ -185,6 +195,7 @@ export class HlsHarvester {
             const tries = (prev?.tries ?? 0) + 1;
             if (tries >= 3) {
               logSeg("seg-giveup", `⚠ ${key} 重试 3 次失败 → 放弃（原始环缺该段）`);
+              this.gaveUp++;
               this.seen.add(key); // 三次仍失败 → 放弃（该段确实不可得）
               this.retryMap.delete(key);
             } else {

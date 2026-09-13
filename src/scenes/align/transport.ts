@@ -8,7 +8,8 @@
  * @see docs/frame-align-implementation.md §3（默认 LL-HLS fMP4 主路径）
  */
 import { HlsHarvester, fetchBytes } from "./hlsPoller";
-import type { Codec } from "./types";
+import type { Codec, HarvesterStats } from "./types";
+import { emptyHarvesterStats } from "./types";
 
 /** 识别 HLS 段容器：首 4CC 为 MP4 box → fmp4（媒体段常以 styp/moof 开头，非仅 ftyp）；
  *  0x47 同步 → ts；否则 annexb。 */
@@ -39,6 +40,8 @@ export interface FrameSource {
   stop(): void;
   setOnSegment(cb: (seg: RawSegment) => void): void;
   setOnError(cb: (e: unknown) => void): void;
+  /** 取源层健康计数（重试/放弃/鉴权拒——拼进指标行） */
+  harvesterStats(): HarvesterStats;
 }
 
 export interface HlsSourceOptions {
@@ -85,6 +88,9 @@ export class HlsFrameSource implements FrameSource {
     // 保存引用；harvester 构造时已捕获 this.onErr，晚设也生效
     this.onErr = cb;
   }
+  harvesterStats(): HarvesterStats {
+    return this.harvester.stats();
+  }
 }
 
 /**
@@ -120,6 +126,9 @@ export class AnnexbFrameSource implements FrameSource {
   }
   setOnError(_cb: (e: unknown) => void): void {
     /* noop for now */
+  }
+  harvesterStats(): HarvesterStats {
+    return emptyHarvesterStats();
   }
   private async pull(): Promise<void> {
     try {
