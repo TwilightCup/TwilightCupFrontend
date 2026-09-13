@@ -70,6 +70,9 @@ declare global {
   }
 }
 
+/** 媒体端 Bearer 鉴权（hls.js xhrSetup 用；前端直连无后端 secret 只能直写，安全弱） */
+const HLS_SECRET = "b4rxLkECNUIcV6eiiHPnA9NeoubyvojY";
+
 /** HLS/B站流播放失败（MSE 不可用 / 致命解码错误）→ 占位（可见，不黑屏） */
 const videoBroken = ref(false);
 
@@ -172,6 +175,8 @@ async function attach(): Promise<void> {
         lowLatencyMode: true,
         liveDurationInfinity: true,
         maxBufferLength: 10,
+        // 媒体端 Bearer 鉴权（替换旧 session 防盗链；前端直连无后端 secret 只能直写）
+        xhrSetup: (xhr) => xhr.setRequestHeader("Authorization", HLS_SECRET),
       });
       hls.on(Hls.Events.ERROR, (_e, data) => {
         if (data.fatal) {
@@ -202,6 +207,8 @@ async function attach(): Promise<void> {
         lowLatencyMode: true,
         liveDurationInfinity: true,
         maxBufferLength: 10,
+        // 媒体端 Bearer 鉴权（替换旧 session 防盗链；前端直连无后端 secret 只能直写）
+        xhrSetup: (xhr) => xhr.setRequestHeader("Authorization", HLS_SECRET),
       });
       hls.on(Hls.Events.ERROR, (_e, data) => {
         if (data.fatal) {

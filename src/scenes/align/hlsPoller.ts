@@ -57,8 +57,17 @@ export function parseM3u8(text: string, base: string): HlsPlaylist {
   return { init, items, variantUri: bestVariant?.uri ?? null };
 }
 
+// ---- HLS 鉴权：媒体端用 Bearer secret 替代防盗链 session（前端直连无后端，secret 只能前端直写，
+//   安全弱、与匿名可读相当——当前架构折中）。所有 HLS 请求带此头。----
+const HLS_AUTH = { Authorization: "Bearer b4rxLkECNUIcV6eiiHPnA9NeoubyvojY" };
+
+/** 统一 HLS fetch：带鉴权头 + 不缓存（m3u8 / 分片共用）。 */
+export async function hlsFetch(url: string): Promise<Response> {
+  return fetch(url, { cache: "no-store", headers: HLS_AUTH });
+}
+
 export async function fetchBytes(url: string): Promise<Uint8Array> {
-  const r = await fetch(url, { cache: "no-store" });
+  const r = await hlsFetch(url);
   if (!r.ok) throw new Error(`fetch ${url} -> ${r.status}`);
   return new Uint8Array(await r.arrayBuffer());
 }
@@ -120,12 +129,12 @@ export class HlsHarvester {
     try {
       // 首次：拉 master，若有变体锁最优 media（之后直接轮询 media，避免重复探测 master）
       if (!this.mediaUrl) {
-        const masterText = await (await fetch(this.url, { cache: "no-store" })).text();
+        const masterText = await (await hlsFetch(this.url)).text();
         const master = parseM3u8(masterText, this.url);
         this.mediaUrl = master.variantUri ?? this.url;
       }
       const url = this.mediaUrl;
-      const text = await (await fetch(url, { cache: "no-store" })).text();
+      const text = await (await hlsFetch(url)).text();
       const pl = parseM3u8(text, url);
       // 空列表诊断：把"拿到但没分片"的真实原因上报一次（master / 非HLS / 空闲）
       if (pl.items.length === 0) {
