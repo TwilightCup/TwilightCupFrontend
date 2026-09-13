@@ -186,22 +186,19 @@ class AlignEngine {
   }
 
   private drawFrame(canvas: HTMLCanvasElement, frame: CanvasImageSource): void {
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    // 画面不拉伸：canvas 像素尺寸 = 容器尺寸（由 SeiStream 用 ResizeObserver 对齐）。
-    // 绘制按「高度铺满 100%、宽度等比、水平居中裁左右溢出」（16:9 → 4:3 裁边）。
     const src = frame as { displayWidth?: number; displayHeight?: number; codedWidth?: number; codedHeight?: number };
     const sw = src.displayWidth || src.codedWidth || 0;
     const sh = src.displayHeight || src.codedHeight || 0;
-    const tw = canvas.width;
-    const th = canvas.height;
-    if (!sw || !sh || !tw || !th) return;
-    const scale = th / sh; // 高铺满容器高（1080px 占 100%）
-    const dw = sw * scale; // 宽按比例，16:9 典型会超出两侧
-    const dh = th;
-    const dx = (tw - dw) / 2; // 居中 → 负 dx 即裁掉左/右溢出
-    ctx.clearRect(0, 0, tw, th);
-    ctx.drawImage(frame, dx, 0, dw, dh);
+    if (!sw || !sh) return;
+    // canvas 保持源帧原生分辨率（清晰），裁切/缩放交给 CSS object-fit:cover（高铺满+裁左右）
+    if (canvas.width !== sw || canvas.height !== sh) {
+      canvas.width = sw;
+      canvas.height = sh;
+    }
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, sw, sh);
+    ctx.drawImage(frame, 0, 0, sw, sh);
   }
 }
 
