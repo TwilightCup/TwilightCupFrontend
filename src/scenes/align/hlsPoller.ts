@@ -59,7 +59,11 @@ export function parseM3u8(text: string, base: string): HlsPlaylist {
 
 export async function fetchBytes(url: string): Promise<Uint8Array> {
   const r = await fetch(url, { cache: "no-store" });
-  if (!r.ok) throw new Error(`fetch ${url} -> ${r.status}`);
+  if (!r.ok) {
+    const e = new Error(`fetch ${url} -> ${r.status}`) as Error & { status?: number };
+    e.status = r.status;
+    throw e;
+  }
   return new Uint8Array(await r.arrayBuffer());
 }
 
@@ -153,14 +157,21 @@ export class HlsHarvester {
           this.onContent(await fetchBytes(it.uri), it.kind);
           this.seen.add(key);
           this.retryMap.delete(key);
-        } catch {
-          const prev = this.retryMap.get(key);
-          const tries = (prev?.tries ?? 0) + 1;
-          if (tries >= 3) {
-            this.seen.add(key); // 三次仍失败 → 放弃（该段确实不可得，避免无限重试刷屏）
+        } catch (e) {
+          const status = (e as { status?: number } | undefined)?.status;
+          if (status === 401 || status === 403) {
+            // 鉴权被拒（session/防盗链无效）：重试无用 → 立即永久放弃，避免刷屏&更多401
+            this.seen.add(key);
             this.retryMap.delete(key);
           } else {
-            this.retryMap.set(key, { tries, at: Date.now() });
+            const prev = this.retryMap.get(key);
+            const tries = (prev?.tries ?? 0) + 1;
+            if (tries >= 3) {
+              this.seen.add(key); // 三次仍失败 → 放弃（该段确实不可得，避免无限重试刷屏）
+              this.retryMap.delete(key);
+            } else {
+              this.retryMap.set(key, { tries, at: Date.now() }); // 延迟重试(404 瞬时可等)
+            }
           }
           // 单个分片 404/过期（live 轮动/瞬时）属正常，不记为流错误
         }
