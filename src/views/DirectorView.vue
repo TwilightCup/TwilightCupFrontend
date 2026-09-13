@@ -245,9 +245,11 @@ function healthText(side: "A" | "B"): string {
     const head = stale > 4 ? `⚠ 信号中断 ${stale.toFixed(0)}s` : "⏳ 攒缓冲中";
     return `${head}（总 ${h.frames} 帧 · 活 ${h.liveFps} fps）${diag}${pipe}`;
   }
-  // 实时 fps 用近 1s 速率（liveFps），累计总数用 帧
-  const fps = (h.liveFps || h.fps || 0).toFixed(0);
+  // 实时 fps 用近 1s 速率（liveFps），累计总数用 帧；信号中断时近 1s 速率归 0，
+  // 不回退历史中位数 fps（否则流已死仍显示"192 fps · 已就绪"误导导播）
+  const fps = (stale > 4 ? 0 : h.liveFps || 0).toFixed(0);
   let s = `${h.codec.toUpperCase()} · ${fps} fps · 总${h.frames}帧 · NTP ${h.ntp}/${h.frames}`;
+  if (stale > 4) s = `⚠ 信号中断 ${stale.toFixed(0)}s` + s;
   if (h.droppedSeq) s += ` · 丢帧 ${h.droppedSeq}`;
   if (h.missing) s += ` · 缺SEI ${h.missing}`;
   s += ` · K ${h.key}`;

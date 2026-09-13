@@ -38,9 +38,15 @@ class AlignEngine {
   private last = 0;
   private running = false;
   private healthTimer: ReturnType<typeof setInterval> | null = null;
+  /** 隐藏兜底时钟：页面 hidden 时 rAF 全面暂停（OBS 浏览器源不在前台/最小化），
+   *  权威页会停发 frame_align → 所有跟随页冻结。退 setInterval 保底推进 + 广播。 */
+  private hiddenTimer: ReturnType<typeof setInterval> | null = null;
   /** 跨文档一致性：被权威页（舞台）经 WS director_cmd(frame_align)/state_sync 广播的外部 T（µs）。
    *   观众页（控制台）置位后以外部 T 为准；权威页（舞台）自己推进 RateController 并广播。 */
   private externalTUs: number | null = null;
+  /** 外部 T 最近一次到达时刻（performance.now）：权威广播 ~2.5Hz，超时 = 权威页
+   *  已停播（OBS 隐藏节流/WS 断/舞台被关）→ 回退本地推进，不能永久冻结跟随页 */
+  private externalTAt = 0;
   /** 本实例是否是对齐权威（舞台渲染页）：true 时不用外部 T，自己跑速率控制并发广播 */
   private isAuthority = false;
 
@@ -72,6 +78,7 @@ class AlignEngine {
 
   setExternalTUs(us: number | null): void {
     this.externalTUs = us;
+    if (us != null) this.externalTAt = performance.now();
     if (!this.isAuthority && us != null) this.tUs.value = us;
   }
   /* ---- 流管理（每侧唯一流，引用计数：舞台/控制台共同引用，计数归零才停） ---- */
@@ -165,6 +172,11 @@ class AlignEngine {
       this.raf = requestAnimationFrame(loop);
     };
     this.raf = requestAnimationFrame(loop);
+    // 隐藏兜底：rAF 暂停时以 1Hz 保底推进 T（速率控制对大 elapsed 有 REANCHOR 自愈，
+    // 权威页隐藏时 frame_align 广播（watch tUs）仍能继续发出）
+    this.hiddenTimer = setInterval(() => {
+      if (this.running && document.hidden) this.tickLoop(performance.now());
+    }, 1000);
   }
 
   private tickLoop(now: number): void {
@@ -176,9 +188,12 @@ class AlignEngine {
         const f = s.frontier();
         if (f != null) frontiers.push(f);
       }
-      // T：权威页自己跑速率控制（并发广播）；观众页用外部权威 T（当有）
+      // T：权威页自己跑速率控制（并发广播）；观众页用外部权威 T（当有且新鲜）。
+      // 权威广播停更 >5s（舞台被 OBS 隐藏节流/WS 断/页面关闭）→ 回退本地推进，
+      // 否则所有跟随页永久冻结在最后一次广播值（追 Xs 持续拉大、画面全停）
+      const externalFresh = this.externalTUs != null && performance.now() - this.externalTAt <= 5000;
       let T: number | null = null;
-      if (this.isAuthority || this.externalTUs == null) {
+      if (this.isAuthority || !externalFresh) {
         if (frontiers.length > 0) T = this.cfg.step(elapsed, frontiers);
       } else {
         T = this.externalTUs;
@@ -209,6 +224,8 @@ class AlignEngine {
     this.raf = 0;
     if (this.healthTimer) clearInterval(this.healthTimer);
     this.healthTimer = null;
+    if (this.hiddenTimer) clearInterval(this.hiddenTimer);
+    this.hiddenTimer = null;
   }
 
   private drawFrame(canvas: HTMLCanvasElement, frame: CanvasImageSource): void {

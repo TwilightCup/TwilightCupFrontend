@@ -80,8 +80,10 @@ export class RateController {
     }
 
     if (this.speed === 1) {
-      // 1x 推进，但永不超过 required
-      this.tUs = Math.min(this.tUs + elapsedUs, required);
+      // 1x 推进，但永不超过 required；且只前向单调——required 回落（新慢流加入后首拉
+      // 整窗 backlog、编码器重启致前沿回跳）不回拽 T，否则已淘汰的解码帧补不回来、
+      // decPos 也不回卷 → 画面长时间冻结（"B 先出来又暂停"的元凶）
+      this.tUs = Math.max(this.tUs, Math.min(this.tUs + elapsedUs, required));
       const drift = required - this.tUs;
       if (drift >= this.cfg.thresholdUs) {
         this.speed = 2;
@@ -91,8 +93,8 @@ export class RateController {
       return this.tUs;
     }
 
-    // 2x 推进：每真实毫秒走 2x，但封顶 at required（追上即收）
-    this.tUs = Math.min(this.tUs + elapsedUs * 2, required);
+    // 2x 推进：每真实毫秒走 2x，但封顶 at required（追上即收）；同样只前向单调
+    this.tUs = Math.max(this.tUs, Math.min(this.tUs + elapsedUs * 2, required));
     this.burstLeftMs -= elapsedMs;
     if (this.burstLeftMs <= 0 || this.tUs >= required) {
       this.speed = 1;
