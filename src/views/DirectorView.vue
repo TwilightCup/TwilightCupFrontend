@@ -224,22 +224,25 @@ function healthText(side: "A" | "B"): string {
   if (err) return `拉不到流 · ${err} ·（${url}）`;
   if (!on || !url) return "对齐未启用（MSE 播放）";
   const h = alignEngine.health[side];
+  // 关键诊断：倍速(>1=在追/快进)/落后秒数/可上屏队列/重同步次数
+  const pb = alignEngine.playback;
+  const diag = ` · ×${pb.speed.toFixed(2)} · 追${pb.behindS.toFixed(1)}s · 队列${h.queueLen} · 重${h.resyncs}`;
   if (h.frames === 0 && !h.hasContent) {
     return h.segs > 0
       ? `已收到 ${h.segs} 段但无 SEI 时间戳——该流需用 SEI Timestamp 编码器推`
       : `等待内容 · 未从 media 列表取到分片 · ${url}`;
   }
   if (h.frames > 0 && !alignEngine.presented[side]) {
-    return `⏳ 攒缓冲中（已 ${h.frames} 帧，够约 30s 后上屏）…`;
+    // 攒缓冲阶段也带诊断：看「追」是否在缩（能上屏）、队列是否有帧、主循环是否活
+    return `⏳ 攒缓冲中（总 ${h.frames} 帧 · 活 ${h.liveFps} fps）${diag}`;
   }
-  const fps = h.fps ? h.fps.toFixed(0) : "—";
-  let s = `${h.codec.toUpperCase()} · ${fps} fps · ${h.frames} 帧 · NTP ${h.ntp}/${h.frames}`;
+  // 实时 fps 用近 1s 速率（liveFps），累计总数用 帧
+  const fps = (h.liveFps || h.fps || 0).toFixed(0);
+  let s = `${h.codec.toUpperCase()} · ${fps} fps · 总${h.frames}帧 · NTP ${h.ntp}/${h.frames}`;
   if (h.droppedSeq) s += ` · 丢帧 ${h.droppedSeq}`;
   if (h.missing) s += ` · 缺SEI ${h.missing}`;
   s += ` · K ${h.key}`;
-  // 关键诊断：倍速(>1=在追/快进)/落后秒数/可上屏队列/重同步次数
-  const pb = alignEngine.playback;
-  s += ` · ×${pb.speed.toFixed(2)} · 追${pb.behindS.toFixed(1)}s · 队列${h.queueLen} · 重${h.resyncs}`;
+  s += diag;
   return s;
 }
 function healthCls(side: "A" | "B"): "h-ok" | "h-err" | "" {

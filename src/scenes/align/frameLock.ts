@@ -209,6 +209,8 @@ export class FrameLockStream {
   // ---- 连通性指标（维度对齐 SEIInjector 冒烟工具；供导播控制台观察） ----
   private st = { frames: 0, segs: 0, missing: 0, ntp: 0, key: 0, droppedSeq: 0, lastSeq: null as number | null, lastRtUs: null as number | null };
   private dtRing: number[] = [];
+  /** 近 1s 内的到达时刻（算实时每秒帧率；累计 frames 总数与此分开） */
+  private liveArr: number[] = [];
 
   constructor(source: FrameSource, opts: FrameLockStreamOptions = {}) {
     this.opts = opts;
@@ -320,6 +322,9 @@ export class FrameLockStream {
     }
     const rtUs = Number(info.realtime_us);
     this.st.frames++;
+    const nowArr = performance.now();
+    this.liveArr.push(nowArr);
+    while (this.liveArr.length && this.liveArr[0]! < nowArr - 1000) this.liveArr.shift();
     this.st.ntp += info.clock_ntp ? 1 : 0;
     this.st.key += info.keyframe || s.isKey ? 1 : 0;
     if (this.st.lastSeq != null) {
@@ -367,6 +372,7 @@ export class FrameLockStream {
       key: this.st.key,
       droppedSeq: this.st.droppedSeq,
       fps: median ? 1_000_000 / median : null,
+      liveFps: this.liveArr.length,
       hasContent: this.hasContent,
       mode: this.mode,
       frontRtUs: this.lastArrivedRtUs,

@@ -69,6 +69,8 @@ export interface StreamHealth {
   droppedSeq: number;
   /** 近端帧率（fps），无足够样本 null */
   fps: number | null;
+  /** 近 1s 实时帧数（真实到达速率，与累计 frames 分开） */
+  liveFps: number;
   hasContent: boolean;
   mode: "aligned" | "off";
   /** 最近到货 rt（µs） */
@@ -91,6 +93,7 @@ export function emptyHealth(): StreamHealth {
     key: 0,
     droppedSeq: 0,
     fps: null,
+    liveFps: 0,
     hasContent: false,
     mode: "off",
     frontRtUs: null,
