@@ -25,6 +25,9 @@ export const DEFAULT_RATE: RateConfig = {
   catchUs: 15_000_000,
 };
 
+/** T 脱离缓冲深度阈值（µs）：落后超此量视为脱离（源瞬断/frontier 前跳），重锚到 required */
+const REANCHOR_US = 60_000_000; // 60s
+
 /** 2 倍速阶段：以 2x 推进，直到累计真实计数(catchRealMs)达到 catchUs 对应量或 T 到 required。 */
 export class RateController {
   private cfg: RateConfig;
@@ -64,6 +67,15 @@ export class RateController {
       // 初始化：T = required（= S_慢 − 30s），让呈现从可垫稳的时刻起步
       this.tUs = required;
       this.speed = 1;
+      return this.tUs;
+    }
+
+    // 脱离自愈：T 落后远超缓冲深度（如源瞬断/ gap 后前沿前跳）→ 重锚到 required，
+    // 否则 T 指向原始环已不存在的时刻 → 解码找不到帧 → 画面永久冻结
+    if (required - this.tUs > REANCHOR_US) {
+      this.tUs = required;
+      this.speed = 1;
+      this.burstLeftMs = 0;
       return this.tUs;
     }
 
