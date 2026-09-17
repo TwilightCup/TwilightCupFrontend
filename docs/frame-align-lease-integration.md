@@ -1,0 +1,50 @@
+# 前端租约接入（2026-09-18）
+
+对应后端 044f925 的 docs/frame-align-authority.md。本轮仅修改前端。
+
+## 启用和兼容
+
+auth_ok/align_authority 声明 align_lease_required/lease_required 布尔字段即表示
+后端认识新版协议；前端开始发送严格的 frame_align_status。缺少该字段的旧后端
+不接收新 action，仍使用旧连接顺序选举和原有 T 发布。首个合法状态会使后端
+撤销旧主并启用租约模式；同账号同比赛应统一刷新新版页面，旧前端不再有候选资格。
+
+状态约每秒发送，角色、可见性、媒体/解码条件或播放侧变化时立即发送。每条消息
+重新采样本页状态，走现有 Worker 驱动与主线程定时器兜底；不排队重放租约消息。
+seq 按连接递增，跨 epoch 不重置；T 输入 seq 和后端输出 seq 继续独立。
+active_sides 与 waiting_sides 总是完整分割 A/B，即使只启用一路。
+
+## 无主与冷启动
+
+src=null 的角色通知立即撤销本页发布权并冻结公开 T，保留已呈现画面和 T 下限。
+ExternalClock 同时锁定新 epoch 和选中的来源，拒收旧主迟到数据；合法无主冻结
+锚点的 src/source_id=null 不再被替换为旧 src。只有新认证连接才清空会话 fencing。
+
+follower 可以在后台预解码共同安全点（至少落后 30 秒），但不更新公开 T、
+presentedRt、计时或 canvas。真实解码帧合格才报告 decode_ready；未呈现时
+progress_t_us=0，不能报告私有预热游标。主失联或没有可用播放侧时也可重新预热。
+只有后端选中的页面可以开始公开 T。预热就绪不等于自行成为 authority。
+
+## 接管顺序
+
+接收角色、任期及 t_floor_us → 准备/实际共同呈现到不小于 T 下限 →
+先发送新 epoch 的 running 状态 → 同一 WebSocket 再发送 frame_align。
+这是按协议顺序发送确认，不是后端另有成功 ACK。确认状态发送失败时禁发 T 并
+重新采样重试；状态尚未达到下限时禁发 T，不能用墙钟伪造进度。
+未获得 floor 元数据时等待角色通知/冻结快照，不把缺省值当成功确认。
+约在 takeover_timeout_ms 到期前 250ms 仍无法确认时主动报告 relinquish。
+
+单侧降级和恢复先发状态，再发对应 T；后端从已验证状态读取参与侧。
+media_wait 继续续租且让后端冻结，不通过改成 capability=false 触发无意义换主。
+未加载对齐流的页面报告 capability=false，不占据主角色。
+
+## 验证与限制
+
+新增纯状态机和引擎 fixture 覆盖 src=null、旧任期拒收、独立 seq、T 下限确认、
+超时放弃、发送失败、单路集合、三页冷启动私有预热和旧后端兼容。
+前端实际生成的冷启动、运行、media_wait 三类消息通过后端 FrameAlignStatus
+严格模型及 A/B 集合校验。另运行后端现有租约/权威测试（禁用字节码和 pytest 缓存）。
+
+未执行真实媒体、OBS 或长时间系统挂起联调。Worker 仍可能被系统暂停；实际
+失活接管由后端 5 秒租约、2 秒候选稳定期和 3 秒接管确认共同约束，并非无缝切换。
+本轮不改变后端单实例限制，不修改后端或 SEIInjector，也不部署后端。

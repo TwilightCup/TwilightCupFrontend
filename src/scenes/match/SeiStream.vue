@@ -36,7 +36,7 @@ const pullErr = computed(() => alignEngine.streamError[props.side]);
 /** 本侧是否已解析出 SEI 帧（区分"在解码"与"待解码/不支持"） */
 const frameCount = computed(() => alignEngine.health[props.side].frames);
 const waitingText = computed(() => streamWaitingText({ frames: frameCount.value,
-  publisher: alignEngine.sync.role === "publisher", authorityUs: alignEngine.sync.authorityUs, state: alignEngine.sync.state, aligned: aligned.value }));
+  candidate: alignEngine.sync.candidate, publisher: alignEngine.sync.role === "publisher", authorityUs: alignEngine.sync.authorityUs, state: alignEngine.sync.state, aligned: aligned.value }));
 /** 本侧解码错误（WebCodecs 实际报错，明文） */
 const decodeErr = computed(() => alignEngine.health[props.side].decodeError);
 /** 本侧是否已真正上屏过一帧（用于决定舞台显示等待信号还是画面） */

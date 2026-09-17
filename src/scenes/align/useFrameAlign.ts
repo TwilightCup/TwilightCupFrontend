@@ -1,6 +1,7 @@
 /** Per-document renderer. The server elects one publisher; other documents follow
  * its relayed anchors. Only canvases inside this document share decoded frames. */
 import { reactive, ref, type Ref } from "vue";
+import type { LeaseSample } from "./frameLeaseClient";
 import { PlaybackDriver } from "./playbackDriver";
 import { SignalRecovery, SIGNAL } from "./signalPolicy";
 import { ExternalClock, type FrameAlignAnchor } from "./externalClock";
@@ -40,6 +41,8 @@ export class AlignEngine {
   private waitingT: number | null = null;
   private stableMs = 0;
   private missingMs = 0;
+  private takeoverSeek = false;
+  private candidateProbe: { target: number; sides: string; at: number } | null = null;
   private lastSeekAt = -Infinity;
   private signalPolicy = new SignalRecovery();
   private signalProgress = new Map<Side, { frontier: number | null; at: number }>();
@@ -64,6 +67,7 @@ export class AlignEngine {
     role: "follower" as "publisher" | "follower",
     catchup: "wait" as CatchupMode, authorityUs: null as number | null,
     activeSides: [] as Side[], waitingSides: [] as Side[],
+    candidate: "off" as "off" | "warming" | "ready",
     reason: "startup", seekCount: 0, lastSeekReason: "", lastJumpUs: 0,
     targetUs: null as number | null, pairErrorUs: null as number | null,
     presentedRt: { A: null, B: null } as Record<Side, number | null>,
@@ -95,13 +99,22 @@ export class AlignEngine {
     if (this.publisher !== selected) {
       this.pendingSeek = null; this.waitingT = null; this.stableMs = 0; this.catchupMode = "normal";
       this.signalPolicy.reset(selected ? this.remoteWaiting : []); this.warming.clear();
+      if (selected && this.candidateProbe != null) {
+        // Private preparation may have moved the decoder beyond the public T.
+        // Rebuild immediately on takeover, not after the ordinary missing-frame timeout.
+        this.takeoverSeek = true; this.lastSeekAt = -Infinity;
+        this.candidateProbe = null;
+      }
     }
+    if (!selected) this.takeoverSeek = false;
     this.publisher = selected;
     this.sync.role = selected ? "publisher" : "follower";
   }
   resetClockConnection(): void {
+    this.takeoverSeek = false;
     this.publisher = false; this.sync.role = "follower";
     this.external = new ExternalClock();
+    this.candidateProbe = null; this.sync.candidate = "off";
     this.remoteSides = null; this.remoteWaiting = [];
     this.authorityFloor = this.tUs.value;
     this.pendingSeek = null; this.waitingT = null; this.stableMs = 0;
@@ -131,7 +144,63 @@ export class AlignEngine {
     }
     return accepted;
   }
-  selectAuthority(src: string): void { this.external.selectSource(src); }
+  selectAuthority(src: string | null, epoch?: number): void {
+    this.external.selectSource(src, epoch);
+    if (src == null) {
+      this.setPublisher(false); this.sync.state = "waiting"; this.sync.authorityUs = null;
+      this.playback.speed = 0; this.presented.A = this.presented.B = false;
+    }
+  }
+  setAuthorityFloor(floor: number | null): void {
+    if (floor != null) this.authorityFloor = Math.max(this.authorityFloor ?? 0, floor);
+  }
+  /** Private cold-start probe: decode a shared safe point without publishing or
+   * advancing presentation T. Once elected, normal common presentation owns T. */
+  leaseSample(now: number): LeaseSample {
+    const required = [...this.requiredSides];
+    const capability = this.enabled.value && required.some(s => this.streams.has(s));
+    let active = this.sync.activeSides.filter(s => required.includes(s));
+    let media = false, decoded = false;
+    const progress = Math.floor(this.tUs.value ?? 0);
+    const preparing = !this.publisher && (this.tUs.value == null || !this.external.attached || this.sync.state === "stale" || !active.length);
+    if (preparing) {
+      active = required.filter(s => {
+        const c = this.streams.get(s)?.coverage();
+        return c != null && c.to - c.from >= CATCHUP.backUs + 5_000_000;
+      });
+      const streams = active.map(s => this.streams.get(s)!);
+      const covers = streams.map(s => s.coverage()!);
+      const from = Math.max(...covers.map(c => c.from), this.authorityFloor ?? 0);
+      const to = Math.min(...covers.map(c => c.to)) - CATCHUP.backUs;
+      const probe = this.candidateProbe;
+      let target = probe?.target ?? to - 5_000_000;
+      if (target < from || target > to || probe?.sides !== active.join()) target = Math.max(from, to - 5_000_000);
+      media = streams.length > 0 && target >= from && target <= to && streams.every(s => s.canSeek(target));
+      if (media) {
+        if (!probe || probe.target !== target || probe.sides !== active.join() || (now - probe.at >= SIGNAL.retryMs && !commonFrames(streams.map(s => s.queue), target, CATCHUP.maxFrameErrorUs))) {
+          for (const s of streams) s.seek(target);
+          this.candidateProbe = { target, sides: active.join(), at: now };
+        }
+        for (const s of streams) s.advance(target);
+        decoded = commonFrames(streams.map(s => s.queue), target, CATCHUP.maxFrameErrorUs) != null;
+      }
+    } else if (this.tUs.value != null && active.length) {
+      this.candidateProbe = null;
+      const target = this.tUs.value;
+      media = active.every(side => {
+        const c = this.streams.get(side)?.coverage();
+        return c != null && target >= c.from && target <= c.to - CATCHUP.backUs;
+      });
+      decoded = media && commonFrames(active.map(s => this.streams.get(s)!.queue), target,
+        CATCHUP.maxFrameErrorUs) != null;
+    }
+    this.sync.candidate = preparing && capability ? decoded ? "ready" : "warming" : "off";
+    const waiting = (["A", "B"] as Side[]).filter(s => !active.includes(s));
+    const holdingSignal = !preparing && this.tUs.value != null && this.sync.reason === "signal_wait";
+    return { capability, media_ready: media, decode_ready: decoded, progress_t_us: progress,
+      active_sides: active, waiting_sides: waiting,
+      state: media && decoded && !holdingSignal ? "running" : "media_wait" };
+  }
   setRequiredSides(sides: Side[]): void {
     this.requiredSides = new Set(sides);
     this.enabled.value = sides.length > 0;
@@ -164,7 +233,7 @@ export class AlignEngine {
           if (this.streamError[side]) this.streamError[side] = null;
         },
       });
-      this.signalProgress.delete(side); this.warming.delete(side);
+      this.signalProgress.delete(side); this.warming.delete(side); this.candidateProbe = null;
       this.streams.set(side, s);
       this.modes[side] = s.mode;
       this.resetPresented(side);
@@ -202,7 +271,8 @@ export class AlignEngine {
   resetSession(): void {
     for (const stream of this.streams.values()) stream.stop();
     this.streams.clear(); this.refs.clear(); this.sourceUrls.clear();
-    this.paintedCanvases.clear();
+    this.paintedCanvases.clear(); this.candidateProbe = null; this.sync.candidate = "off";
+    this.takeoverSeek = false;
     this.publisher = false; this.sync.role = "follower"; this.authorityFloor = null;
     this.external = new ExternalClock(); this.pendingSeek = null; this.waitingT = null; this.catchupMode = "normal";
     this.tUs.value = null; this.sync.state = "waiting";
@@ -373,7 +443,7 @@ export class AlignEngine {
     if (earliest > required) { freeze("waiting", false, "buffer_short"); return; }
     const plan = planCatchup({ current: this.tUs.value, authority: external.t,
       from: earliest, safeTo: required, elapsedMs: elapsed, rate: external.rate,
-      supply: true, publisher: this.publisher, mode: this.catchupMode, recovering: this.missingMs >= CATCHUP.stallSeekMs && now - this.lastSeekAt >= SIGNAL.retryMs });
+      supply: true, publisher: this.publisher, mode: this.catchupMode, recovering: (this.takeoverSeek || this.missingMs >= CATCHUP.stallSeekMs) && now - this.lastSeekAt >= SIGNAL.retryMs });
     if (this.pendingSeek != null && (this.pendingSeek < earliest || this.pendingSeek > required ||
         (this.missingMs >= CATCHUP.stallSeekMs && now - this.lastSeekAt >= SIGNAL.retryMs))) {
       this.pendingSeek = null; this.waitingT = null;
@@ -388,6 +458,7 @@ export class AlignEngine {
       this.sync.lastJumpUs = this.tUs.value == null ? 0 : plan.t - this.tUs.value;
       logAuth("seek", `reason=${this.sync.lastSeekReason} jumpUs=${this.sync.lastJumpUs} missingMs=${this.missingMs}`);
       for (const stream of streams) stream!.seek(plan.t);
+      this.takeoverSeek = false;
       this.pendingSeek = plan.t;
       this.stableMs = 0;
       this.missingMs = 0;

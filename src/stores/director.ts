@@ -32,6 +32,7 @@ import { ConnStatus, MatchSocket } from "@/ws/socket";
 import { useAuthStore } from "./auth";
 import { PresentationHistory } from "@/scenes/align/presentationHistory";
 import type { FrameAlignAnchor } from "@/scenes/align/externalClock";
+import { FrameLeaseClient } from "@/scenes/align/frameLeaseClient";
 import { AuthorityRole, type AuthorityAssignment } from "@/scenes/align/authorityRole";
 import { alignEngine } from "@/scenes/align/useFrameAlign";
 import {
@@ -229,6 +230,7 @@ export const useDirectorStore = defineStore("director", () => {
   });
 
   const authorityRole = new AuthorityRole();
+  const frameLease = new FrameLeaseClient();
   const alignRole = ref<"publisher" | "follower">("follower");
   let awaitingPromotionAnchor = false;
   let lastAlignPublish = -Infinity;
@@ -238,25 +240,41 @@ export const useDirectorStore = defineStore("director", () => {
     alignHeartbeat = null;
     awaitingPromotionAnchor = false;
     lastAlignPublish = -Infinity; alignEngine.setClockPulse(null);
-    authorityRole.disconnect(); alignRole.value = "follower";
+    frameLease.reset(); authorityRole.disconnect(); alignRole.value = "follower";
     alignEngine.resetClockConnection();
   }
   function applyAuthority(p: AuthorityAssignment, initial = false): void {
     const wasPublisher = authorityRole.publisher;
     if (!authorityRole.assign(p)) return;
-    if (!initial && !wasPublisher && authorityRole.publisher && alignEngine.tUs.value != null) {
+    frameLease.observe(p, authorityRole, performance.now());
+    alignEngine.setAuthorityFloor(p.t_floor_us ?? null);
+    if (frameLease.required && authorityRole.publisher) {
+      awaitingPromotionAnchor = p.t_floor_us === undefined;
+    } else if (!initial && !wasPublisher && authorityRole.publisher && alignEngine.tUs.value != null) {
       awaitingPromotionAnchor = true;
     }
     if (!authorityRole.publisher) awaitingPromotionAnchor = false;
     currentAlignSrc.value = authorityRole.src;
-    alignEngine.selectAuthority(authorityRole.src!);
+    alignEngine.selectAuthority(authorityRole.src, authorityRole.epoch);
     alignRole.value = authorityRole.role;
     alignEngine.setPublisher(authorityRole.publisher && !awaitingPromotionAnchor);
   }
   function publishFrameAlign(): void {
-    const t = alignEngine.tUs.value;
-    if (!authorityRole.publisher || awaitingPromotionAnchor || t == null) return;
     const now = performance.now();
+    let leaseRunning = true;
+    if (frameLease.supported && accountId.value && matchId.value) {
+      const sample = alignEngine.leaseSample(now);
+      leaseRunning = sample.state === "running";
+      const status = frameLease.report(authorityRole, accountId.value, matchId.value, sample,
+        document.hidden ? "hidden" : "visible", now);
+      // WebSocket ordering: new-epoch readiness confirmation precedes any T.
+      if (status && !socket.send(send.directorCommand("frame_align_status", status))) {
+        frameLease.deliveryFailed(); return;
+      }
+    }
+    const t = alignEngine.tUs.value;
+    if (!authorityRole.publisher || awaitingPromotionAnchor || t == null ||
+        !frameLease.canPublish(authorityRole) || (frameLease.required && !leaseRunning)) return;
     if (now - lastAlignPublish < 400) return;
     lastAlignPublish = now;
     const playing = alignEngine.sync.state === "playing";
@@ -326,7 +344,7 @@ export const useDirectorStore = defineStore("director", () => {
         if (msg.seat === "DIRECTOR" && msg.connection_id) {
           authorityRole.connect(msg.connection_id);
           applyAuthority({ connection_id: msg.connection_id, src: msg.align_authority_src,
-            epoch: msg.authority_epoch, role: msg.align_role }, true);
+            epoch: msg.authority_epoch, role: msg.align_role, lease_required: msg.align_lease_required }, true);
           alignEngine.setClockPulse(publishFrameAlign);
           alignHeartbeat = setInterval(publishFrameAlign, 400);
         }
@@ -494,13 +512,15 @@ export const useDirectorStore = defineStore("director", () => {
           const replay = msg.payload ?? {};
           const replayFrame = replay.frame_align as Partial<FrameAlignAnchor> | undefined;
           applyAuthority({ connection_id: replay.connection_id as string | undefined,
-            src: asrc as string | undefined, role: replay.align_role as string | undefined,
-            epoch: replayFrame?.epoch });
+            src: asrc as string | null | undefined, role: replay.align_role as string | undefined,
+            epoch: replayFrame?.epoch ?? authorityRole.epoch,
+            lease_required: replay.align_lease_required as boolean | undefined,
+            t_floor_us: replayFrame?.t_us ?? null });
           const fa = s?.frame_align as
             | { t_us?: unknown; ready_a?: unknown; ready_b?: unknown }
             | undefined;
           if (fa && typeof fa.t_us === "number") applyFrameAlign(fa as FrameAlignPayload, true);
-        } else if (msg.action === "align_authority" && typeof msg.payload?.src === "string") {
+        } else if (msg.action === "align_authority" && (typeof msg.payload?.src === "string" || msg.payload?.src === null)) {
           // 后端权威接任时广播该跟谁
           if (msg.payload.account_id != null && msg.payload.account_id !== accountId.value) break;
           if (msg.payload.match_id != null && msg.payload.match_id !== matchId.value) break;
@@ -612,7 +632,7 @@ export const useDirectorStore = defineStore("director", () => {
   interface FrameAlignPayload extends FrameAlignAnchor {
     ready_a?: boolean;
     ready_b?: boolean;
-    src?: string;
+    src?: string | null;
   }
   const frameAlign = ref<{ tUs: number | null; readyA: boolean; readyB: boolean } | null>(null);
   /** 当前唯一权威 id——由后端选举决定（align_authority 通知 / state_sync.align_authority_src）。
@@ -621,8 +641,10 @@ export const useDirectorStore = defineStore("director", () => {
   function applyFrameAlign(p: FrameAlignPayload, replay = false): void {
     if (p.match_id != null && p.match_id !== matchId.value) return;
     if (p.account_id != null && p.account_id !== accountId.value) return;
-    if (alignEngine.setExternalTUs(p.t_us, { ...p, replay, src: p.src ?? currentAlignSrc.value ?? undefined })) {
+    if (alignEngine.setExternalTUs(p.t_us, { ...p, replay, src: p.src === undefined ? currentAlignSrc.value ?? undefined : p.src })) {
       if (authorityRole.publisher && p.epoch === authorityRole.epoch && p.src === authorityRole.connectionId) {
+        frameLease.observe({ t_floor_us: p.t_us }, authorityRole, performance.now());
+        alignEngine.setAuthorityFloor(p.t_us);
         awaitingPromotionAnchor = false;
         alignEngine.setPublisher(true);
       }

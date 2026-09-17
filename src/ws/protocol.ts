@@ -120,7 +120,8 @@ export interface ClientDirectorCommand {
     | "soon_reset"
     | "soon_set_target"
     | "config_update"
-    | "frame_align";
+    | "frame_align"
+    | "frame_align_status";
   /** 指令载荷（按 action 不同含义） */
   payload: Record<string, unknown>;
   // switch_scene:   { scene: "soon" }
@@ -249,7 +250,8 @@ export interface SrvAuthOk {
   type: "auth_ok";
   connection_id?: string;
   align_role?: "publisher" | "follower";
-  align_authority_src?: string;
+  align_authority_src?: string | null;
+  align_lease_required?: boolean;
   authority_epoch?: number;
 
   account_id: string;

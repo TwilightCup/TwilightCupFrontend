@@ -7,7 +7,7 @@ export interface FrameAlignAnchor {
   /** Publisher-selected presentation membership, independent of local readiness. */
   active_sides?: ("A" | "B")[];
   waiting_sides?: ("A" | "B")[];
-  src?: string;
+  src?: string | null;
   epoch?: number;
   seq?: number;
   rate?: number;
@@ -16,7 +16,7 @@ export interface FrameAlignAnchor {
   match_id?: string;
   account_id?: string;
   scene?: string;
-  source_id?: string;
+  source_id?: string | null;
   /** Internal: legacy handshake snapshots have unknown age. */
   replay?: boolean;
   effective_at_ms?: number;
@@ -27,23 +27,32 @@ export class ExternalClock {
   private anchor: { t: number; at: number; rate: number; received: number; staleReplay: boolean } | null = null;
   private epoch: number | null = null;
   private seq: number | null = null;
-  private scope: { scene?: string; source_id?: string } | null = null;
+  private scope: { scene?: string; source_id?: string | null } | null = null;
   revision = 0;
   private source: string | null = null;
   private allowedSource: string | null = null;
+  private selected = false;
+  private selectedEpoch = -1;
   private lastInput = -Infinity;
   private lastOutput = -Infinity;
   private seenSources = new Set<string>();
   get attached(): boolean { return this.anchor !== null; }
 
-  selectSource(src: string): void { this.allowedSource = src; }
+  selectSource(src: string | null, epoch?: number): void {
+    this.selected = true; this.allowedSource = src;
+    if (epoch != null) this.selectedEpoch = Math.max(this.selectedEpoch, epoch);
+    if (src == null) this.anchor = null;
+  }
   accept(p: FrameAlignAnchor, now: number): boolean {
     if (!Number.isSafeInteger(p.t_us) || p.t_us <= 0 || p.t_us < this.lastInput) return false;
     if (p.epoch != null && (!Number.isSafeInteger(p.epoch) || p.epoch < 0)) return false;
     if (p.seq != null && (!Number.isSafeInteger(p.seq) || p.seq < 0)) return false;
     if (p.rate != null && (!Number.isFinite(p.rate) || p.rate < 0 || p.rate > 1.08)) return false;
     if (this.epoch != null && (p.epoch == null || p.epoch < this.epoch)) return false;
-    const src = p.src ?? this.allowedSource;
+    if (this.selectedEpoch >= 0 && (p.epoch == null || p.epoch < this.selectedEpoch)) return false;
+    const src = p.src === undefined ? this.allowedSource : p.src;
+    if (this.selected && src !== this.allowedSource) return false;
+    if (src == null && this.selected && !p.frozen && !p.paused) return false;
     const changed = src != null && this.source != null && src !== this.source;
     if (src && this.allowedSource && src !== this.allowedSource) return false;
     const newerEpoch = p.epoch != null && (this.epoch == null || p.epoch > this.epoch);
