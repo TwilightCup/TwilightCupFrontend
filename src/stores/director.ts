@@ -231,11 +231,13 @@ export const useDirectorStore = defineStore("director", () => {
   const authorityRole = new AuthorityRole();
   const alignRole = ref<"publisher" | "follower">("follower");
   let awaitingPromotionAnchor = false;
+  let lastAlignPublish = -Infinity;
   let alignHeartbeat: ReturnType<typeof setInterval> | null = null;
   function stopPublishing(): void {
     if (alignHeartbeat) clearInterval(alignHeartbeat);
     alignHeartbeat = null;
     awaitingPromotionAnchor = false;
+    lastAlignPublish = -Infinity; alignEngine.setClockPulse(null);
     authorityRole.disconnect(); alignRole.value = "follower";
     alignEngine.resetClockConnection();
   }
@@ -254,6 +256,9 @@ export const useDirectorStore = defineStore("director", () => {
   function publishFrameAlign(): void {
     const t = alignEngine.tUs.value;
     if (!authorityRole.publisher || awaitingPromotionAnchor || t == null) return;
+    const now = performance.now();
+    if (now - lastAlignPublish < 400) return;
+    lastAlignPublish = now;
     const playing = alignEngine.sync.state === "playing";
     socket.send(send.directorCommand("frame_align", {
       t_us: Math.floor(t), epoch: authorityRole.epoch, seq: ++authorityRole.sequence,
@@ -322,6 +327,7 @@ export const useDirectorStore = defineStore("director", () => {
           authorityRole.connect(msg.connection_id);
           applyAuthority({ connection_id: msg.connection_id, src: msg.align_authority_src,
             epoch: msg.authority_epoch, role: msg.align_role }, true);
+          alignEngine.setClockPulse(publishFrameAlign);
           alignHeartbeat = setInterval(publishFrameAlign, 400);
         }
         // 双方选手名：auth_ok 即带（后端已补），连入即有，不再依赖聊天捕获

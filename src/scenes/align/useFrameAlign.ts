@@ -1,6 +1,7 @@
 /** Per-document renderer. The server elects one publisher; other documents follow
  * its relayed anchors. Only canvases inside this document share decoded frames. */
 import { reactive, ref, type Ref } from "vue";
+import { PlaybackDriver } from "./playbackDriver";
 import { SignalRecovery, SIGNAL } from "./signalPolicy";
 import { ExternalClock, type FrameAlignAnchor } from "./externalClock";
 import { commonFrames } from "./frameQueue";
@@ -45,12 +46,13 @@ export class AlignEngine {
   private warming = new Map<Side, { at: number; stable: number | null }>();
   private remoteSides: Side[] | null = null;
   private remoteWaiting: Side[] = [];
-  private raf = 0;
+  private driver = new PlaybackDriver();
+  private clockPulse: (() => void) | null = null;
+  setClockPulse(pulse: (() => void) | null): void { this.clockPulse = pulse; }
   private last = 0;
   private running = false;
   private healthTimer: ReturnType<typeof setInterval> | null = null;
-  /** Background readiness checks never publish or elect a clock. */
-  private hiddenTimer: ReturnType<typeof setInterval> | null = null;
+
   private external = new ExternalClock();
   private publisher = false;
   private authorityFloor: number | null = null;
@@ -262,24 +264,19 @@ export class AlignEngine {
     this.last = performance.now();
     this.refreshHealth();
     this.healthTimer = setInterval(() => this.refreshHealth(), 400);
-    const loop = (now: number) => {
+    this.driver.start((now: number) => {
       if (!this.running) return;
       // 主循环无论单帧是否抛错都继续（此前一旦某帧绘制异常就会掐断 rAF → 画面永久卡死）
       try {
         this.tickLoop(now);
+        this.clockPulse?.(); // Same driver as T; no dependence on a throttled heartbeat timer.
       } catch (e) {
         console.error("[align loop]", e);
         this.loopErr.value = e instanceof Error ? e.message : String(e);
       }
       this.loopAlive.value = true;
       this.lastTickTime = now;
-      this.raf = requestAnimationFrame(loop);
-    };
-    this.raf = requestAnimationFrame(loop);
-    // 隐藏兜底：1Hz 检查就绪状态；elapsed 有上限，避免后台恢复时跳跃。
-    this.hiddenTimer = setInterval(() => {
-      if (this.running && document.hidden) this.tickLoop(performance.now());
-    }, 1000);
+    });
   }
 
   /** Publisher-only loss detection: a stopped ingest frontier must also have
@@ -471,15 +468,10 @@ export class AlignEngine {
   }
   stop(): void {
     this.running = false;
-    if (this.raf) cancelAnimationFrame(this.raf);
-    this.raf = 0;
+    this.driver.stop();
     if (this.healthTimer) clearInterval(this.healthTimer);
     this.healthTimer = null;
-    if (this.hiddenTimer) clearInterval(this.hiddenTimer);
-    this.hiddenTimer = null;
   }
-
-
 }
 
 /** Document-local singleton; separate pages follow WS anchors independently. */
