@@ -68,7 +68,21 @@ export class FrameQueue {
     return n ? this.entries[n - 1]!.rtUs : null;
   }
 
-  /** 取 rtUs 最接近 target 的帧（T 单调则结果稳定）；空为 null */
+  /** Bounded candidates for joint selection; never include a previously passed frame. */
+  candidates(targetUs: number, maxErrorUs: number, minRtUs = -Infinity): FrameEntry[] {
+    const low = Math.max(targetUs - maxErrorUs, minRtUs), high = targetUs + maxErrorUs;
+    let lo = 0, hi = this.entries.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (this.entries[mid]!.rtUs < low) lo = mid + 1;
+      else hi = mid;
+    }
+    const frames: FrameEntry[] = [];
+    for (let i = lo; i < this.entries.length && this.entries[i]!.rtUs <= high; i++) frames.push(this.entries[i]!);
+    return frames;
+  }
+
+  /** 取 rtUs 最接近 target 的帧；超出误差范围返回 null。 */
   nearest(targetUs: number, maxErrorUs = 40_000): FrameEntry | null {
     let lo = 0, hi = this.entries.length - 1, best: FrameEntry | null = null, bestD = Infinity;
     while (lo <= hi) {
@@ -133,3 +147,22 @@ export class FrameQueue {
 }
 
 export type { AlignedFrame };
+/** Select a common A/B pair, rather than rejecting independently nearest frames.
+ * Both target error and pair error retain the same bound; presented rt cannot rewind. */
+export function commonFrames(queues: FrameQueue[], targetUs: number, maxErrorUs: number,
+  floors: (number | null)[] = []): FrameEntry[] | null {
+  if (!queues.length || queues.length > 2) return null;
+  const candidates = queues.map((q, i) => q.candidates(targetUs, maxErrorUs, floors[i] ?? -Infinity));
+  let best: FrameEntry[] | null = null, bestMax = Infinity, bestSum = Infinity;
+  for (const a of candidates[0]!) {
+    for (const b of candidates.length === 1 ? [a] : candidates[1]!) {
+      if (Math.abs(a.rtUs - b.rtUs) > maxErrorUs) continue;
+      const da = Math.abs(a.rtUs - targetUs), db = Math.abs(b.rtUs - targetUs);
+      const max = Math.max(da, db), sum = da + db;
+      if (max < bestMax || (max === bestMax && sum < bestSum)) {
+        best = candidates.length === 1 ? [a] : [a, b]; bestMax = max; bestSum = sum;
+      }
+    }
+  }
+  return best;
+}

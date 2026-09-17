@@ -3,7 +3,7 @@
 import { reactive, ref, type Ref } from "vue";
 import { SignalRecovery, SIGNAL } from "./signalPolicy";
 import { ExternalClock, type FrameAlignAnchor } from "./externalClock";
-import type { FrameEntry } from "./frameQueue";
+import { commonFrames } from "./frameQueue";
 import { CATCHUP, planCatchup, recoveryGate, publisherTarget, type CatchupMode } from "./rateControl";
 import { FrameLockStream } from "./frameLock";
 import { createFrameSource } from "./transport";
@@ -36,6 +36,7 @@ export class AlignEngine {
   private canvases = new Map<Side, HTMLCanvasElement[]>();
   private catchupMode: CatchupMode = "normal";
   private pendingSeek: number | null = null;
+  private waitingT: number | null = null;
   private stableMs = 0;
   private missingMs = 0;
   private lastSeekAt = -Infinity;
@@ -90,7 +91,7 @@ export class AlignEngine {
   /** Called only after validating the backend connection-specific role assignment. */
   setPublisher(selected: boolean): void {
     if (this.publisher !== selected) {
-      this.pendingSeek = null; this.stableMs = 0; this.catchupMode = "normal";
+      this.pendingSeek = null; this.waitingT = null; this.stableMs = 0; this.catchupMode = "normal";
       this.signalPolicy.reset(selected ? this.remoteWaiting : []); this.warming.clear();
     }
     this.publisher = selected;
@@ -101,7 +102,7 @@ export class AlignEngine {
     this.external = new ExternalClock();
     this.remoteSides = null; this.remoteWaiting = [];
     this.authorityFloor = this.tUs.value;
-    this.pendingSeek = null; this.stableMs = 0;
+    this.pendingSeek = null; this.waitingT = null; this.stableMs = 0;
     this.sync.authorityUs = null;
     this.sync.state = "waiting";
     this.presented.A = this.presented.B = false;
@@ -123,7 +124,7 @@ export class AlignEngine {
       this.remoteWaiting = [...(meta.waiting_sides ?? [])];
     }
     if (accepted && revision !== this.external.revision) {
-      this.pendingSeek = null; this.stableMs = 0;
+      this.pendingSeek = null; this.waitingT = null; this.stableMs = 0;
       this.missingMs = CATCHUP.stallSeekMs; this.catchupMode = "normal";
     }
     return accepted;
@@ -140,7 +141,7 @@ export class AlignEngine {
     if (this.sourceUrls.get(side) !== url && this.streams.has(side)) {
       this.streams.get(side)!.stop();
       this.streams.delete(side);
-      this.pendingSeek = null; this.catchupMode = "normal";
+      this.pendingSeek = null; this.waitingT = null; this.catchupMode = "normal";
     }
     this.enabled.value = true;
     if (!this.streams.has(side)) {
@@ -192,7 +193,7 @@ export class AlignEngine {
     if (!url) return;
     this.streams.get(side)?.stop();
     this.streams.delete(side);
-    this.pendingSeek = null; this.catchupMode = "normal"; // explicit operator recovery, not automatic timeline jump
+    this.pendingSeek = null; this.waitingT = null; this.catchupMode = "normal"; // explicit operator recovery, not automatic timeline jump
     const release = this.startStream(side, url);
     release();
   }
@@ -201,7 +202,7 @@ export class AlignEngine {
     this.streams.clear(); this.refs.clear(); this.sourceUrls.clear();
     this.paintedCanvases.clear();
     this.publisher = false; this.sync.role = "follower"; this.authorityFloor = null;
-    this.external = new ExternalClock(); this.pendingSeek = null; this.catchupMode = "normal";
+    this.external = new ExternalClock(); this.pendingSeek = null; this.waitingT = null; this.catchupMode = "normal";
     this.tUs.value = null; this.sync.state = "waiting";
     this.sync.reason = "startup"; this.sync.seekCount = 0;
     this.sync.lastSeekReason = ""; this.sync.lastJumpUs = 0;
@@ -287,7 +288,7 @@ export class AlignEngine {
     if (!this.publisher) {
       const active = this.remoteSides == null ? [...required] : required.filter(s => this.remoteSides!.includes(s));
       if (active.join() !== this.sync.activeSides.join()) {
-        this.pendingSeek = null; this.stableMs = 0;
+        this.pendingSeek = null; this.waitingT = null; this.stableMs = 0;
         if (active.some(s => this.sync.waitingSides.includes(s))) {
           this.missingMs = CATCHUP.stallSeekMs; this.lastSeekAt = -Infinity;
         }
@@ -331,7 +332,7 @@ export class AlignEngine {
     }
     const decision = this.signalPolicy.update(now, required, lost, recovered);
     if (this.sync.activeSides.join() !== decision.active.join()) {
-      this.pendingSeek = null; this.stableMs = 0; this.missingMs = 0;
+      this.pendingSeek = null; this.waitingT = null; this.stableMs = 0; this.missingMs = 0;
     }
     for (const side of decision.active) if (this.sync.waitingSides.includes(side)) this.resetPresented(side);
     this.sync.activeSides = decision.active; this.sync.waitingSides = decision.waiting;
@@ -378,7 +379,7 @@ export class AlignEngine {
       supply: true, publisher: this.publisher, mode: this.catchupMode, recovering: this.missingMs >= CATCHUP.stallSeekMs && now - this.lastSeekAt >= SIGNAL.retryMs });
     if (this.pendingSeek != null && (this.pendingSeek < earliest || this.pendingSeek > required ||
         (this.missingMs >= CATCHUP.stallSeekMs && now - this.lastSeekAt >= SIGNAL.retryMs))) {
-      this.pendingSeek = null;
+      this.pendingSeek = null; this.waitingT = null;
     }
     if (this.pendingSeek == null && plan.mode === "seek" && plan.t != null) {
       if (!streams.every(stream => stream!.canSeek(plan.t!))) { freeze("waiting", false, "no_keyframe"); return; }
@@ -394,21 +395,20 @@ export class AlignEngine {
       this.stableMs = 0;
       this.missingMs = 0;
     }
-    const T = this.pendingSeek ?? plan.t;
+    if (this.waitingT != null && (this.waitingT < earliest || this.waitingT > required)) this.waitingT = null;
+    const T = this.pendingSeek ?? this.waitingT ?? plan.t;
     this.sync.catchup = this.pendingSeek != null ? "seek" : plan.mode;
     this.sync.targetUs = T;
     if (T == null || (this.pendingSeek == null && plan.mode === "wait") || T > external.t ||
         T < earliest || T > required || (this.tUs.value != null && T < this.tUs.value)) {
       freeze("frozen"); return;
     }
-    const frames: FrameEntry[] = [];
-    for (const stream of streams) {
-      stream!.advance(T);
-      const frame = stream!.queue.nearest(T, CATCHUP.maxFrameErrorUs);
-      if (frame) frames.push(frame);
-    }
+    for (const stream of streams) stream!.advance(T);
+    const frames = commonFrames(streams.map(s => s!.queue), T, CATCHUP.maxFrameErrorUs,
+      sides.map(side => this.sync.presentedRt[side])) ?? [];
     const pairError = frames.length ? Math.max(...frames.map(f => f.rtUs)) - Math.min(...frames.map(f => f.rtUs)) : null;
     if (frames.length !== sides.length || (pairError ?? Infinity) > CATCHUP.maxFrameErrorUs) {
+      this.waitingT ??= T;
       this.missingMs += elapsed; this.stableMs = 0; this.catchupMode = "normal";
       const missing = sides.filter((_, i) => !streams[i]!.queue.nearest(T, CATCHUP.maxFrameErrorUs));
       freeze("frozen", false, missing.length ? `missing_frame:${missing.join("+")}` : "pair_error"); return;
@@ -429,6 +429,7 @@ export class AlignEngine {
         }
       }
     } catch {
+      this.waitingT ??= T;
       this.missingMs += elapsed; this.stableMs = 0; this.catchupMode = "normal";
       freeze("frozen"); return;
     }
@@ -445,7 +446,7 @@ export class AlignEngine {
     this.sync.pairErrorUs = pairError;
     this.playback.speed = this.pendingSeek != null || !advanced ? 0 : plan.rate;
     this.catchupMode = plan.mode === "soft" ? "soft" : "normal";
-    this.pendingSeek = null; this.missingMs = 0; this.stableMs = 0;
+    this.pendingSeek = null; this.waitingT = null; this.missingMs = 0; this.stableMs = 0;
     this.playback.behindS = (required - T) / 1e6;
     for (let i = 0; i < sides.length; i++) {
       const side = sides[i]!;
