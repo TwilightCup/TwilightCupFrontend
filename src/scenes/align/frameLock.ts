@@ -102,12 +102,19 @@ class WebCodecsDecoder implements Decoder {
   async configure(codec: string, description: Uint8Array | null): Promise<boolean> {
     this.close();
     const generation = this.generation;
-    if (typeof VideoDecoder === "undefined") return false;
+    if (typeof VideoDecoder === "undefined") {
+      this.onErr?.(new Error("浏览器未提供 VideoDecoder；请检查 HTTPS 安全上下文及浏览器/OBS 版本"));
+      return false;
+    }
     const config: globalThis.VideoDecoderConfig = { codec };
     if (description?.length) config.description = description;
     try {
       const support = await VideoDecoder.isConfigSupported(config);
-      if (generation !== this.generation || !support.supported) return false;
+      if (generation !== this.generation) return false;
+      if (!support.supported) {
+        this.onErr?.(new Error(`浏览器不支持视频解码配置 ${codec}`));
+        return false;
+      }
       this.dec = new VideoDecoder({
         output: (frame) => {
           if (generation !== this.generation) { frame.close(); return; }
@@ -336,6 +343,7 @@ export class FrameLockStream {
     } else {
       this.mode = "off";
       this.ready = false;
+      this.needKey = false; // rejected configuration is terminal until explicit recovery
     }
     this.opts.onModeChange?.(this.mode);
   }

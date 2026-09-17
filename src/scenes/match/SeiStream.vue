@@ -7,6 +7,7 @@
  * side='A' 蓝（左）、'B' 红（右）。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { streamWaitingText } from "@/scenes/align/streamStatus";
 import { bi } from "@/utils/bilingual";
 import { alignEngine, type Side } from "@/scenes/align/useFrameAlign";
 
@@ -33,7 +34,9 @@ const aligned = ref(false);
 /** 本侧拉流错误（可读文案；无则 null）。来自 alignEngine.streamError（响应式） */
 const pullErr = computed(() => alignEngine.streamError[props.side]);
 /** 本侧是否已解析出 SEI 帧（区分"在解码"与"待解码/不支持"） */
-const hasFrames = computed(() => alignEngine.health[props.side].frames > 0);
+const frameCount = computed(() => alignEngine.health[props.side].frames);
+const waitingText = computed(() => streamWaitingText({ frames: frameCount.value,
+  authorityUs: alignEngine.sync.authorityUs, state: alignEngine.sync.state, aligned: aligned.value }));
 /** 本侧解码错误（WebCodecs 实际报错，明文） */
 const decodeErr = computed(() => alignEngine.health[props.side].decodeError);
 /** 本侧是否已真正上屏过一帧（用于决定舞台显示等待信号还是画面） */
@@ -87,7 +90,7 @@ watch(cv, (c) => {
         <template v-else>
           <div v-if="pullErr" class="err">⚠ 拉不到流 · {{ pullErr }}</div>
           <div v-else-if="decodeErr" class="err">解码出错 · {{ decodeErr }}</div>
-          <div v-else class="live">● {{ bi("scenes.match.waitingSignal") }}</div>
+          <div v-else class="live">{{ waitingText }}</div>
         </template>
       </div>
     </div>
@@ -98,7 +101,7 @@ watch(cv, (c) => {
       <template v-else>
         <div v-if="pullErr" class="err">⚠ 拉不到流 · {{ pullErr }}</div>
         <div v-else-if="decodeErr" class="err">解码出错 · {{ decodeErr }}</div>
-        <div v-else-if="hasFrames" class="err">画面已解析 {{ hasFrames }} 帧，但解码未就绪 / 环境不支持 WebCodecs</div>
+        <div v-else-if="frameCount > 0" class="live">{{ waitingText }}</div>
         <div v-else class="live">● {{ bi("scenes.match.waitingSignal") }}</div>
       </template>
     </div>

@@ -106,3 +106,27 @@ MediaMTX/SEIInjector 不改：仍须实际确认 SEI、完整 fMP4、关键帧�
   延迟与抗缓冲能力的取舍；本项目保留高延迟安全缓冲，不追求贴直播边缘。
 
 没有采用或声称掌握 Bilibili 内部多端同步实现。
+
+## 2026-09-17 真流排查补充
+
+用户提供 `/test/index.m3u8` 和 `/test2/index.m3u8`（bsrserver.org.cn:1936）。
+本次通过仓库 HLS/fMP4/SEI 解析器实际读取两条流：均为 avc1.64002a、1920x1080、
+60fps。各 playlist 有 198 个非 GAP 完整段，合计 395.983 秒；各抽查最新一个完整段，
+120/120 视频样本含 SEI，各有一个关键帧。此证据仅证明当时 HTTP/分片/解析可用，
+不等于用户浏览器/OBS 已成功 WebCodecs 解码，也不是长期丢帧测试。
+
+兄弟后端已更新至 `3e7a45d`：现在确实生成 epoch/seq/有效时间并补发完整锚点，
+不能沿用本文件前文 f62ace5 的“缺字段”结论。但
+`connection_manager.py:933` 的 `_adopt_align` 仍从 publisher payload 读取 t_us；
+`docs/frame-align-authority.md:85` 明确说明没有媒体前沿采集服务，全部新版前端为
+follower 且没有独立 publisher 时不会产生首个 T。字段补齐尚未解决时间生产者缺失。
+
+前端 `tickLoop` 无外部锚点直接等待，尚未执行 advance/pump/configure，因此原提示
+“画面已解析 true 帧，但解码未就绪 / 环境不支持 WebCodecs”不能诊断浏览器能力。
+此次修正为实际帧数与等待原因；只在 VideoDecoder API 缺失或 isConfigSupported
+确实拒绝配置时报告能力错误。没有恢复任何页面本地 authority。
+
+后端 agent 下一步必须闭合：部署独立媒体时间生产者或在后端采集 A/B 连续媒体前沿，
+经服务端唯一 authority 产生 T<=slow-30s，并定期向所有 follower 发完整锚点。
+仅增加 epoch/seq 或启动失联监视器不能产生第一条 T。本次未修改后端，也未读取
+用户浏览器实时 WS，故本会话“无锚点”的运行时状态仍需检查 frame_align 收包确认。
