@@ -40,7 +40,8 @@ const waitingText = computed(() => streamWaitingText({ frames: frameCount.value,
 /** 本侧解码错误（WebCodecs 实际报错，明文） */
 const decodeErr = computed(() => alignEngine.health[props.side].decodeError);
 /** 本侧是否已真正上屏过一帧（用于决定舞台显示等待信号还是画面） */
-const presented = computed(() => alignEngine.presented[props.side]);
+// Canvas pixels outlive VideoFrames. Readiness may fall without erasing the last image.
+const hasImage = computed(() => alignEngine.hasCanvasImage(cv.value));
 
 let release: (() => void) | null = null;
 function refresh(): void {
@@ -79,10 +80,10 @@ watch(cv, (c) => {
 
 <template>
   <div class="frame" :class="[side, { uncropped: !props.crop4to3 }]">
-    <div v-if="aligned && !props.hidden" class="stage">
+    <div v-if="!props.hidden" class="stage">
       <canvas ref="cv" class="video" />
       <!-- 舞台在真正出画面(已上屏)前一律显示等待信号 Awaiting；不显示"攒缓冲中/已就绪"这类对齐相位 -->
-      <div v-if="!presented" class="ph-abs">
+      <div v-if="!hasImage" class="ph-abs">
         <!-- bare(舞台)：任何情况下只露扫描器式等待，错误码/解码/地址一律不写 -->
         <template v-if="bare">
           <div class="live">● {{ bi("scenes.match.waitingSignal") }}</div>

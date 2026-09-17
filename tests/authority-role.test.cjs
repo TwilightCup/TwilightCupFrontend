@@ -15,10 +15,10 @@ test('only backend-selected connection can publish; old role messages cannot pro
 });
 test('publisher bootstraps without external T; followers cannot; safety floor survives takeover', () => {
   const { publisherTarget } = load('src/scenes/align/rateControl.ts');
-  assert.equal(publisherTarget(0,100e6,null),67e6);
+  assert.equal(publisherTarget(0,100e6,null),65e6);
   assert.equal(publisherTarget(80e6,100e6,null),null);
   assert.equal(publisherTarget(0,100e6,75e6),null);
-  assert.equal(publisherTarget(0,110e6,75e6),77e6);
+  assert.equal(publisherTarget(0,110e6,75e6),75e6);
 });
 
 test('elected publisher starts both frames; two followers wait then track its anchor', () => {
@@ -35,7 +35,7 @@ test('elected publisher starts both frames; two followers wait then track its an
   }
   const [main,a,b] = [page(),page(),page()]; main.setPublisher(true);
   for (let t=0;t<=320;t+=16) for (const e of [main,a,b]) e.tickLoop(t);
-  assert(main.tUs.value >=67e6); assert.equal(a.tUs.value,null); assert.equal(b.tUs.value,null);
+  assert(main.tUs.value >=65e6); assert.equal(a.tUs.value,null); assert.equal(b.tUs.value,null);
   const anchor={t_us:Math.floor(main.tUs.value),epoch:1,seq:1,rate:1};
   a.external.accept(anchor,320); b.external.accept(anchor,320);
   for (let t=336;t<=656;t+=16) {a.tickLoop(t); b.tickLoop(t);}

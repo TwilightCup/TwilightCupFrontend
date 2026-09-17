@@ -28,6 +28,10 @@ export function friendlyStreamError(e: unknown): string {
 
 export class AlignEngine {
   private streams = new Map<Side, FrameLockStream>();
+  private paintedCanvases = reactive(new Set<HTMLCanvasElement>());
+  hasCanvasImage(canvas: HTMLCanvasElement | null): boolean {
+    return canvas != null && this.paintedCanvases.has(canvas);
+  }
   private canvases = new Map<Side, HTMLCanvasElement[]>();
   private catchupMode: CatchupMode = "normal";
   private pendingSeek: number | null = null;
@@ -174,6 +178,7 @@ export class AlignEngine {
   resetSession(): void {
     for (const stream of this.streams.values()) stream.stop();
     this.streams.clear(); this.refs.clear(); this.sourceUrls.clear();
+    this.paintedCanvases.clear();
     this.publisher = false; this.sync.role = "follower"; this.authorityFloor = null;
     this.external = new ExternalClock(); this.pendingSeek = null; this.catchupMode = "normal";
     this.tUs.value = null; this.sync.state = "waiting";
@@ -189,6 +194,7 @@ export class AlignEngine {
   }
   /** 重挂流时还原"未上屏"状态（下轮攒够缓冲再提） */
   private resetPresented(side: Side): void {
+    for (const canvas of this.canvases.get(side) ?? []) this.paintedCanvases.delete(canvas);
     this.presented[side] = false;
     this.sync.presentedRt[side] = null;
     this.sync.targetErrorUs[side] = null;
@@ -204,6 +210,7 @@ export class AlignEngine {
     return () => this.unregisterCanvas(side, canvas);
   }
   private unregisterCanvas(side: Side, canvas: HTMLCanvasElement): void {
+    this.paintedCanvases.delete(canvas);
     const arr = this.canvases.get(side);
     if (!arr) return;
     const i = arr.indexOf(canvas);
@@ -276,7 +283,7 @@ export class AlignEngine {
     if (earliest > required) { freeze("waiting"); return; }
     const plan = planCatchup({ current: this.tUs.value, authority: external.t,
       from: earliest, safeTo: required, elapsedMs: elapsed, rate: external.rate,
-      supply: true, mode: this.catchupMode, recovering: this.missingMs >= CATCHUP.stallSeekMs });
+      supply: true, publisher: this.publisher, mode: this.catchupMode, recovering: this.missingMs >= CATCHUP.stallSeekMs });
     if (this.pendingSeek != null && (this.pendingSeek < earliest || this.pendingSeek > required ||
         this.missingMs >= CATCHUP.stallSeekMs)) {
       this.pendingSeek = null;
@@ -308,7 +315,7 @@ export class AlignEngine {
       freeze("frozen"); return;
     }
     if (this.pendingSeek != null || this.missingMs > 0) {
-      const gate = recoveryGate(this.stableMs, true, elapsed);
+      const gate = recoveryGate(this.stableMs, true, elapsed, this.pendingSeek == null ? this.missingMs : Infinity);
       this.stableMs = gate.stableMs;
       if (!gate.ready) { freeze("frozen", true); return; }
     }
@@ -330,6 +337,7 @@ export class AlignEngine {
       if (canvas.width !== buffer.width) canvas.width = buffer.width;
       if (canvas.height !== buffer.height) canvas.height = buffer.height;
       canvas.getContext("2d")!.drawImage(buffer, 0, 0);
+      this.paintedCanvases.add(canvas);
     }
     const advanced = this.tUs.value == null || T > this.tUs.value;
     this.tUs.value = T; // committed presentation time; overlays must never use targetUs

@@ -8,6 +8,8 @@ export const CATCHUP = {
   hardUs: 5_000_000,
   maxRate: 1.08,
   recoveryMs: 250,
+  transientMissMs: 100,
+  publisherReserveUs: 4_000_000,
   stallSeekMs: 2000,
   maxFrameErrorUs: 40_000,
 } as const;
@@ -22,6 +24,7 @@ export interface CatchupInput {
   supply: boolean;
   recovering?: boolean;
   mode?: CatchupMode;
+  publisher?: boolean;
 }
 export interface CatchupPlan { mode: CatchupMode; t: number | null; rate: number }
 export function planCatchup(i: CatchupInput): CatchupPlan {
@@ -29,11 +32,17 @@ export function planCatchup(i: CatchupInput): CatchupPlan {
   const wait: CatchupPlan = { mode: "wait", t: i.current, rate: 0 };
   if (!Number.isFinite(target) || target < i.from || !i.supply ||
       (i.current != null && target < i.current)) return wait;
-  if (i.current == null || i.current < i.from || target - i.current >= CATCHUP.hardUs || i.recovering) {
-    return { mode: "seek", t: target, rate: 0 };
+  const reserve = i.publisher ? CATCHUP.publisherReserveUs : 0;
+  if (i.current == null || i.current < i.from || target - i.current >= CATCHUP.hardUs + reserve || i.recovering) {
+    // Recovery must also leave cadence headroom; seeking to the ceiling would
+    // immediately recreate the stop/start cycle on the next segment boundary.
+    const seekTo = i.publisher && i.current != null ? Math.max(i.current, i.from, target - reserve) : target;
+    return { mode: "seek", t: seekTo, rate: 0 };
   }
   if (i.rate === 0) return wait; // authority freeze is not permission to catch up
-  const error = target - i.current;
+  // Complete HLS segments advance in steps. The publisher must not consume its
+  // cadence buffer by chasing each step; followers still chase the continuous master.
+  const error = target - i.current - reserve;
   const soft = error >= CATCHUP.softEnterUs || (i.mode === "soft" && error > CATCHUP.softExitUs);
   const base = Math.max(0, Math.min(CATCHUP.maxRate, i.rate));
   const rate = soft ? Math.min(CATCHUP.maxRate, base + Math.max(0.01, Math.min(0.08, error / 10_000_000))) : base;
@@ -42,13 +51,13 @@ export function planCatchup(i: CatchupInput): CatchupPlan {
 }
 
 /** Recovery requires consecutive successful candidate checks, not elapsed wall time alone. */
-export function recoveryGate(stableMs: number, available: boolean, elapsedMs: number) {
+export function recoveryGate(stableMs: number, available: boolean, elapsedMs: number, missingMs = Infinity) {
   const next = available ? stableMs + Math.max(0, Math.min(100, elapsedMs)) : 0;
-  return { stableMs: next, ready: next >= CATCHUP.recoveryMs };
+  return { stableMs: next, ready: available && (missingMs < CATCHUP.transientMissMs || next >= CATCHUP.recoveryMs) };
 }
 
 /** 30s safety plus segment cadence at startup; 1.2s covers 1.08x extrapolation and frame error. */
 export function publisherTarget(from: number, slowTo: number, floor: number | null, startup = true): number | null {
-  const target = slowTo - CATCHUP.backUs - (startup ? 3_000_000 : 1_200_000);
+  const target = slowTo - CATCHUP.backUs - (startup ? 5_000_000 : 1_200_000);
   return target >= from && target >= (floor ?? -Infinity) ? target : null;
 }
