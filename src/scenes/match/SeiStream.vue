@@ -17,6 +17,7 @@ const props = withDefaults(
     url: string;
     /** 对齐开关（配置 alignA/B）；关 → 父组件换 StreamFrame */
     enabled: boolean;
+    refreshNonce?: number;
     /** 是否按 4:3 裁切（导播端 true；裁判端 false 按原 16:9） */
     crop4to3?: boolean;
     /** 隐藏（等待信号占位；应急） */
@@ -38,22 +39,24 @@ const decodeErr = computed(() => alignEngine.health[props.side].decodeError);
 /** 本侧是否已真正上屏过一帧（用于决定舞台显示等待信号还是画面） */
 const presented = computed(() => alignEngine.presented[props.side]);
 
+let release: (() => void) | null = null;
 function refresh(): void {
   if (props.enabled && props.url) {
-    alignEngine.startStream(props.side, props.url);
-    if (!aligned.value) aligned.value = alignEngine.modeOf(props.side) === "aligned";
+    release = alignEngine.startStream(props.side, props.url);
+    aligned.value = alignEngine.modeOf(props.side) === "aligned";
   }
 }
-
-onMounted(() => {
-  refresh();            // 启动本侧权威流 + 定 aligned
-  alignEngine.start();  // 确保主循环运行（幂等）
+onMounted(() => { refresh(); alignEngine.start(); });
+watch(() => props.url, () => {
+  release?.();
+  release = null;
+  refresh();
 });
-
+watch(() => props.refreshNonce, () => alignEngine.restartStream(props.side));
 let unreg: (() => void) | null = null;
 onBeforeUnmount(() => {
   unreg?.();
-  if (props.enabled && props.url) alignEngine.stopStream(props.side);
+  release?.();
 });
 
 // 监听本侧对齐能力变化（isConfigSupported 异步探测后 mode 会翻转为 aligned）。

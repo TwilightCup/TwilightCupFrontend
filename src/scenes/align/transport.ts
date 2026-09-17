@@ -29,6 +29,7 @@ export interface RawSegment {
   /** 媒体形式：fmp4（LL-HLS 默认）、ts（MPEG-TS 分片）或 annexb（原始 ES 单拉） */
   fmt: "fmp4" | "annexb" | "ts";
   payload: Uint8Array;
+  discontinuity?: boolean;
   /** init 段携带：codec 与 description（avcC/hvcC），媒体段无关 */
   codec?: Codec;
   avcC?: Uint8Array | null;
@@ -58,18 +59,18 @@ export class HlsFrameSource implements FrameSource {
   constructor(opts: HlsSourceOptions) {
     this.harvester = new HlsHarvester(
       opts.url,
-      (buf, kind) => {
+      (buf, kind, meta) => {
         const fmt = detectContainer(buf);
         if (kind === "init") {
           // init（ftyp/moov）也是 fmp4：为后续媒体段提供 codec/description
           this.onSegment({ kind: "init", fmt: "fmp4", payload: buf });
         } else {
-          this.onSegment({ kind: "data", fmt, payload: buf });
+          this.onSegment({ kind: "data", fmt, payload: buf, discontinuity: meta?.discontinuity });
         }
       },
       {
         pollIntervalMs: opts.pollIntervalMs ?? 800,
-        followParts: true,
+        followParts: false,
         // 拉流失败（跨域/拒连/404）必须透传，让 UI 显示而不静默 → 避免永远"等待内容"
         onError: (e) => this.onErr(e),
       },

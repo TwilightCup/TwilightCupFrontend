@@ -27,9 +27,6 @@ export const DEFAULT_RATE: RateConfig = {
   catchUs: 15_000_000,
 };
 
-/** T 脱离缓冲深度阈值（µs）：落后超此量视为脱离（源瞬断/frontier 前跳），重锚到 required */
-const REANCHOR_US = 60_000_000; // 60s
-
 /** 2 倍速阶段：以 2x 推进，直到累计真实计数(catchRealMs)达到 catchUs 对应量或 T 到 required。 */
 export class RateController {
   private cfg: RateConfig;
@@ -42,6 +39,13 @@ export class RateController {
 
   constructor(cfg: Partial<RateConfig> = {}) {
     this.cfg = { ...DEFAULT_RATE, ...cfg };
+  }
+
+  checkpoint(): { tUs: number | null; speed: 1 | 2; burstLeftMs: number } {
+    return { tUs: this.tUs, speed: this.speed, burstLeftMs: this.burstLeftMs };
+  }
+  restore(state: ReturnType<RateController["checkpoint"]>): void {
+    this.tUs = state.tUs; this.speed = state.speed; this.burstLeftMs = state.burstLeftMs;
   }
 
   get ready(): boolean {
@@ -70,16 +74,6 @@ export class RateController {
       this.tUs = required;
       this.speed = 1;
       logT("init", `T 初始化 = required = ${(required / 1e6) % 10000}s（最慢前沿−30s）`);
-      return this.tUs;
-    }
-
-    // 脱离自愈：T 落后远超缓冲深度（如源瞬断/ gap 后前沿前跳）→ 重锚到 required，
-    // 否则 T 指向原始环已不存在的时刻 → 解码找不到帧 → 画面永久冻结
-    if (required - this.tUs > REANCHOR_US) {
-      logT("reanchor", `⚠ T 脱离自愈：drift=${((required - this.tUs) / 1e6).toFixed(1)}s > 60s → 重锚 T=required=${(required / 1e6) % 10000}s`);
-      this.tUs = required;
-      this.speed = 1;
-      this.burstLeftMs = 0;
       return this.tUs;
     }
 

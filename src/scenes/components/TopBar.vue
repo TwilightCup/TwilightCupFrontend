@@ -15,6 +15,7 @@
  * 数据只读 director store（hosted 模式 WS 由舞台根统一连）；赛事名组件内 REST
  * 拉取（SoonScene 同款两级回退）。mock 模式（WS 断）由父级传 mock 演示值。
  */
+import { alignEngine } from "@/scenes/align/useFrameAlign";
 import { computed, onMounted, ref, watch, useId } from "vue";
 import { api } from "@/api/client";
 import type { TournamentOut } from "@/api/types";
@@ -80,8 +81,8 @@ const eventName = computed(
 const matchTitle = computed(() => props.mock?.matchName ?? director.matchName);
 const nameA = computed(() => props.mock?.nameA ?? director.nameOf("A"));
 const nameB = computed(() => props.mock?.nameB ?? director.nameOf("B"));
-const winsA = computed(() => props.mock?.winsA ?? director.winsA);
-const winsB = computed(() => props.mock?.winsB ?? director.winsB);
+const winsA = computed(() => props.mock?.winsA ?? (alignEngine.enabled.value ? director.presentation?.winsA ?? 0 : director.winsA));
+const winsB = computed(() => props.mock?.winsB ?? (alignEngine.enabled.value ? director.presentation?.winsB ?? 0 : director.winsB));
 
 /** 指示器格数：WS threshold > REST win_threshold > 由 BO 推导；均未知则隐藏 */
 const pipCount = computed(() => {

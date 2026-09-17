@@ -9,7 +9,7 @@
  * （赛制 / 延迟）在 auth_ok 后拉 match_log 补全（首回合前日志不存在则忽略）。
  */
 import { defineStore } from "pinia";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 
 import { api } from "@/api/client";
 import {
@@ -30,6 +30,8 @@ import type { ServerMessage } from "@/ws/protocol";
 import { send } from "@/ws/protocol";
 import { ConnStatus, MatchSocket } from "@/ws/socket";
 import { useAuthStore } from "./auth";
+import { PresentationHistory } from "@/scenes/align/presentationHistory";
+import type { FrameAlignAnchor } from "@/scenes/align/externalClock";
 import { alignEngine } from "@/scenes/align/useFrameAlign";
 import {
   mergeStoredConfig,
@@ -197,6 +199,34 @@ export const useDirectorStore = defineStore("director", () => {
   const utcA = ref<UtcTimestamp | null>(null);
   const utcB = ref<UtcTimestamp | null>(null);
 
+  function broadcastSnapshot() {
+    return { phase: phase.value, currentRound: currentRound.value,
+      playerA: playerA.value, playerB: playerB.value,
+      winsA: winsA.value, winsB: winsB.value, lastResult: lastResult.value,
+      lastResultAt: lastResultAt.value, matchWinner: matchWinner.value,
+      aOnline: aOnline.value, bOnline: bOnline.value,
+      subsegmentGap: subsegmentGap.value, subsegmentGapAt: subsegmentGapAt.value,
+      liveTimeA: liveTimeA.value, liveTimeB: liveTimeB.value, draft: draft.value };
+  }
+  const emptyBroadcast = { ...broadcastSnapshot(), playerA: freshPlayer(), playerB: freshPlayer() };
+  const history = new PresentationHistory<ReturnType<typeof broadcastSnapshot>>();
+  const historyRevision = ref(0);
+  const liveBroadcast = computed(broadcastSnapshot);
+  watch(liveBroadcast, value => {
+    history.add(Date.now(), JSON.parse(JSON.stringify(value)) as ReturnType<typeof broadcastSnapshot>);
+    historyRevision.value++;
+  }, { deep: true, flush: "sync" });
+  function presentationAt(wallMs: number | null) {
+    void historyRevision.value;
+    return wallMs == null ? null : history.at(wallMs);
+  }
+  const presentation = computed(() => {
+    const T = alignEngine.tUs.value;
+    const frames = Object.values(alignEngine.sync.presentedRt).filter((x): x is number => x != null);
+    const wallMs = T == null ? null : Math.min(T, ...frames) / 1000;
+    return presentationAt(wallMs);
+  });
+
   socket.onStatusChange = (s) => {
     connStatus.value = s;
   };
@@ -229,6 +259,19 @@ export const useDirectorStore = defineStore("director", () => {
   function handle(msg: ServerMessage): void {
     switch (msg.type) {
       case "auth_ok":
+        if (matchId.value !== msg.match_id) {
+          history.clear();
+          historyRevision.value++;
+          if (matchId.value) alignEngine.resetSession();
+          phase.value = MatchPhase.IDLE; matchWinner.value = null; lastResultAt.value = null;
+          aOnline.value = bOnline.value = false;
+          currentRound.value = null;
+          playerA.value = freshPlayer(); playerB.value = freshPlayer();
+          winsA.value = winsB.value = 0; lastResult.value = null; draft.value = null;
+          clearRoundTelemetry();
+          history.clear(); // never retain a partially reset old-match snapshot
+          frameAlign.value = null; currentAlignSrc.value = null;
+        }
         seat.value = msg.seat;
         matchId.value = msg.match_id;
         accountId.value = msg.account_id;
@@ -393,7 +436,7 @@ export const useDirectorStore = defineStore("director", () => {
           // 并带 align_authority_src 指明该跟谁（晚连一致跟随）
           const s = msg.payload as { frame_align?: unknown; align_authority_src?: unknown } | undefined;
           const asrc = s?.align_authority_src;
-          if (typeof asrc === "string") currentAlignSrc.value = asrc;
+          if (typeof asrc === "string") { currentAlignSrc.value = asrc; alignEngine.selectAuthority(asrc); }
           const fa = s?.frame_align as
             | { t_us?: unknown; ready_a?: unknown; ready_b?: unknown }
             | undefined;
@@ -401,6 +444,7 @@ export const useDirectorStore = defineStore("director", () => {
         } else if (msg.action === "align_authority" && typeof msg.payload?.src === "string") {
           // 后端权威接任时广播该跟谁
           currentAlignSrc.value = msg.payload.src as string;
+          alignEngine.selectAuthority(currentAlignSrc.value);
         } else if (msg.action === "switch_scene") {
           currentSceneCmd.value = (msg.payload?.scene as string) ?? null;
         } else if (msg.action === "soon_set_target" && msg.payload?.target_ms) {
@@ -504,8 +548,7 @@ export const useDirectorStore = defineStore("director", () => {
   const remoteConfig = ref<Partial<DirectorConfig> | null>(null);
 
   /** 权威页（舞台）上报的最近一次帧对齐状态：统一虚拟时间 T + A/B 就绪 */
-  interface FrameAlignPayload {
-    t_us: number;
+  interface FrameAlignPayload extends FrameAlignAnchor {
     ready_a?: boolean;
     ready_b?: boolean;
     src?: string;
@@ -515,9 +558,9 @@ export const useDirectorStore = defineStore("director", () => {
    *  后端已只扇出权威的 frame_align，前端不再自己锁 src，避免拒绝后端合法接管的新权威。 */
   const currentAlignSrc = ref<string | null>(null);
   function applyFrameAlign(p: FrameAlignPayload): void {
-    frameAlign.value = { tUs: p.t_us, readyA: !!p.ready_a, readyB: !!p.ready_b };
-    // 观众页覆盖本地时钟到权威 T；权威页（舞台）自己推进，不覆盖（否则卡死）
-    alignEngine.setExternalTUs(p.t_us);
+    if (alignEngine.setExternalTUs(p.t_us, { ...p, src: p.src ?? currentAlignSrc.value ?? undefined })) {
+      frameAlign.value = { tUs: p.t_us, readyA: !!p.ready_a, readyB: !!p.ready_b };
+    }
   }
 
   /**
@@ -568,7 +611,7 @@ export const useDirectorStore = defineStore("director", () => {
   ): boolean {
     // 已结束比赛仅锁定会改变比赛/直播配置的操作；场景切换只是舞台展示控制，
     // 仍应允许导播在结束后切换查看比赛详情 / 图池 / 赛程图等回放画面。
-    if (matchEnded.value && action !== "switch_scene") return false;
+    if (matchEnded.value && action !== "switch_scene" && action !== "frame_align") return false;
     // 同步本地状态（config_update 无需：发送方本地已保存，后端广播排除发送者）
     if (action === "switch_scene") {
       currentSceneCmd.value = (payload?.scene as string) ?? null;
@@ -600,12 +643,17 @@ export const useDirectorStore = defineStore("director", () => {
   /** 节流广播虚拟时间 T + A/B 就绪（帧对齐跨文档一致性；发送者=舞台被后端排除不收到自己）。
    *  由权威页（舞台）调用；观众页不调只收。ready 反映舞台真实上屏态，观众就绪胶囊据此显示。 */
   let lastAlignT = 0;
+  let alignSeq = 0;
   function sendFrameAlign(tUs: number, readyA?: boolean, readyB?: boolean, src = ""): void {
-    if (matchEnded.value) return;
-    const now = Date.now();
+    const now = performance.now();
     if (now - lastAlignT < 400) return; // ~2.5Hz 足够（帧锁同帧由 30s 缓冲兜底）
     lastAlignT = now;
-    sendDirectorCommand("frame_align", { t_us: tUs, ready_a: readyA ?? false, ready_b: readyB ?? false, src });
+    // Never queue time anchors: replaying old playback positions after reconnect is unsafe.
+    socket.send(send.directorCommand("frame_align", {
+      t_us: tUs, ready_a: readyA ?? false, ready_b: readyB ?? false, src,
+      seq: ++alignSeq, rate: alignEngine.playback.speed,
+      paused: alignEngine.sync.state !== "playing",
+    }));
   }
 
   function nameOf(side: "A" | "B"): string {
@@ -643,6 +691,8 @@ export const useDirectorStore = defineStore("director", () => {
   const stageUrl = computed(() => scenePageUrl("stage.html"));
 
   return {
+    // 接收时间展示历史（常驻 store，不随场景卸载）
+    presentation, presentationAt, liveBroadcast, emptyBroadcast, currentAlignSrc,
     // 连接
     connStatus,
     seat,

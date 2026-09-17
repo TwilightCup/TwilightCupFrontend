@@ -20,9 +20,11 @@ export interface SeiFrameInfo {
 export interface Fmp4Sample {
   payload: Uint8Array;
   isKey: boolean;
+  trackId?: number;
 }
 
 export interface Fmp4Result {
+  videoTrackId?: number;
   codec: Codec | null;
   samples: Fmp4Sample[];
   /** description 来源（WebCodecs 需要）；缺则依赖带内参数集 */
@@ -36,6 +38,10 @@ export interface HlsSegmentItem {
   uri: string;
   kind: HlsItemKind;
   duration: number;
+  sequence: number;
+  discontinuity: number;
+  gap: boolean;
+  initUri: string | null;
 }
 
 export interface HlsPlaylist {
@@ -103,6 +109,12 @@ export interface StreamHealth {
   resyncGap: number;
   /** 因解码报错触发 resync 的次数（坏流/参数变化） */
   resyncErr: number;
+  rawBytes: number;
+  continuousFromUs: number | null;
+  continuousToUs: number | null;
+  decodedFromUs: number | null;
+  decodedToUs: number | null;
+  memoryBlocked: boolean;
 }
 
 export function emptyHealth(): StreamHealth {
@@ -133,6 +145,12 @@ export function emptyHealth(): StreamHealth {
     segAuth: 0,
     resyncGap: 0,
     resyncErr: 0,
+    rawBytes: 0,
+    continuousFromUs: null,
+    continuousToUs: null,
+    decodedFromUs: null,
+    decodedToUs: null,
+    memoryBlocked: false,
   };
 }
 

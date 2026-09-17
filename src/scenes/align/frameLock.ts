@@ -22,14 +22,17 @@ export interface Decoder {
   /** 异步探测 + 配置解码器；返回是否可用（能力支持 & 配置成功） */
   configure(codecStr: string, description: Uint8Array | null): Promise<boolean>;
   /** 顺序喂一个样本；解码回调 onFrame(rtUs, isKey, videoFrame) */
-  decodeSample(rtUs: number, isKey: boolean, payload: Uint8Array): void;
+  decodeSample(rtUs: number, isKey: boolean, payload: Uint8Array): boolean;
   flush(): Promise<void>;
   reset(): void;
   close(): void;
 }
 
-/** 原始(待解码)样本——按 rtUs 升序的 raw 环 */
-interface RawSample { rtUs: number; isKey: boolean; payload: Uint8Array }
+/** Encoded samples stay in container/decode order, including reordered B frames. */
+interface RawSample {
+  rtUs: number; isKey: boolean; payload: Uint8Array;
+  epoch: number; codec: Codec; description: Uint8Array | null;
+}
 
 /** avcC → `avc1.PPCCLL`（profile/compat/level 取 avcC[1..3]） */
 function avc1Codec(avcC: Uint8Array): string {
@@ -87,98 +90,66 @@ function extractInbandAvcC(payload: Uint8Array): Uint8Array | null {
  */
 class WebCodecsDecoder implements Decoder {
   private dec: globalThis.VideoDecoder | null = null;
-  private onFrame: (rtUs: number, isKey: boolean, frame: globalThis.VideoFrame) => void;
-  private onErr?: (e: unknown) => void;
-  private pendingRt: number[] = [];
-  private pendingKey: boolean[] = [];
+  private generation = 0;
+  private pending = new Map<number, boolean>();
   isDecoding = false;
-
   constructor(
-    onFrame: (rtUs: number, isKey: boolean, frame: globalThis.VideoFrame) => void,
-    onErr?: (e: unknown) => void,
-  ) {
-    this.onFrame = onFrame;
-    this.onErr = onErr;
-  }
-
-  /** 解码器待处理队列深度（诊断用 qc） */
-  get queueSize(): number {
-    return this.dec?.decodeQueueSize ?? 0;
-  }
-
-  async configure(codecStr: string, description: Uint8Array | null): Promise<boolean> {
+    private onFrame: (rtUs: number, isKey: boolean, frame: globalThis.VideoFrame) => void,
+    private onErr?: (e: unknown) => void,
+  ) {}
+  get queueSize(): number { return this.dec?.decodeQueueSize ?? 0; }
+  get pendingSize(): number { return this.pending.size; }
+  async configure(codec: string, description: Uint8Array | null): Promise<boolean> {
     this.close();
-    if (typeof VideoDecoder === "undefined" || typeof VideoEncoder === "undefined") return false;
-    let support: globalThis.VideoDecoderSupport;
+    const generation = this.generation;
+    if (typeof VideoDecoder === "undefined") return false;
+    const config: globalThis.VideoDecoderConfig = { codec };
+    if (description?.length) config.description = description;
     try {
-      const probe: globalThis.VideoDecoderConfig = { codec: codecStr };
-      if (description && description.length > 0) probe.description = description;
-      support = await VideoDecoder.isConfigSupported(probe);
-      if (!support.supported) return false;
-    } catch {
-      return false;
-    }
-    try {
+      const support = await VideoDecoder.isConfigSupported(config);
+      if (generation !== this.generation || !support.supported) return false;
       this.dec = new VideoDecoder({
         output: (frame) => {
-          const rt = this.pendingRt[0];
-          const key = this.pendingKey[0];
-          this.pendingRt.shift();
-          this.pendingKey.shift();
-          if (rt !== undefined) this.onFrame(rt, key, frame);
-          else frame.close();
+          if (generation !== this.generation) { frame.close(); return; }
+          const key = this.pending.get(frame.timestamp);
+          this.pending.delete(frame.timestamp);
+          if (key === undefined) { frame.close(); return; }
+          this.onFrame(frame.timestamp, key, frame);
         },
-        error: (e) => {
-          const m = e instanceof Error ? e.message : String(e ?? "VideoDecoder error");
-          this.onErr?.(new Error(m));
-          // 报错后 codec 可能已进入 closed 态，再 close() 会抛 InvalidStateError——try 兜底
-          try { this.dec?.close(); } catch { /* already closed */ }
-          this.dec = null;
-          this.isDecoding = false;
+        error: (error) => {
+          if (generation !== this.generation) return;
+          this.close();
+          this.onErr?.(error);
         },
       });
-      const cfg: globalThis.VideoDecoderConfig = { codec: codecStr };
-      if (description && description.length > 0) cfg.description = description;
-      void support;
-      this.dec.configure(cfg);
+      this.dec.configure(config);
       this.isDecoding = true;
       return true;
-    } catch {
-      this.isDecoding = false;
-      this.dec = null;
+    } catch (error) {
+      if (generation === this.generation) { this.close(); this.onErr?.(error); }
       return false;
     }
   }
-
-  decodeSample(rtUs: number, isKey: boolean, payload: Uint8Array): void {
-    if (!this.dec || !this.isDecoding) return;
-    this.pendingRt.push(rtUs);
-    this.pendingKey.push(isKey);
+  decodeSample(rtUs: number, isKey: boolean, payload: Uint8Array): boolean {
+    if (!this.dec || !this.isDecoding) return false;
+    this.pending.set(rtUs, isKey);
     try {
-      this.dec.decode(new EncodedVideoChunk({
-        type: isKey ? "key" : "delta",
-        timestamp: rtUs,
-        data: payload,
-      }));
-    } catch {
-      // 队列满/异常包：丢样本
-      this.pendingRt.pop();
-      this.pendingKey.pop();
+      this.dec.decode(new EncodedVideoChunk({ type: isKey ? "key" : "delta", timestamp: rtUs, data: payload }));
+      return true;
+    } catch (error) {
+      this.close(); // preserve neither stale metadata nor a damaged reference chain
+      this.onErr?.(error);
+      return false;
     }
   }
-
-  async flush(): Promise<void> {
-    await this.dec?.flush();
-  }
-  reset(): void {
-    try { this.dec?.reset(); } catch { /* noop */ }
-  }
+  async flush(): Promise<void> { await this.dec?.flush(); }
+  reset(): void { this.close(); }
   close(): void {
-    try { this.dec?.close(); } catch { /* noop */ }
+    this.generation++;
+    try { this.dec?.close(); } catch { /* already closed */ }
     this.dec = null;
     this.isDecoding = false;
-    this.pendingRt = [];
-    this.pendingKey = [];
+    this.pending.clear();
   }
 }
 
@@ -188,6 +159,8 @@ export interface FrameLockStreamOptions {
   onModeChange?: (mode: "aligned" | "off") => void;
   /** 原始采样环的最大 rt 跨度（µs）；默认 10 分钟 */
   rawSpanUs?: number;
+  maxRawBytes?: number;
+  maxRawSamples?: number;
 }
 
 /** 单路帧锁流。模式：aligned | off（能力不可用/无有效解码 → off，外层回退 MSE） */
@@ -195,7 +168,21 @@ export class FrameLockStream {
   private source: FrameSource;
   private decoder: WebCodecsDecoder;
   queue: FrameQueue;
-  private raw: RawSample[] = []; // rtUs 升序
+  private raw: RawSample[] = []; // decode order
+  private rawBytes = 0;
+  private frameBytes = 1920 * 1080 * 4;
+  private videoTrackId: number | undefined;
+  private targetUs: number | null = null;
+  private stopped = false;
+  private generation = 0;
+  private ingestEpoch = 0;
+  private decodedEpoch = -1;
+  private ingestBroken = false;
+  private continuousFromUs: number | null = null;
+  private continuousToUs: number | null = null;
+  private lastInputSeq: number | null = null;
+  private lastInputRt: number | null = null;
+  private memoryBlocked = false;
   private codec: Codec = "h264";
   private description: Uint8Array | null = null;
   private ready = false;
@@ -224,12 +211,16 @@ export class FrameLockStream {
     this.source = source;
     this.decoder = new WebCodecsDecoder(
       (rtUs, isKey, frame) => {
+        if (this.stopped) { frame.close(); return; }
+        this.frameBytes = Math.max(1, frame.displayWidth * frame.displayHeight * 4);
+        this.decodeError = null;
         this.decOutput++; // 解码器确实产出了帧
         // 去重：该 rt 已有帧 → 新的 VideoFrame 必须 close，否则 GC 未 close 泄漏
         if (this.queue.has(rtUs)) {
           try { frame.close(); } catch { /* noop */ }
           return;
         }
+        if (this.targetUs != null && rtUs < this.targetUs - 150_000) { frame.close(); return; }
         this.queue.add({ rtUs, isKey, handle: frame });
       },
       (e) => {
@@ -246,45 +237,66 @@ export class FrameLockStream {
       const f = e.handle as globalThis.VideoFrame | null;
       try { f?.close(); } catch { /* noop */ }
     });
-    this.source.setOnSegment((seg) => void this.onSegment(seg));
-    this.source.setOnError((e) => { this.lastErr = e; this.opts.onError?.(e); });
+    this.source.setOnSegment((seg) => { if (!this.stopped) this.onSegment(seg); });
+    this.source.setOnError((e) => { if (this.stopped) return; this.lastErr = e; this.opts.onError?.(e); });
   }
 
   start(): void {
     this.source.start();
   }
   stop(): void {
+    this.stopped = true;
+    this.generation++;
     this.source.stop();
     this.decoder.close();
     this.queue.clear();
+    this.raw = [];
+    this.rawBytes = 0;
   }
 
-  private async onSegment(seg: RawSegment): Promise<void> {
+  private onSegment(seg: RawSegment): void {
     try {
       // 携带 codec/description（init 或上层已知）
+      if (this.memoryBlocked) return;
       if (seg.codec) this.codec = seg.codec;
       if (seg.avcC) this.description = seg.avcC;
       if (seg.hvcC) this.description = seg.hvcC;
 
       if (seg.fmt === "fmp4") {
         const r = extractFmp4Samples(seg.payload);
+        if (r.videoTrackId != null) this.videoTrackId = r.videoTrackId;
         if (r.codec) this.codec = r.codec;
         if (r.avcC) this.description = r.avcC;
         if (r.hvcC) this.description = r.hvcC;
+        if (seg.discontinuity) this.breakInput();
         let seiHits = 0;
-        for (const s of r.samples) {
-          const info = this.onSample(s);
-          if (!info) continue; // 无 SEI 戳的样本不参与（没有 rt 锚也无需呈现）
+        for (const sample of r.samples) {
+          if (this.videoTrackId != null && sample.trackId !== this.videoTrackId) continue;
+          const info = this.onSample(sample);
+          if (!info) { this.breakInput(); continue; }
+          const rtUs = Number(info.realtime_us);
+          // Sequence is encoder output order, not presentation order. Never sort raw by rt.
+          if (this.lastInputSeq === info.seq && this.lastInputRt === rtUs) continue;
+          if (this.lastInputSeq != null && ((info.seq - this.lastInputSeq) >>> 0) !== 1) this.breakInput();
+          this.lastInputSeq = info.seq;
+          this.lastInputRt = rtUs;
+          const isKey = sample.isKey || info.keyframe;
+          if (this.ingestBroken && !isKey) continue;
+          if (isKey && (this.ingestBroken || this.continuousFromUs == null)) {
+            this.continuousFromUs = rtUs;
+            this.continuousToUs = rtUs;
+            this.ingestBroken = false;
+          }
+          if (this.continuousFromUs == null) continue;
+          this.continuousToUs = Math.max(this.continuousToUs ?? rtUs, rtUs);
           seiHits++;
-          // 延迟解码：到货只入原始环（10min 字节级缓存），解码由 pump(T) 按虚拟时间节流
-          this.raw.push({ rtUs: Number(info.realtime_us), isKey: s.isKey || info.keyframe, payload: new Uint8Array(s.payload) });
+          this.raw.push({ rtUs, isKey, payload: sample.payload, epoch: this.ingestEpoch,
+            codec: this.codec, description: this.description });
+          this.rawBytes += sample.payload.byteLength;
         }
-        logSeg("seg", `${seg.kind} ${seg.payload.length}B → 样本${r.samples.length} SEI命中${seiHits} 原始环${this.raw.length} 前沿${((this.lastArrivedRtUs ?? 0) / 1e6) % 10000}s`);
         this.trimRaw(this.lastArrivedRtUs ?? 0);
-        if (r.samples.length > 0) {
-          this.hasContent = true;
-          this.st.segs++;
-        }
+        logSeg("seg", `${seg.kind} samples=${r.samples.length} SEI=${seiHits} raw=${this.raw.length}`);
+        if (r.samples.length > 0) { this.hasContent = true; this.st.segs++; }
         return;
       }
       // TS（通用 HLS，MPEG-TS 分片）：先重装 PES → Annex-B ES，再解析 SEI 锚
@@ -306,15 +318,18 @@ export class FrameLockStream {
     }
   }
 
-  private async configureDecoder(): Promise<void> {
-    const avcC = this.codec === "h264" ? this.description : null;
-    const hvcC = this.codec === "hevc" ? this.description : null;
-    const codecStr = this.codec === "h264"
+  private async configureDecoder(codec: Codec, description: Uint8Array | null): Promise<void> {
+    const generation = this.generation;
+    const avcC = codec === "h264" ? description : null;
+    const hvcC = codec === "hevc" ? description : null;
+    const codecStr = codec === "h264"
       ? (avcC ? avc1Codec(avcC) : "avc1.42E01F")
       : (hvcC ? (hvc1Codec(hvcC) ?? "hvc1.1.6.L93.B0") : "hvc1.1.6.L93.B0");
     // 关键：AVCC 需带 avcC/hvcC description；Annex-B 起止需去掉 description（数据按起始码喂）。
-    const useDesc = this.encapsulation === "annexb" ? null : this.description;
+    const useDesc = this.encapsulation === "annexb" ? null : description;
     const ok = await this.decoder.configure(codecStr, useDesc);
+    if (this.stopped || generation !== this.generation) return;
+    this.pendingConfigure = false;
     if (ok) {
       this.mode = "aligned";
       this.ready = true;
@@ -353,7 +368,7 @@ export class FrameLockStream {
       }
     }
     this.st.lastRtUs = rtUs;
-    this.lastArrivedRtUs = rtUs;
+    this.lastArrivedRtUs = Math.max(this.lastArrivedRtUs ?? rtUs, rtUs);
     return info;
   }
 
@@ -402,119 +417,117 @@ export class FrameLockStream {
       segAuth: this.source.harvesterStats().authFail,
       resyncGap: this.resyncGap,
       resyncErr: this.resyncErr,
+      rawBytes: this.rawBytes,
+      continuousFromUs: this.continuousFromUs,
+      continuousToUs: this.continuousToUs,
+      decodedFromUs: this.queue.stats().backUs,
+      decodedToUs: this.queue.frontier(),
+      memoryBlocked: this.memoryBlocked,
     };
   }
 
+  private breakInput(): void {
+    if (!this.ingestBroken) { this.ingestEpoch++; this.resyncGap++; }
+    this.ingestBroken = true;
+    this.continuousFromUs = null;
+    this.continuousToUs = null;
+  }
+
   private trimRaw(frontUs: number): void {
-    const minUs = frontUs - this.rawSpanUs;
-    while (this.raw.length && this.raw[0]!.rtUs < minUs) this.raw.shift();
+    // Only evict already-consumed GOPs, never the GOP required to decode the target.
+    const protectedKey = this.targetUs == null ? 0 : Math.max(0, this.findStartKeyframe(this.targetUs));
+    const limit = Math.min(this.decPos, protectedKey);
+    const maxBytes = this.opts.maxRawBytes ?? 512 * 1024 * 1024;
+    const maxSamples = this.opts.maxRawSamples ?? 72_000;
+    let remove = 0, bytes = this.rawBytes;
+    while (remove < limit && (this.raw[remove]!.rtUs < frontUs - this.rawSpanUs ||
+      bytes > maxBytes || this.raw.length - remove > maxSamples)) {
+      bytes -= this.raw[remove++]!.payload.byteLength;
+    }
+    if (remove) { this.raw.splice(0, remove); this.decPos -= remove; this.rawBytes = bytes; }
+    if (this.rawBytes > maxBytes || this.raw.length > maxSamples) {
+      // Explicit resource stop: do not silently discard unplayed target media.
+      this.memoryBlocked = true;
+      this.source.stop();
+      this.decodeError = "缓存达到预算，收片已停止";
+      this.opts.onError?.(new Error("对齐缓存达到内存预算；已停止收片，请刷新或降低码率"));
+    }
   }
 
-  /** 由权威调度每帧调用：先按虚拟时间 T 把该解的解码出来（延迟解码），再推进队列淘汰旧帧 */
   advance(targetUs: number): void {
-    this.pump(targetUs);
+    this.targetUs = targetUs;
     this.queue.advance(targetUs);
+    this.pump(targetUs);
+    this.trimRaw(this.lastArrivedRtUs ?? 0);
   }
 
-  // ---- 延迟解码：解码器只喂 T 附近的原始样本（上屏帧 rt≈T，比前沿落后 30s），
-  //      解出的帧进小窗口队列；原始环按 10min 缓存。避免"解码即上屏被 advance 全丢"。----
-  private decPos = 0; // raw 环里下一个要喂给解码器的样本下标
+  private decPos = 0;
   private pendingConfigure = false;
   private lastFedRtUs: number | null = null;
-  /** 断流/解码报错后需要等下一个关键帧重同步 */
   private needKey = false;
-  private resyncCount = 0;
-  /** 断流/解码重同步累计（监控用：上升 = 断流反复） */
   resyncs = 0;
-  /** resync 细分：因跳段（分片洞）触发 vs 因解码报错触发（指标行区分缺段/坏流） */
   private resyncGap = 0;
   private resyncErr = 0;
-  /** 解码器累计输出帧数（监控：0=从未产帧） */
   decOutput = 0;
-  /** 判定跳段（断流丢分片等）的 rt 间隔阈值（µs）——0.2s 抓更小的孔洞 */
-  private static readonly GAP_US = 200_000;
-  /** 断流重同步后清零解码错误提示 */
-  private resynced = false;
 
-  /** T 之前最近的可用关键帧下标（解码需从关键帧起），无则 -1 */
   private findStartKeyframe(targetUs: number): number {
     let idx = -1;
     for (let i = 0; i < this.raw.length; i++) {
-      if (this.raw[i]!.rtUs > targetUs) break;
-      if (this.raw[i]!.isKey) idx = i;
+      const s = this.raw[i]!;
+      if (s.isKey && s.rtUs <= targetUs) idx = i;
     }
-    if (idx >= 0) return idx;
-    for (let i = 0; i < this.raw.length; i++) if (this.raw[i]!.isKey) return i;
-    return -1;
+    return idx;
   }
 
-  /** 把 raw 里 rtUs ≤ targetUs+lookahead 的样本顺序喂解码器（首次从 T 前关键帧起播） */
   private pump(targetUs: number): void {
-    const lookaheadUs = 4_000_000; // T 之后预解 4s（给 nearest 留富余）
+    if (this.stopped || this.pendingConfigure) return;
     if (!this.encapsulation) {
       const start = this.findStartKeyframe(targetUs);
       if (start < 0) return;
       this.decPos = start;
+      this.needKey = true;
       this.encapsulation = detectEncapsulation(this.raw[start]!.payload);
-      logDec("first", `首解：raw[${start}] rt=${(this.raw[start]!.rtUs / 1e6) % 10000}s T=${(targetUs / 1e6) % 10000}s 封装=${this.encapsulation}`);
-      this.pendingConfigure = true;
-      void this.configureDecoder(); // mode/ready 异步落定
-      return;
     }
-    if (this.pendingConfigure) {
-      if (this.mode !== "aligned" || !this.ready) return;
-      this.pendingConfigure = false;
-      if (this.resynced) { this.resynced = false; this.decodeError = null; }
-    }
-    // 解码背压：decodeQueueSize 满则等，避免一次喂上千 chunk → decode 队列爆满抛异常被静默丢帧
-    const MAX_DECODE_QUEUE = 12;
-    const t0 = this.decPos;
     let fed = 0;
-    let blockedByQueue = false;
-    while (
-      this.decPos < this.raw.length &&
-      this.raw[this.decPos]!.rtUs <= targetUs + lookaheadUs &&
-      this.decoder.queueSize < MAX_DECODE_QUEUE
-    ) {
-      const s = this.raw[this.decPos]!;
-      // 断流/跳段（间隔超 GAP_US）→ 标记需要到下一个关键帧重同步
-      if (this.lastFedRtUs !== null && s.rtUs - this.lastFedRtUs > FrameLockStream.GAP_US) {
-        this.needKey = true;
-        this.resyncGap++; // 细分计数：跳段（分片洞）引起的 resync（指标行显示）
-        logResync("gap", `跳段检测：上帧${(this.lastFedRtUs / 1e6) % 10000}s → 下帧${(s.rtUs / 1e6) % 10000}s（差${((s.rtUs - this.lastFedRtUs) / 1e6).toFixed(2)}s > 0.2s）→ 等关键帧重同步`);
-      }
+    while (this.decPos < this.raw.length && this.decoder.queueSize < 12 &&
+      this.decoder.pendingSize < 32 && this.queue.length < 96 && this.queue.bytes + (this.decoder.pendingSize + 1) * this.frameBytes <= 128 * 1024 * 1024) {
+      const sample = this.raw[this.decPos]!;
+      if (sample.rtUs > targetUs + 250_000) break;
+      if (sample.epoch !== this.decodedEpoch) this.needKey = true;
       if (this.needKey) {
-        if (!s.isKey) { this.decPos++; continue; } // 跳过到关键帧（无触发不硬喂）
-        // 到关键帧 → 重置解码器重配（从干净点起播）；若带内能取到新 SPS/PPS 用新 description，
-        // 应对编码器中途改参数/丢参数。注意：绝不强制硬喂非关键帧——遇到解不动的坏区
-        // 持续跳到下一个关键帧（宁可该区不呈现也不反复报错风暴）
-        this.resyncCount++;
-        this.resyncs++;
-        logResync("resync", `#${this.resyncs} 到关键帧 rt=${(s.rtUs / 1e6) % 10000}s 重配解码器（坏区跳过 ${this.decPos - t0} 样本）`);
+        if (!sample.isKey) { this.decPos++; continue; }
+        this.generation++;
         this.decoder.close();
-        if (this.encapsulation === "avcc") {
-          const fresh = extractInbandAvcC(s.payload);
-          if (fresh && fresh.length > 7) this.description = fresh;
-        }
+        this.encapsulation = detectEncapsulation(sample.payload);
+        const description = sample.codec === "h264" && this.encapsulation === "avcc"
+          ? extractInbandAvcC(sample.payload) ?? sample.description : sample.description;
+        this.decodedEpoch = sample.epoch;
         this.pendingConfigure = true;
-        this.resynced = true;
-        void this.configureDecoder();
         this.needKey = false;
-        this.lastFedRtUs = null;
-        break; // 配置异步，下一轮 pump 再喂本关键帧
+        this.ready = false;
+        this.resyncs++;
+        void this.configureDecoder(sample.codec, description);
+        break;
       }
-      this.lastFedRtUs = s.rtUs;
-      this.resyncCount = 0; // 成功喂入 → 脱离坏区，重置 resync 计数
+      if (!this.ready) break; // unsupported config: explicit waiting, no silent consumption
+      if (!this.decoder.decodeSample(sample.rtUs, sample.isKey, sample.payload)) {
+        // Failed sample cannot be retried as delta against a new decoder.
+        this.decPos++;
+        this.needKey = true;
+        this.ready = false;
+        break;
+      }
+      this.lastFedRtUs = sample.rtUs;
       this.decPos++;
       fed++;
-      this.decoder.decodeSample(s.rtUs, s.isKey, s.payload);
     }
-    if (this.decPos < this.raw.length && this.raw[this.decPos]!.rtUs <= targetUs + lookaheadUs) {
-      blockedByQueue = true; // while 因队列满退出（还有该喂的没喂）
-    }
-    if (fed > 0 || blockedByQueue) {
-      logDec("pump", `T=${(targetUs / 1e6) % 10000}s 喂${fed}（${t0}→${this.decPos}/${this.raw.length}）出${this.decOutput} 队列${this.queue.length} qc${this.decoder.queueSize}${blockedByQueue ? " ⏸背压等消化" : ""}`);
-    }
+    if (fed) logDec("pump", `T=${targetUs} fed=${fed} pos=${this.decPos} decoded=${this.decOutput}`);
+  }
+
+  /** Continuous encoded coverage since the last loss; excludes undecodable deltas. */
+  coverage(): { from: number; to: number } | null {
+    return this.continuousFromUs == null || this.continuousToUs == null ? null
+      : { from: this.continuousFromUs, to: this.continuousToUs };
   }
 
   /** 本路最前已到货 rt（µs）；无内容 null */
@@ -524,7 +537,7 @@ export class FrameLockStream {
 
   /** 取最接近 T 的已解帧句柄 */
   nearest(targetUs: number): unknown | null {
-    return this.queue.nearest(targetUs)?.handle ?? null;
+    return this.queue.nearest(targetUs, 40_000)?.handle ?? null;
   }
 
   get readyState(): boolean {

@@ -38,28 +38,35 @@ import SoonScene from "@/scenes/soon/SoonScene.vue";
 
 const params = useSceneParams();
 const director = useDirectorStore();
-const { config: alignCfg, load: loadCfg } = useDirectorConfig();
+const { config: alignCfg, load: loadCfg, refresh: refreshCfg } = useDirectorConfig();
 
 /** 后台预载：舞台根把 A/B 对齐流常驻拉起+解码（不论当前在哪场景），
  *  切到比赛场景时 SeiStream 直接画已解帧 → 秒切不重缓冲。alignEngine 持常驻引用，
  *  SeiStream 卸载只减自身计数，流不会被停。 */
+const preloadRelease: Partial<Record<Side, () => void>> = {};
 const preloaded = reactive<Record<Side, string>>({ A: "", B: "" });
 // 舞台即对齐权威：自己推进虚拟时间 T 并发广播；控制台/预览读广播的 T（见 store.applyFrameAlign）
-alignEngine.setAuthority(true);
+const alignSrcId = Math.random().toString(36).slice(2);
+watch(() => director.currentAlignSrc, src => {
+  alignEngine.setAuthority(!src || src === alignSrcId);
+}, { immediate: true });
 
 function ensureAlignPreload(): void {
+  alignEngine.setRequiredSides((["A", "B"] as Side[]).filter(side =>
+    side === "A" ? alignCfg.alignA && !!alignCfg.hlsA : alignCfg.alignB && !!alignCfg.hlsB));
   for (const side of ["A", "B"] as Side[]) {
     const url = side === "A" ? alignCfg.hlsA : alignCfg.hlsB;
     const on = side === "A" ? alignCfg.alignA : alignCfg.alignB;
     if (on && url) {
       // 换源/首启：同源直接复用
       if (preloaded[side] !== url) {
-        if (preloaded[side]) alignEngine.stopStream(side);
+        preloadRelease[side]?.();
         preloaded[side] = url;
-        alignEngine.startStream(side, url);
+        preloadRelease[side] = alignEngine.startStream(side, url);
       }
     } else if (preloaded[side]) {
-      alignEngine.stopStream(side);
+      preloadRelease[side]?.();
+      delete preloadRelease[side];
       preloaded[side] = "";
     }
   }
@@ -69,19 +76,26 @@ function ensureAlignPreload(): void {
 // 作为对齐权威持续广播统一虚拟时间 T + A/B 就绪（节流由 store.sendFrameAlign 控制），
 // 供控制台/预览四路同一 T、就绪反映舞台真实态；后端排除发送方，舞台自己不进回环。
 // src=本文档唯一 id：多个舞台并存时观众页只跟随第一个/当前权威的 T，避免两套 T 对撞。
-const alignSrcId = Math.random().toString(36).slice(2);
-watch(
-  () => alignEngine.tUs.value,
-  (t) => {
-    if (t != null) director.sendFrameAlign(t, alignEngine.presented.A, alignEngine.presented.B, alignSrcId);
-  },
-);
+let alignHeartbeat: ReturnType<typeof setInterval> | null = null;
+onMounted(() => {
+  alignHeartbeat = setInterval(() => {
+    const t = alignEngine.tUs.value;
+    if (t != null && (!director.currentAlignSrc || director.currentAlignSrc === alignSrcId)) {
+      director.sendFrameAlign(t, alignEngine.presented.A, alignEngine.presented.B, alignSrcId);
+    }
+  }, 400);
+});
+let loadedMatch = "";
 
 watch(
   [() => director.matchId, () => director.remoteConfig],
   ([mid]) => {
     if (!mid) return;
-    loadCfg(mid, params); // URL > localStorage 并入；remoteConfig 已由 store mergeStoredConfig 落库
+    if (loadedMatch !== mid) {
+      loadCfg(mid, params);
+      loadedMatch = mid;
+      preloaded.A = preloaded.B = "";
+    } else refreshCfg(mid);
     ensureAlignPreload();
   },
   { immediate: true },
@@ -149,6 +163,9 @@ onMounted(() => {
 onUnmounted(() => {
   unwatchCmd?.();
   unwatchStorage?.();
+  if (alignHeartbeat) clearInterval(alignHeartbeat);
+  for (const side of ["A", "B"] as Side[]) preloadRelease[side]?.();
+  alignEngine.setAuthority(false);
   director.disconnect();
 });
 

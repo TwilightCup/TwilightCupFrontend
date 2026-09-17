@@ -13,11 +13,17 @@ export function parseM3u8(text: string, base: string): HlsPlaylist {
   const items: HlsSegmentItem[] = [];
   const lines = text.split(/\r?\n/);
   let pendingDur: number | null = null;
+  let sequence = 0, discontinuity = 0;
+  let gap = false;
   let bestVariant: { uri: string; score: number } | null = null;
   const resolve = (u: string) => new URL(u, base).href;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!.trim();
     if (!line || line.startsWith("#EXT-X-VERSION")) continue;
+    if (line.startsWith("#EXT-X-MEDIA-SEQUENCE:")) { sequence = Number(line.split(":")[1]); continue; }
+    if (line.startsWith("#EXT-X-DISCONTINUITY-SEQUENCE:")) { discontinuity = Number(line.split(":")[1]); continue; }
+    if (line === "#EXT-X-DISCONTINUITY") { discontinuity++; continue; }
+    if (line === "#EXT-X-GAP") { gap = true; continue; }
     if (line.startsWith("#EXT-X-MAP:")) {
       const m = line.match(/URI="([^"]+)"/);
       if (m) init.uri = resolve(m[1]!);
@@ -31,7 +37,7 @@ export function parseM3u8(text: string, base: string): HlsPlaylist {
     if (line.startsWith("#EXT-X-PART:")) {
       const m = line.match(/URI="([^"]+)"/);
       const d = line.match(/DURATION=([0-9.]+)/);
-      if (m) items.push({ uri: resolve(m[1]!), kind: "part", duration: d ? parseFloat(d[1]!) : 0 });
+      if (m) items.push({ uri: resolve(m[1]!), kind: "part", duration: d ? parseFloat(d[1]!) : 0, sequence, discontinuity, gap: /GAP=YES/.test(line), initUri: init.uri });
       continue;
     }
     if (line.startsWith("#EXT-X-STREAM-INF:")) {
@@ -52,7 +58,8 @@ export function parseM3u8(text: string, base: string): HlsPlaylist {
       continue;
     }
     if (!line.startsWith("#") && /^[^#]/.test(line) && pendingDur !== null) {
-      items.push({ uri: resolve(line), kind: "segment", duration: pendingDur });
+      items.push({ uri: resolve(line), kind: "segment", duration: pendingDur, sequence: sequence++, discontinuity, gap, initUri: init.uri });
+      gap = false;
       pendingDur = null;
     }
   }
@@ -64,14 +71,14 @@ export function parseM3u8(text: string, base: string): HlsPlaylist {
 const HLS_AUTH = { Authorization: "Bearer b4rxLkECNUIcV6eiiHPnA9NeoubyvojY" };
 
 /** 统一 HLS fetch：带鉴权头 + 不缓存（m3u8 / 分片共用）。 */
-export async function hlsFetch(url: string): Promise<Response> {
-  return fetch(url, { cache: "no-store", headers: HLS_AUTH });
+export async function hlsFetch(url: string, signal?: AbortSignal): Promise<Response> {
+  return fetch(url, { cache: "no-store", headers: HLS_AUTH, signal });
 }
 
-export async function fetchBytes(url: string): Promise<Uint8Array> {
-  const r = await hlsFetch(url);
+export async function fetchBytes(url: string, signal?: AbortSignal): Promise<Uint8Array> {
+  const r = await hlsFetch(url, signal);
   if (!r.ok) {
-    const e = new Error(`fetch ${url} -> ${r.status}`) as Error & { status?: number };
+    const e = new Error(`HLS HTTP ${r.status}`) as Error & { status?: number };
     e.status = r.status;
     throw e;
   }
@@ -91,123 +98,135 @@ export function categorizeEmptyPlaylist(text: string, items: HlsSegmentItem[]): 
 }
 
 export interface HarvesterOptions {
-  /** m3u8 轮询周期（ms） */
   pollIntervalMs: number;
-  /** 预取未完成 part（LL-HLS EXT-X-PRELOAD-HINT 语义：part 已列即取，不追 hint） */
+  /** Reserved for compatibility. Complete segments are the only delivery path. */
   followParts: boolean;
   onError?: (err: unknown) => void;
 }
 
-/** 增量收段：维护已见 URI，把新 init/part/segment 字节交给回调。 */
+export interface SegmentDelivery { discontinuity: boolean; sequence: number }
+
+/** One serial download lane. A retry blocks later media until success or explicit gap.
+ * High-water sequence replaces an unbounded URI set; discarded old segments never re-enter.
+ */
 export class HlsHarvester {
-  private opts: HarvesterOptions;
-  private seen = new Set<string>();
-  private initFetched = false;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private controller = new AbortController();
+  private polling = false;
   private stopped = false;
-  /** 最近一次空列表诊断（去重：同一原因只报一次，恢复有分片即重置） */
-  private lastEmptyDiag: string | null = null;
-  /** master 解析后锁定的 media 播放列表 URI（null = 尚未解析） */
   private mediaUrl: string | null = null;
-  /** 分片瞬时失败重试表：key(去query) → {tries, at}；404 不立即标 seen，延迟重试，限次后放弃 */
-  private retryMap = new Map<string, { tries: number; at: number }>();
-  // 指标行计数（导播非技术力也能读：正在重试数 / 放弃数 / 鉴权拒数）
+  private initUri: string | null = null;
+  private lastSequence: number | null = null;
+  private lastDiscontinuity: number | null = null;
+  private broken = false;
+  private retry: { sequence: number; tries: number; at: number } | null = null;
   private gaveUp = 0;
   private authFail = 0;
 
   constructor(
     private url: string,
-    private onContent: (buf: Uint8Array, kind: "init" | "part" | "segment") => void,
-    opts: HarvesterOptions,
-  ) {
-    this.opts = opts;
-  }
+    private onContent: (buf: Uint8Array, kind: "init" | "part" | "segment", meta?: SegmentDelivery) => void,
+    private opts: HarvesterOptions,
+  ) {}
 
-  /** 取源层健康计数（拼进指标行：片段重试/放弃/鉴权拒） */
   stats(): HarvesterStats {
-    return { retries: this.retryMap.size, gaveUp: this.gaveUp, authFail: this.authFail };
+    return { retries: this.retry ? 1 : 0, gaveUp: this.gaveUp, authFail: this.authFail };
   }
-
   start(): void {
-    if (this.timer) return;
+    if (this.timer || this.stopped) return;
     this.timer = setInterval(() => void this.poll(), this.opts.pollIntervalMs);
     void this.poll();
   }
-
   stop(): void {
     this.stopped = true;
+    this.controller.abort();
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
   }
-
+  private async playlist(url: string): Promise<string> {
+    const r = await hlsFetch(url, this.controller.signal);
+    if (!r.ok) throw new Error(`HLS playlist HTTP ${r.status}`);
+    const text = await r.text();
+    if (!text.trimStart().startsWith("#EXTM3U")) throw new Error("Invalid HLS playlist");
+    return text;
+  }
   private async poll(): Promise<void> {
-    if (this.stopped) return;
+    if (this.stopped || this.polling) return;
+    this.polling = true;
     try {
-      // 首次：拉 master，若有变体锁最优 media（之后直接轮询 media，避免重复探测 master）
-      if (!this.mediaUrl) {
-        const masterText = await (await hlsFetch(this.url)).text();
-        const master = parseM3u8(masterText, this.url);
-        this.mediaUrl = master.variantUri ?? this.url;
+      const root = this.mediaUrl ?? this.url;
+      let pl = parseM3u8(await this.playlist(root), root);
+      if (this.stopped) return;
+      if (pl.variantUri) {
+        this.mediaUrl = pl.variantUri;
+        pl = parseM3u8(await this.playlist(this.mediaUrl), this.mediaUrl);
       }
-      const url = this.mediaUrl;
-      const text = await (await hlsFetch(url)).text();
-      const pl = parseM3u8(text, url);
-      // 空列表诊断：把"拿到但没分片"的真实原因上报一次（master / 非HLS / 空闲）
-      if (pl.items.length === 0) {
-        const diag = categorizeEmptyPlaylist(text, pl.items);
-        if (diag && diag !== this.lastEmptyDiag) {
-          this.lastEmptyDiag = diag;
-          this.opts.onError?.(new Error(diag));
+      let segments = pl.items.filter((it) => it.kind === "segment");
+      // A new init URL identifies a restarted muxer even when its media sequence resets.
+      const first = segments[0];
+      if (first && this.initUri && first.initUri && this.key(first.initUri) !== this.initUri &&
+          segments.every((it) => it.sequence <= (this.lastSequence ?? -1))) {
+        this.lastSequence = null;
+        this.retry = null;
+        this.broken = true;
+      }
+      // Cold join needs the target GOP plus safety, not the entire server retention window.
+      if (this.lastSequence == null) {
+        let seconds = 0, start = segments.length;
+        while (start > 0 && seconds < 60) seconds += segments[--start]!.duration;
+        segments = segments.slice(start);
+      }
+      for (const it of segments) {
+        if (this.stopped) return;
+        if (this.lastSequence != null && it.sequence <= this.lastSequence) continue;
+        if (this.lastSequence != null && it.sequence !== this.lastSequence + 1) this.broken = true;
+        if (this.retry && this.retry.sequence !== it.sequence) {
+          this.gaveUp++;
+          this.retry = null; // retry slid out of the live window
+          this.broken = true;
         }
-      } else {
-        this.lastEmptyDiag = null;
-      }
-      // init：只取一次，用于 codec/description
-      if (pl.init.uri && !this.initFetched) {
-        this.initFetched = true;
-        this.onContent(await fetchBytes(pl.init.uri!), "init");
-      }
-      for (const it of pl.items) {
-        // 去重按"去掉 query"的基地址：盗链 HLS 每次轮询 session 参数会变，
-        // 同一段若按完整 URL 判重会被当新段重抓、媒体被处理两遍 → 帧率/帧数翻倍
-        const key = it.uri.split("?")[0];
-        if (this.seen.has(key)) continue;
-        if (it.kind === "part" && !this.opts.followParts) continue;
-        // 瞬时 404（m3u8 已列出但文件还没落盘/就绪）：成功才标 seen，失败进延迟重试，
-        // 否则该段成为原始环永久洞 → 解码到洞报错。限 3 次后放弃（live 轮动靠前的旧段
-        // 服务端已删也属正常，不能无限重试刷屏）。
-        const pendingRetry = this.retryMap.get(key);
-        if (pendingRetry && Date.now() - pendingRetry.at < 1500) continue;
+        if (it.gap) { this.lastSequence = it.sequence; this.broken = true; continue; }
+        if (this.retry && Date.now() - this.retry.at < 1500) return;
         try {
-          this.onContent(await fetchBytes(it.uri), it.kind);
-          this.seen.add(key);
-          this.retryMap.delete(key);
-        } catch (e) {
-          const status = (e as { status?: number } | undefined)?.status;
-          if (status === 401 || status === 403) {
-            // 鉴权被拒（secret 无效）：重试无用 → 永久放弃，避免每轮 3 连刷屏
-            logSeg("seg-401", `⚠ ${key} ${status} 永久放弃`);
-            this.authFail++;
-            this.seen.add(key);
-            this.retryMap.delete(key);
-          } else {
-            const prev = this.retryMap.get(key);
-            const tries = (prev?.tries ?? 0) + 1;
-            if (tries >= 3) {
-              logSeg("seg-giveup", `⚠ ${key} 重试 3 次失败 → 放弃（原始环缺该段）`);
-              this.gaveUp++;
-              this.seen.add(key); // 三次仍失败 → 放弃（该段确实不可得）
-              this.retryMap.delete(key);
-            } else {
-              logSeg("seg-retry", `… ${key} 拉取失败(${status ?? "?"})，1.5s 后重试 ${tries}/3`);
-              this.retryMap.set(key, { tries, at: Date.now() });
-            }
+          const map = it.initUri ? this.key(it.initUri) : null;
+          if (it.initUri && map !== this.initUri) {
+            const bytes = await fetchBytes(it.initUri, this.controller.signal);
+            if (this.stopped) return;
+            this.onContent(bytes, "init");
+            if (this.initUri) this.broken = true;
+            this.initUri = map; // only after successful delivery
           }
-          // 单个分片 404/过期（live 轮动/瞬时）属正常，不记为流错误
+          const bytes = await fetchBytes(it.uri, this.controller.signal);
+          if (this.stopped) return;
+          const discontinuity = this.broken || (this.lastDiscontinuity != null && this.lastDiscontinuity !== it.discontinuity);
+          this.onContent(bytes, "segment", { sequence: it.sequence, discontinuity });
+          this.lastSequence = it.sequence;
+          this.lastDiscontinuity = it.discontinuity;
+          this.broken = false;
+          this.retry = null;
+        } catch (e) {
+          if (this.stopped) return;
+          const status = (e as { status?: number }).status;
+          const tries = (this.retry?.tries ?? 0) + 1;
+          if (status === 401 || status === 403 || tries >= 3) {
+            this.authFail += status === 401 || status === 403 ? 1 : 0;
+            this.gaveUp++;
+            this.lastSequence = it.sequence;
+            this.broken = true;
+            this.retry = null;
+            logSeg("seg-giveup", `segment ${it.sequence}: abandoned (${status ?? "network/parse"})`);
+          } else {
+            this.retry = { sequence: it.sequence, tries, at: Date.now() };
+            logSeg("seg-retry", `segment ${it.sequence}: retry ${tries}/3`);
+            return; // never append a recovered older segment behind newer media
+          }
         }
       }
     } catch (e) {
-      this.opts.onError?.(e);
+      if (!this.stopped) this.opts.onError?.(e);
+    } finally {
+      this.polling = false;
     }
   }
+  private key(uri: string): string { return uri.split("?")[0]!; }
 }

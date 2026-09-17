@@ -27,8 +27,8 @@ export interface SceneParams {
   /** 场景背景样式 key（URL 覆盖，供跨浏览器舞台链接下发） */
   background: string;
   /** 选手 A/B SEI 对齐开关（"1"=开，随链接下发给舞台/控制台，跨浏览器本地不互通） */
-  alignA: boolean;
-  alignB: boolean;
+  alignA?: boolean;
+  alignB?: boolean;
   /** 编辑态（=1 唤出导播配置面板） */
   editMode: boolean;
   /** 偏差条满偏对应的计时差（毫秒），默认 60000 */
@@ -53,8 +53,8 @@ export function useSceneParams(): SceneParams {
     themeA: get("theme_a"),
     themeB: get("theme_b"),
     background: get("background"),
-    alignA: p.get("align_a") === "1" || p.get("align_a") === "true",
-    alignB: p.get("align_b") === "1" || p.get("align_b") === "true",
+    alignA: p.has("align_a") ? p.get("align_a") === "1" || p.get("align_a") === "true" : undefined,
+    alignB: p.has("align_b") ? p.get("align_b") === "1" || p.get("align_b") === "true" : undefined,
     editMode: p.get("edit") === "1",
     gapMs: parseGap(get("gap")),
   };

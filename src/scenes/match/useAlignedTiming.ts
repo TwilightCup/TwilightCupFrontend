@@ -6,7 +6,6 @@
  */
 import { onBeforeUnmount, onMounted, ref, type Ref } from "vue";
 import { alignEngine, type Side } from "@/scenes/align/useFrameAlign";
-import { TimerHistory } from "@/scenes/align/timerHistory";
 import type { LiveTime } from "@/stores/director";
 
 export interface AlignedTimingCtx {
@@ -16,6 +15,8 @@ export interface AlignedTimingCtx {
   offsetMs: () => number;
   /** 本侧最近一条 live_time（director.liveTimeOf(side)；无则为 null） */
   liveOf: () => LiveTime | null;
+  /** Read the persistent store snapshot at exactly this playback time. */
+  sampleAt: (wallMs: number) => { sample: LiveTime | null; running: boolean } | null;
 }
 
 export interface AlignedTiming {
@@ -26,7 +27,6 @@ export interface AlignedTiming {
 }
 
 export function useAlignedTiming(_side: Side, ctx: AlignedTimingCtx): AlignedTiming {
-  const hist = new TimerHistory();
   const main = ref<number | null>(null);
   const seg = ref<number | null>(null);
   const active = ref(false);
@@ -41,17 +41,22 @@ export function useAlignedTiming(_side: Side, ctx: AlignedTimingCtx): AlignedTim
         seg.value = null;
         return;
       }
-      const s = ctx.liveOf();
-      if (s) hist.add({ receivedAt: s.receivedAt ?? Date.now(), totalMs: s.totalMs, segmentMs: s.segmentMs ?? 0 });
+      // Keep alignment active while warming up: never fall back to realtime values.
+      active.value = true;
       const T = alignEngine.tUs.value;
-      if (T == null || hist.last == null) {
-        active.value = false;
+      const rt = alignEngine.sync.presentedRt[_side];
+      const tw = T == null || rt == null ? null : Math.min(T, rt) / 1000 - Math.max(0, ctx.offsetMs());
+      const state = tw == null ? null : ctx.sampleAt(tw);
+      const sample = state?.sample;
+      if (tw == null || !sample || sample.receivedAt > tw) {
+        main.value = seg.value = null;
         return;
       }
-      const tw = T / 1000 + ctx.offsetMs();
-      main.value = hist.totalMsAt(tw);
-      seg.value = hist.segmentMsAt(tw);
-      active.value = true;
+      // realTimeMs is elapsed round time, NOT epoch. Unknown/old state is held,
+      // not extrapolated indefinitely through pauses or a disconnected timer.
+      const dt = state.running ? Math.min(1500, Math.max(0, tw - sample.receivedAt)) : 0;
+      main.value = sample.totalMs + dt;
+      seg.value = (sample.segmentMs ?? 0) + dt;
     };
     tick();
     timer = window.setInterval(tick, 100);

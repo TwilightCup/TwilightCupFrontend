@@ -57,6 +57,7 @@ function locateConfigBox(data: Uint8Array, type: string): Uint8Array | null {
  */
 export function extractFmp4Samples(buf: Uint8Array): Fmp4Result {
   let codec: Codec | null = null;
+  let videoTrackId: number | undefined;
   let avcC: Uint8Array | null = null;
   let hvcC: Uint8Array | null = null;
   const boxes = parseBoxes(buf);
@@ -75,6 +76,8 @@ export function extractFmp4Samples(buf: Uint8Array): Fmp4Result {
       const e = parseStsdVideoEntry(stsd);
       if (!e) continue;
       if (["avc1", "avc3", "hvc1", "hev1"].includes(e.codec)) {
+        const tkhd = findBox(childBoxes(trak), "tkhd");
+        if (tkhd) videoTrackId = u32be(tkhd.data, tkhd.data[0] === 1 ? 20 : 12);
         codec = e.codec.startsWith("avc") ? "h264" : "hevc";
         const entry = buf.subarray(stsd.start + 8 + e.entryStart, stsd.start + 8 + e.entryStart + e.entrySize);
         const avcc = locateConfigBox(entry, "avcC");
@@ -127,11 +130,11 @@ export function extractFmp4Samples(buf: Uint8Array): Fmp4Result {
         const effFlags = s === 0 && (trFlags & 0x000004) ? firstSampleFlags : fl;
         const isKey = !(effFlags & 0x00010000); // bit16 = sample_is_non_sync_sample
         if (sz > 0 && samplePos + sz <= buf.length) {
-          samples.push({ payload: new Uint8Array(buf.subarray(samplePos, samplePos + sz)), isKey });
+          samples.push({ payload: new Uint8Array(buf.subarray(samplePos, samplePos + sz)), isKey, trackId: u32be(tf, 4) });
         }
         samplePos += sz;
       }
     }
   }
-  return { codec, samples, avcC, hvcC };
+  return { codec, samples, avcC, hvcC, videoTrackId };
 }

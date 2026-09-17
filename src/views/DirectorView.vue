@@ -216,6 +216,11 @@ const previewAlignedB = computed(() => !!cfgConfig.alignB && !!cfgConfig.hlsB);
 
 // 拉流失败只内联显示在 A/B 位置（指标条/画面占位），不弹窗打扰
 
+watch(() => [cfgConfig.alignA, cfgConfig.hlsA, cfgConfig.alignB, cfgConfig.hlsB], () => {
+  alignEngine.setRequiredSides((["A", "B"] as const).filter(side =>
+    side === "A" ? cfgConfig.alignA && !!cfgConfig.hlsA : cfgConfig.alignB && !!cfgConfig.hlsB));
+}, { immediate: true });
+
 // 连通性指标条（维度对齐 SEIInjector 冒烟工具，刷新由 alignEngine.health ~2.5Hz）
 function healthText(side: "A" | "B"): string {
   const err = alignEngine.streamError[side];
@@ -232,7 +237,10 @@ function healthText(side: "A" | "B"): string {
     const rtNow = Date.now() * 1000;
     stale = (rtNow - h.frontRtUs) / 1e6;
   }
-  const diag = ` · ×${pb.speed.toFixed(2)} · 追${pb.behindS.toFixed(1)}s · 队列${h.queueLen} · 重${h.resyncs}${h.resyncGap ? `段${h.resyncGap}` : ""}${h.resyncErr ? `错${h.resyncErr}` : ""}`;
+  const sync = alignEngine.sync;
+  const errMs = sync.targetErrorUs[side];
+  const timing = ` · ${sync.state} · T误差${errMs == null ? "—" : (errMs / 1000).toFixed(1)}ms · AB${sync.pairErrorUs == null ? "—" : (sync.pairErrorUs / 1000).toFixed(1)}ms`;
+  const diag = timing + ` · ×${pb.speed.toFixed(2)} · 追${pb.behindS.toFixed(1)}s · 队列${h.queueLen} · 重${h.resyncs}${h.resyncGap ? `段${h.resyncGap}` : ""}${h.resyncErr ? `错${h.resyncErr}` : ""}`;
   // 解码流水线：原始环/解码游标/封装/解码累计输出（定位"队列0/没画面"）
   const pipe = ` · raw${h.rawLen}/pos${h.decPos}/${h.enc || "-"}/出${h.decOutput}/qc${h.qc}/pn${h.pendCfg ? "1" : "0"}`;
   if (h.frames === 0 && !h.hasContent) {
@@ -277,6 +285,8 @@ function readyState(side: "A" | "B"): { cls: string; label: string } {
   if (!on || !url) return { cls: "off", label: "未启用" };
   const fa = director.frameAlign;
   const stageReady = fa ? side === "A" ? fa.readyA : fa.readyB : null;
+  if (alignEngine.sync.state === "stale") return { cls: "wait", label: "同步失联，已冻结" };
+  if (alignEngine.sync.state !== "playing") return { cls: "wait", label: "等待共同帧" };
   if (stageReady === true) return { cls: "ok", label: "已就绪" };
   if (alignEngine.streamError[side]) return { cls: "err", label: "拉不到流" };
   if (stageReady === false) return { cls: "wait", label: "攒缓冲中" };
@@ -842,7 +852,9 @@ onUnmounted(() => {
                 <SeiStream
                   v-if="previewAlignedA"
                   side="A"
+                  :key="'A:' + director.matchId"
                   :url="cfgConfig.hlsA"
+                  :refresh-nonce="cfgConfig.refreshA"
                   :enabled="previewAlignedA"
                   :crop4to3="true"
                 />
@@ -866,7 +878,9 @@ onUnmounted(() => {
                 <SeiStream
                   v-if="previewAlignedB"
                   side="B"
+                  :key="'B:' + director.matchId"
                   :url="cfgConfig.hlsB"
+                  :refresh-nonce="cfgConfig.refreshB"
                   :enabled="previewAlignedB"
                   :crop4to3="true"
                 />

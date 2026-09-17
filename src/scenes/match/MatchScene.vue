@@ -20,7 +20,7 @@
  * 计时口径见 useMatchTiming：多关主计时 = live_time 实时走表（每秒上报矫正 +
  * 墙钟外推，见 useLiveTimers / ignored/需求-live_time实时计时中转.md），无实时
  * 数据回退离线累计口径。偏差条由 subsegment 实时时间差驱动（subsegment_gap
- * 广播 → director.subsegmentGap，最近一条覆盖、回合级生命周期，见
+ * 广播 → broadcast.value.subsegmentGap，最近一条覆盖、回合级生命周期，见
  * ignored/需求-subsegment实时时间差追踪与前端接入.md）。导播配置（RTMP/HLS）走
  * useDirectorConfig（localStorage），?edit=1 唤出面板。计时显示延迟（对齐有延迟
  * 的选手画面，控制台 0.5s 步进设置、config_update 实时下发）由 useDelayedRef
@@ -69,6 +69,23 @@ const director = useDirectorStore();
 const { params, hosted, sharedBg, sharedTopBar } = useSceneContext();
 const { config, load, save } = useDirectorConfig();
 
+const broadcast = computed(() =>
+  (config.alignA && !!config.hlsA) || (config.alignB && !!config.hlsB)
+    ? director.presentation ?? director.emptyBroadcast : director.liveBroadcast);
+function displayPlayer(side: "A" | "B") { return side === "A" ? broadcast.value.playerA : broadcast.value.playerB; }
+function displayLive(side: "A" | "B") { return side === "A" ? broadcast.value.liveTimeA : broadcast.value.liveTimeB; }
+function timerStateAt(side: "A" | "B", wallMs: number) {
+  const state = director.presentationAt(wallMs);
+  if (!state) return null;
+  // IN_GAME does not prove the game timer is running (pause/loading).
+  // Hold the historical sample until the protocol supplies an explicit timer rate.
+  return { sample: side === "A" ? state.liveTimeA : state.liveTimeB, running: false };
+}
+watch(() => [config.alignA, config.hlsA, config.alignB, config.hlsB], () => {
+  alignEngine.setRequiredSides((["A", "B"] as const).filter(side =>
+    side === "A" ? config.alignA && !!config.hlsA : config.alignB && !!config.hlsB));
+}, { immediate: true });
+
 const panelOpen = ref(params.editMode);
 
 /** 是否已连 WS（独立入口连上即视为 live；hosted 由舞台根维持）；否则用 mock。
@@ -81,7 +98,7 @@ const isMock = computed(() => !liveReady.value);
 /** 多关选图模式：开赛后以回合类型为准，无回合信息时按多关展示（偏差条常驻） */
 const isMulti = computed(() => {
   if (isMock.value) return MOCK_MATCH.isMulti;
-  return director.currentRound ? director.currentRound.type === PickType.MULTI : true;
+  return broadcast.value.currentRound ? broadcast.value.currentRound.type === PickType.MULTI : true;
 });
 
 // ---- 多关主计时实时走表：live_time 每秒上报（director store 按席暂存）→
@@ -106,12 +123,14 @@ function mockLiveSample(side: "A" | "B"): LiveTime {
 const alignedA = useAlignedTiming("A", {
   enabled: () => config.alignA && !!config.hlsA,
   offsetMs: () => config.delayA * 1000,
-  liveOf: () => (liveReady.value ? director.liveTimeOf("A") : null),
+  liveOf: () => (liveReady.value ? displayLive("A") : null),
+  sampleAt: wallMs => timerStateAt("A", wallMs),
 });
 const alignedB = useAlignedTiming("B", {
   enabled: () => config.alignB && !!config.hlsB,
   offsetMs: () => config.delayB * 1000,
-  liveOf: () => (liveReady.value ? director.liveTimeOf("B") : null),
+  liveOf: () => (liveReady.value ? displayLive("B") : null),
+  sampleAt: wallMs => timerStateAt("B", wallMs),
 });
 // 只要对齐开关开着且有 m3u8 地址就挂 SeiStream（立即开始拉流/解码），否则（对齐关）回 MSE。
 // 不能因"当前 mode/error 未定"而不挂——那会导致引擎不拉流、永远卡"等待内容"。
@@ -128,14 +147,14 @@ const { liveMsA, liveMsB, liveSegA, liveSegB } = useLiveTimers(
         // 末关 total_ms，与 live_time 同一时间线）。否则插件完赛后停报，外推会
         // 多走 STALE_MS（数秒）才冻结，停表值失真。弃权不停在此处（见下方
         // holdOf，原地冻结而非回跳累计）
-        director.playerOf(side).status === PlayerStatus.IN_GAME
-        ? director.liveTimeOf(side)
+        displayPlayer(side).status === PlayerStatus.IN_GAME
+        ? displayLive(side)
         : null
       : mockLiveSample(side),
   // 弃权（FORFEITED）→ 原地冻结：可能没有任何完成时间，回退离线累计会把
   // 已走的主计时回跳一大截，保持停表瞬间的读数即可（不过冲不回跳）
   (side) =>
-    liveReady.value && director.playerOf(side).status === PlayerStatus.FORFEITED,
+    liveReady.value && displayPlayer(side).status === PlayerStatus.FORFEITED,
 );
 
 const { sideA, sideB } = useMatchTiming({
@@ -147,22 +166,22 @@ const { sideA, sideB } = useMatchTiming({
   },
   levelsOf: (side) =>
     liveReady.value
-      ? director.playerOf(side).completedLevels
+      ? displayPlayer(side).completedLevels
       : side === "A"
         ? MOCK_MATCH.levelsA
         : MOCK_MATCH.levelsB,
   attemptsOf: (side) =>
     liveReady.value
-      ? director.playerOf(side).attempts
+      ? displayPlayer(side).attempts
       : side === "A"
         ? MOCK_MATCH.attemptsA
         : MOCK_MATCH.attemptsB,
   scoring: () => (liveReady.value ? director.scoringMethodName : MOCK_MATCH.scoringMethod),
   scoreOf: (side) => {
-    if (!liveReady.value || !director.lastResult) return null;
+    if (!liveReady.value || !broadcast.value.lastResult) return null;
     // 防剧透：对齐且该回合结果尚未被虚拟时间 T 越过时暂不揭示
-    if (twMs.value != null && director.lastResultAt != null && twMs.value < director.lastResultAt) return null;
-    return side === "A" ? director.lastResult.scoreA : director.lastResult.scoreB;
+    if (twMs.value != null && broadcast.value.lastResultAt != null && twMs.value < broadcast.value.lastResultAt) return null;
+    return side === "A" ? broadcast.value.lastResult.scoreA : broadcast.value.lastResult.scoreB;
   },
 });
 
@@ -175,9 +194,9 @@ const twMs = computed<number | null>(() =>
 );
 const diffMs = computed(() => {
   if (!liveReady.value) return MOCK_MATCH.gapDiffMs;
-  const g = director.subsegmentGap;
+  const g = broadcast.value.subsegmentGap;
   if (g == null) return 0;
-  if (twMs.value != null && director.subsegmentGapAt != null && twMs.value < director.subsegmentGapAt) {
+  if (twMs.value != null && broadcast.value.subsegmentGapAt != null && twMs.value < broadcast.value.subsegmentGapAt) {
     return 0;
   }
   return g;
@@ -196,13 +215,13 @@ interface SubRow {
 
 const levelNames = computed<string[]>(() => {
   if (!liveReady.value) return MOCK_MATCH.levelNames;
-  const raw = director.currentRound?.collection.raw as { levels?: unknown } | undefined;
+  const raw = broadcast.value.currentRound?.collection.raw as { levels?: unknown } | undefined;
   return Array.isArray(raw?.levels) ? raw.levels.map((x) => (x == null ? "" : String(x))) : [];
 });
 
 function completedLevelsOf(side: "A" | "B"): LevelTime[] {
   const levels = liveReady.value
-    ? director.playerOf(side).completedLevels
+    ? displayPlayer(side).completedLevels
     : side === "A"
       ? MOCK_MATCH.levelsA
       : MOCK_MATCH.levelsB;
@@ -211,7 +230,7 @@ function completedLevelsOf(side: "A" | "B"): LevelTime[] {
 
 function attemptsOf(side: "A" | "B"): Attempt[] {
   const attempts = liveReady.value
-    ? director.playerOf(side).attempts
+    ? displayPlayer(side).attempts
     : side === "A"
       ? MOCK_MATCH.attemptsA
       : MOCK_MATCH.attemptsB;
@@ -232,19 +251,19 @@ function liveSegTime(side: "A" | "B"): string | null {
 
 function multiActive(side: "A" | "B"): boolean {
   if (!liveReady.value) return true;
-  if (director.phase !== MatchPhase.IN_ROUND) return false;
-  if (!(side === "A" ? director.aOnline : director.bOnline)) return false;
-  if (director.playerOf(side).status !== PlayerStatus.IN_GAME) return false;
+  if (broadcast.value.phase !== MatchPhase.IN_ROUND) return false;
+  if (!(side === "A" ? broadcast.value.aOnline : broadcast.value.bOnline)) return false;
+  if (displayPlayer(side).status !== PlayerStatus.IN_GAME) return false;
   // 最后一关已上报、等待项目完成信号的瞬间也视为“已完赛”，让第一行立即定格
-  const idx = director.playerOf(side).currentLevelIndex;
+  const idx = displayPlayer(side).currentLevelIndex;
   return levelNames.value.length === 0 || idx < levelNames.value.length;
 }
 
 function singleActive(side: "A" | "B"): boolean {
   if (!liveReady.value) return true;
-  if (director.phase !== MatchPhase.IN_ROUND) return false;
-  if (!(side === "A" ? director.aOnline : director.bOnline)) return false;
-  if (director.playerOf(side).status !== PlayerStatus.IN_GAME) return false;
+  if (broadcast.value.phase !== MatchPhase.IN_ROUND) return false;
+  if (!(side === "A" ? broadcast.value.aOnline : broadcast.value.bOnline)) return false;
+  if (displayPlayer(side).status !== PlayerStatus.IN_GAME) return false;
   // 最后一次尝试已上报但尚未发项目完成信号时，同样按“已完成”定格第一行
   const total = attemptTotal();
   return total == null || attemptsOf(side).length < total;
@@ -254,7 +273,7 @@ function multiFirstRow(side: "A" | "B"): SubRow {
   const levels = completedLevelsOf(side);
   if (multiActive(side)) {
     const idx = liveReady.value
-      ? director.playerOf(side).currentLevelIndex
+      ? displayPlayer(side).currentLevelIndex
       : side === "A"
         ? MOCK_MATCH.currentLevelA
         : MOCK_MATCH.currentLevelB;
@@ -383,10 +402,10 @@ const MOCK_DRAFT: Record<string, unknown> = {
 
 // pick 方 / 携带词条 / 重试次数与图池场景同源：draft_state 广播 → useDraftStatus
 const draftStatus = useDraftStatus(
-  computed(() => (liveReady.value ? director.draft : MOCK_DRAFT)),
+  computed(() => (liveReady.value ? broadcast.value.draft : MOCK_DRAFT)),
 );
 const currentPick = computed(() =>
-  liveReady.value ? director.currentRound?.pick ?? null : MOCK_PICK,
+  liveReady.value ? broadcast.value.currentRound?.pick ?? null : MOCK_PICK,
 );
 const pickKind = computed(() => categoryKindOf(currentPick.value?.category));
 const pickSide = computed(() => {
@@ -420,7 +439,7 @@ function attemptLabelOf(index: number): string | null {
 // 复用 useCategoryInfo：模块级快照跨组件共享——舞台在 categoryinfo 场景拉过
 // 榜单则此处重挂载零加载回显；hook 只接真实数据，mock 预览传 null 不发请求。
 const { status: srStatus, rows: srRows, pbA: srPbA, pbB: srPbB } = useCategoryInfo(
-  computed(() => (liveReady.value ? director.currentRound : null)),
+  computed(() => (liveReady.value ? broadcast.value.currentRound : null)),
   computed(() => (liveReady.value ? director.speedrunA : null)),
   computed(() => (liveReady.value ? director.speedrunB : null)),
 );
@@ -532,7 +551,8 @@ watch(
 );
 
 onMounted(() => {
-  load(params.matchId, params);
+  load(params.matchId, hosted ? {} : params);
+  if (director.remoteConfig) save(params.matchId, director.remoteConfig);
   // speedrun 数据走后端同源代理（需 JWT）；与 categoryinfo 场景同口径
   setSpeedrunToken(params.token || null);
   // hosted（合并舞台）模式下 WS 由舞台根统一连，场景只读 store（liveReady 初始即
@@ -583,7 +603,9 @@ onUnmounted(() => {
           <SeiStream
             v-if="seiA"
             side="A"
+            :key="'A:' + director.matchId"
             :url="config.hlsA"
+                  :refresh-nonce="config.refreshA"
             :enabled="seiA"
             :hidden="config.hideA"
             bare
@@ -601,7 +623,9 @@ onUnmounted(() => {
           <SeiStream
             v-if="seiB"
             side="B"
+            :key="'B:' + director.matchId"
             :url="config.hlsB"
+                  :refresh-nonce="config.refreshB"
             :enabled="seiB"
             :hidden="config.hideB"
             bare

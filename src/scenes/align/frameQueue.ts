@@ -22,9 +22,16 @@ export class FrameQueue {
   constructor(
     private drop: (e: FrameEntry) => void = () => undefined,
     /** 环绕 T 保留的半窗宽（µs）：小于该窗外且已被越过的一律淘汰 */
-    private keepBehindUs = 3_000_000,
-    private keepAheadUs = 5_000_000,
+    private keepBehindUs = 150_000,
+    private keepAheadUs = 500_000,
   ) {}
+
+  get bytes(): number {
+    return this.entries.reduce((n, e) => {
+      const f = e.handle as { displayWidth?: number; displayHeight?: number };
+      return n + (f.displayWidth ?? 0) * (f.displayHeight ?? 0) * 4;
+    }, 0);
+  }
 
   get length(): number {
     return this.entries.length;
@@ -51,7 +58,7 @@ export class FrameQueue {
       if (this.entries[mid]!.rtUs < e.rtUs) lo = mid + 1;
       else hi = mid;
     }
-    if (this.entries[lo] && this.entries[lo]!.rtUs === e.rtUs) return; // 去重
+    if (this.entries[lo] && this.entries[lo]!.rtUs === e.rtUs) { this.drop(e); return; } // 去重
     this.entries.splice(lo, 0, e);
   }
 
@@ -62,7 +69,7 @@ export class FrameQueue {
   }
 
   /** 取 rtUs 最接近 target 的帧（T 单调则结果稳定）；空为 null */
-  nearest(targetUs: number): FrameEntry | null {
+  nearest(targetUs: number, maxErrorUs = 40_000): FrameEntry | null {
     let lo = 0, hi = this.entries.length - 1, best: FrameEntry | null = null, bestD = Infinity;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
@@ -72,7 +79,7 @@ export class FrameQueue {
       if (e.rtUs < targetUs) lo = mid + 1;
       else hi = mid - 1;
     }
-    return best;
+    return bestD <= maxErrorUs ? best : null;
   }
 
   /**

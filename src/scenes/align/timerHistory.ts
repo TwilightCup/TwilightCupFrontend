@@ -9,12 +9,13 @@ export interface TimerSample {
   receivedAt: number; // 报告真实时刻（epoch ms）
   totalMs: number;
   segmentMs: number;
+  running?: boolean;
 }
 
 export class TimerHistory {
   private samples: TimerSample[] = [];
   /** 保留窗（ms）：覆盖 T 的最大落后 + 余量（默认 70s，比 10min 缓冲所需小得多） */
-  constructor(private windowMs = 70_000) {}
+  constructor(private windowMs = 660_000) {}
 
   /** 增量喂最新样本（同 receivedAt 去重；窗口外旧样本裁剪） */
   add(s: TimerSample): void {
@@ -38,15 +39,16 @@ export class TimerHistory {
     const n = this.samples.length;
     if (n === 0) return null;
     // 找最后一个 receivedAt <= wallMs 的样本（作为外推/插值锚）
-    let lo = 0, hi = n - 1, anchor = 0;
+    let lo = 0, hi = n - 1, anchor = -1;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
       if (this.samples[mid]!.receivedAt <= wallMs) { anchor = mid; lo = mid + 1; }
       else hi = mid - 1;
     }
+    if (anchor < 0) return null;
     const base = this.samples[anchor]!;
     // wallMs 早于最早样本：落在样本窗之外（异常超前请求）→ 回退最早样本读数
-    const dt = Math.max(0, wallMs - base.receivedAt);
+    const dt = base.running === false ? 0 : Math.min(1500, Math.max(0, wallMs - base.receivedAt));
     return { receivedAt: wallMs, totalMs: base.totalMs + dt, segmentMs: base.segmentMs + dt };
   }
 

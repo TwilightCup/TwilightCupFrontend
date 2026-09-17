@@ -8,6 +8,8 @@
  * - `modeOf(side)`='off' 时外层 SeiStream 回退 MSE StreamFrame；该侧其余展示不阻塞。
  */
 import { reactive, ref, type Ref } from "vue";
+import { ExternalClock, type FrameAlignAnchor } from "./externalClock";
+import type { FrameEntry } from "./frameQueue";
 import { RateController } from "./rateControl";
 import { FrameLockStream } from "./frameLock";
 import { createFrameSource } from "./transport";
@@ -31,7 +33,7 @@ export function friendlyStreamError(e: unknown): string {
   return `拉流失败：${m}`;
 }
 
-class AlignEngine {
+export class AlignEngine {
   private streams = new Map<Side, FrameLockStream>();
   private canvases = new Map<Side, HTMLCanvasElement[]>();
   private cfg = new RateController();
@@ -42,12 +44,16 @@ class AlignEngine {
   /** 隐藏兜底时钟：页面 hidden 时 rAF 全面暂停（OBS 浏览器源不在前台/最小化），
    *  权威页会停发 frame_align → 所有跟随页冻结。退 setInterval 保底推进 + 广播。 */
   private hiddenTimer: ReturnType<typeof setInterval> | null = null;
-  /** 跨文档一致性：被权威页（舞台）经 WS director_cmd(frame_align)/state_sync 广播的外部 T（µs）。
-   *   观众页（控制台）置位后以外部 T 为准；权威页（舞台）自己推进 RateController 并广播。 */
-  private externalTUs: number | null = null;
-  /** 外部 T 最近一次到达时刻（performance.now）：权威广播 ~2.5Hz，超时 = 权威页
-   *  已停播（OBS 隐藏节流/WS 断/舞台被关）→ 回退本地推进，不能永久冻结跟随页 */
-  private externalTAt = 0;
+  private external = new ExternalClock();
+  private requiredSides = new Set<Side>();
+  private sourceUrls = new Map<Side, string>();
+  private streamGenerations = new Map<Side, number>();
+  readonly enabled = ref(false);
+  readonly sync = reactive({ state: "waiting" as "waiting" | "playing" | "frozen" | "stale",
+    targetUs: null as number | null, pairErrorUs: null as number | null,
+    presentedRt: { A: null, B: null } as Record<Side, number | null>,
+    targetErrorUs: { A: null, B: null } as Record<Side, number | null> });
+
   /** 本实例是否是对齐权威（舞台渲染页）：true 时不用外部 T，自己跑速率控制并发广播 */
   private isAuthority = false;
 
@@ -77,23 +83,39 @@ class AlignEngine {
     this.isAuthority = v;
   }
 
-  setExternalTUs(us: number | null): void {
-    this.externalTUs = us;
-    if (us != null) this.externalTAt = performance.now();
-    if (!this.isAuthority && us != null) this.tUs.value = us;
+  setExternalTUs(us: number | null, meta: Partial<FrameAlignAnchor> = {}): boolean {
+    if (us == null || this.isAuthority) return false;
+    return this.external.accept({ ...meta, t_us: us }, performance.now());
   }
+  selectAuthority(src: string): void { this.external.selectSource(src); }
+  setRequiredSides(sides: Side[]): void {
+    this.requiredSides = new Set(sides);
+    this.enabled.value = sides.length > 0;
+  }
+
   /* ---- 流管理（每侧唯一流，引用计数：舞台/控制台共同引用，计数归零才停） ---- */
-  private refs = new Map<Side, number>();
-  startStream(side: Side, url: string, kind: "hls" | "annexb" = "hls"): void {
+  private refs = new Map<Side, Set<symbol>>();
+  startStream(side: Side, url: string, kind: "hls" | "annexb" = "hls"): () => void {
+    if (this.sourceUrls.get(side) !== url && this.streams.has(side)) {
+      this.streams.get(side)!.stop();
+      this.streams.delete(side);
+      this.cfg = new RateController();
+    }
+    this.enabled.value = true;
     if (!this.streams.has(side)) {
+      const generation = (this.streamGenerations.get(side) ?? 0) + 1;
+      this.streamGenerations.set(side, generation);
+      this.sourceUrls.set(side, url);
       const source = createFrameSource(kind, { url });
       const s = new FrameLockStream(source, {
         onError: (e) => {
+          if (this.streamGenerations.get(side) !== generation) return;
           console.warn(`[align ${side}]`, e);
           // 仅"尚无内容"时的拉流失败值得提示"拉不到"；已有内容后的偶发报错不盖画面
           if (!s.hasContent) this.streamError[side] = friendlyStreamError(e);
         },
         onModeChange: (m) => {
+          if (this.streamGenerations.get(side) !== generation) return;
           this.modes[side] = m;
           if (this.streamError[side]) this.streamError[side] = null;
         },
@@ -103,26 +125,53 @@ class AlignEngine {
       this.resetPresented(side);
       s.start();
     }
-    this.refs.set(side, (this.refs.get(side) ?? 0) + 1);
+    const token = Symbol(side);
+    const refs = this.refs.get(side) ?? new Set<symbol>();
+    refs.add(token);
+    this.refs.set(side, refs);
+    return () => this.stopStream(side, token);
   }
-  stopStream(side: Side): void {
-    const c = (this.refs.get(side) ?? 0) - 1;
-    if (c <= 0) {
+  private stopStream(side: Side, token: symbol): void {
+    const refs = this.refs.get(side);
+    if (!refs?.delete(token)) return; // old session/component cannot release a new lease
+    if (refs.size === 0) {
       this.refs.delete(side);
       this.streams.get(side)?.stop();
       this.streams.delete(side);
+      this.sourceUrls.delete(side);
+      this.streamGenerations.set(side, (this.streamGenerations.get(side) ?? 0) + 1);
       this.modes[side] = "off";
       this.presented[side] = false;
-    } else {
-      this.refs.set(side, c);
+      this.sync.presentedRt[side] = null;
     }
   }
+  restartStream(side: Side): void {
+    const url = this.sourceUrls.get(side);
+    if (!url) return;
+    this.streams.get(side)?.stop();
+    this.streams.delete(side);
+    this.cfg = new RateController(); // explicit operator recovery, not automatic timeline jump
+    const release = this.startStream(side, url);
+    release();
+  }
+  resetSession(): void {
+    for (const stream of this.streams.values()) stream.stop();
+    this.streams.clear(); this.refs.clear(); this.sourceUrls.clear();
+    this.external = new ExternalClock(); this.cfg = new RateController();
+    this.tUs.value = null; this.sync.state = "waiting";
+    this.modes.A = this.modes.B = "off";
+    this.presented.A = this.presented.B = false;
+    this.sync.presentedRt.A = this.sync.presentedRt.B = null;
+  }
+
   modeOf(side: Side): "aligned" | "off" {
     return this.streams.get(side)?.mode ?? "off";
   }
   /** 重挂流时还原"未上屏"状态（下轮攒够缓冲再提） */
   private resetPresented(side: Side): void {
     this.presented[side] = false;
+    this.sync.presentedRt[side] = null;
+    this.sync.targetErrorUs[side] = null;
   }
   frontierOf(side: Side): number | null {
     return this.streams.get(side)?.frontier() ?? null;
@@ -173,54 +222,90 @@ class AlignEngine {
       this.raf = requestAnimationFrame(loop);
     };
     this.raf = requestAnimationFrame(loop);
-    // 隐藏兜底：rAF 暂停时以 1Hz 保底推进 T（速率控制对大 elapsed 有 REANCHOR 自愈，
-    // 权威页隐藏时 frame_align 广播（watch tUs）仍能继续发出）
+    // 隐藏兜底：1Hz 检查就绪状态；elapsed 有上限，避免后台恢复时跳跃。
     this.hiddenTimer = setInterval(() => {
       if (this.running && document.hidden) this.tickLoop(performance.now());
     }, 1000);
   }
 
   private tickLoop(now: number): void {
-      const elapsed = Math.max(now - this.last, 0);
-      this.last = now;
-      // 各侧前沿（µs）
-      const frontiers: number[] = [];
-      for (const [, s] of this.streams) {
-        const f = s.frontier();
-        if (f != null) frontiers.push(f);
-      }
-      // T：权威页自己跑速率控制（并发广播）；观众页用外部权威 T（当有且新鲜）。
-      // 权威广播停更 >5s（舞台被 OBS 隐藏节流/WS 断/页面关闭）→ 回退本地推进，
-      // 否则所有跟随页永久冻结在最后一次广播值（追 Xs 持续拉大、画面全停）
-      const externalFresh = this.externalTUs != null && performance.now() - this.externalTAt <= 5000;
-      let T: number | null = null;
-      if (this.isAuthority || !externalFresh) {
-        if (!this.isAuthority && this.externalTUs != null) {
-          logAuth("ext-stale", `⚠ 外部权威 T 停更 ${((performance.now() - this.externalTAt) / 1000).toFixed(1)}s > 5s（舞台隐藏节流/WS断/被关）→ 回退本地推进`);
+    const elapsed = Math.max(0, Math.min(now - this.last, 100));
+    this.last = now;
+    const sides = this.requiredSides.size ? [...this.requiredSides] : [...this.streams.keys()];
+    const streams = sides.map(side => this.streams.get(side));
+    const coverage = streams.map(stream => stream?.coverage() ?? null);
+    const freeze = (state: "waiting" | "frozen" | "stale") => {
+      this.sync.state = state;
+      this.playback.speed = 0;
+      for (const side of sides) this.presented[side] = false;
+    };
+    if (!sides.length || coverage.some(c => !c)) { freeze("waiting"); return; }
+    const frontiers = coverage.map(c => c!.to);
+    const slow = Math.min(...frontiers);
+    const required = slow - this.cfg.backUs;
+    const earliest = Math.max(...coverage.map(c => c!.from));
+    if (earliest > required) { freeze("waiting"); return; }
+    const previous = this.cfg.checkpoint();
+    const external = this.isAuthority ? null : this.external.read(now);
+    if (external?.stale) { freeze("stale"); return; }
+    const T = external ? external.t : this.cfg.step(elapsed, frontiers);
+    this.sync.targetUs = T;
+    if (T < earliest || T > required || (this.tUs.value != null && T < this.tUs.value)) {
+      this.cfg.restore(previous); freeze("frozen"); return;
+    }
+    const frames: FrameEntry[] = [];
+    for (const stream of streams) {
+      stream!.advance(T);
+      const frame = stream!.queue.nearest(T, 40_000);
+      if (frame) frames.push(frame);
+    }
+    const pairError = frames.length ? Math.max(...frames.map(f => f.rtUs)) - Math.min(...frames.map(f => f.rtUs)) : null;
+    if (frames.length !== sides.length || (pairError ?? Infinity) > 40_000) {
+      this.cfg.restore(previous); freeze("frozen"); return;
+    }
+    // Stage all draws before touching any visible canvas. A missing/closed frame cannot
+    // advance one side alone. JS canvas commits run in the same task, before browser paint.
+    const prepared: { canvas: HTMLCanvasElement; buffer: HTMLCanvasElement }[] = [];
+    try {
+      for (let i = 0; i < sides.length; i++) {
+        for (const canvas of this.canvases.get(sides[i]!) ?? []) {
+          const buffer = this.drawBuffer(canvas, frames[i]!.handle as globalThis.VideoFrame);
+          prepared.push({ canvas, buffer });
         }
-        if (frontiers.length > 0) T = this.cfg.step(elapsed, frontiers);
-      } else {
-        T = this.externalTUs;
       }
-      if (T != null) {
-        this.tUs.value = T;
-        // 播放诊断：当前倍速 + T 落后最慢前沿的秒数（追回量→跳动的解释）
-        this.playback.speed = this.cfg.speed;
-        const slow = Math.min(...frontiers);
-        this.playback.behindS = (slow - this.cfg.backUs - T) / 1e6;
-        // 逐流 advance + 上屏到所有注册 canvas
-        for (const [side, s] of this.streams) {
-          // 只要有内容就视为"已在拉"→ 清掉"拉不到流"提示（恢复后自动收敛）
-          if (s.hasContent && this.streamError[side]) this.streamError[side] = null;
-          s.advance(T);
-          const frame = s.nearest(T);
-          const cvs = this.canvases.get(side);
-          if (frame != null && cvs) {
-            for (const cv of cvs) this.drawFrame(cv, frame as CanvasImageSource);
-            this.presented[side] = true;
-          }
-        }
-      }
+    } catch {
+      this.cfg.restore(previous); freeze("frozen"); return;
+    }
+    for (const { canvas, buffer } of prepared) {
+      if (canvas.width !== buffer.width) canvas.width = buffer.width;
+      if (canvas.height !== buffer.height) canvas.height = buffer.height;
+      canvas.getContext("2d")!.drawImage(buffer, 0, 0);
+    }
+    this.tUs.value = T; // committed presentation time; overlays must never use targetUs
+    this.sync.state = "playing";
+    this.sync.pairErrorUs = pairError;
+    this.playback.speed = external ? external.rate : this.cfg.speed;
+    this.playback.behindS = (required - T) / 1e6;
+    for (let i = 0; i < sides.length; i++) {
+      const side = sides[i]!;
+      this.sync.presentedRt[side] = frames[i]!.rtUs;
+      this.sync.targetErrorUs[side] = frames[i]!.rtUs - T;
+      this.presented[side] = true;
+      this.streamError[side] = null;
+    }
+    logAuth("present", `T=${T} pairErrorUs=${pairError} A=${this.sync.presentedRt.A} B=${this.sync.presentedRt.B}`);
+  }
+  private buffers = new WeakMap<HTMLCanvasElement, HTMLCanvasElement>();
+  private drawBuffer(canvas: HTMLCanvasElement, frame: globalThis.VideoFrame): HTMLCanvasElement {
+    let buffer = this.buffers.get(canvas);
+    if (!buffer) { buffer = document.createElement("canvas"); this.buffers.set(canvas, buffer); }
+    if (!frame.displayWidth || !frame.displayHeight || !canvas.getContext("2d")) throw new Error("Invalid presentation surface");
+    if (buffer.width !== frame.displayWidth) buffer.width = frame.displayWidth;
+    if (buffer.height !== frame.displayHeight) buffer.height = frame.displayHeight;
+    const ctx = buffer.getContext("2d");
+    if (!ctx) throw new Error("Canvas unavailable");
+    ctx.drawImage(frame, 0, 0);
+    return buffer;
   }
   stop(): void {
     this.running = false;
@@ -232,25 +317,7 @@ class AlignEngine {
     this.hiddenTimer = null;
   }
 
-  private drawFrame(canvas: HTMLCanvasElement, frame: CanvasImageSource): void {
-    const src = frame as { displayWidth?: number; displayHeight?: number; codedWidth?: number; codedHeight?: number };
-    const sw = src.displayWidth || src.codedWidth || 0;
-    const sh = src.displayHeight || src.codedHeight || 0;
-    if (!sw || !sh) return;
-    // canvas 保持源帧原生分辨率（清晰），裁切/缩放交给 CSS object-fit:cover（高铺满+裁左右）
-    if (canvas.width !== sw || canvas.height !== sh) {
-      canvas.width = sw;
-      canvas.height = sh;
-    }
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.clearRect(0, 0, sw, sh);
-    try {
-      ctx.drawImage(frame, 0, 0, sw, sh);
-    } catch {
-      // 帧可能已被 queue.advance 提前 close（竞态）→ 跳过本帧，不拖垮主循环
-    }
-  }
+
 }
 
 /** 共享单例：舞台与控制台都引用它，读同一 T、同一帧。 */
