@@ -259,7 +259,7 @@ export const useDirectorStore = defineStore("director", () => {
   function handle(msg: ServerMessage): void {
     switch (msg.type) {
       case "auth_ok":
-        if (matchId.value !== msg.match_id) {
+        if (matchId.value !== msg.match_id || accountId.value !== msg.account_id) {
           history.clear();
           historyRevision.value++;
           if (matchId.value) alignEngine.resetSession();
@@ -440,7 +440,7 @@ export const useDirectorStore = defineStore("director", () => {
           const fa = s?.frame_align as
             | { t_us?: unknown; ready_a?: unknown; ready_b?: unknown }
             | undefined;
-          if (fa && typeof fa.t_us === "number") applyFrameAlign(fa as FrameAlignPayload);
+          if (fa && typeof fa.t_us === "number") applyFrameAlign(fa as FrameAlignPayload, true);
         } else if (msg.action === "align_authority" && typeof msg.payload?.src === "string") {
           // 后端权威接任时广播该跟谁
           currentAlignSrc.value = msg.payload.src as string;
@@ -557,8 +557,10 @@ export const useDirectorStore = defineStore("director", () => {
   /** 当前唯一权威 id——由后端选举决定（align_authority 通知 / state_sync.align_authority_src）。
    *  后端已只扇出权威的 frame_align，前端不再自己锁 src，避免拒绝后端合法接管的新权威。 */
   const currentAlignSrc = ref<string | null>(null);
-  function applyFrameAlign(p: FrameAlignPayload): void {
-    if (alignEngine.setExternalTUs(p.t_us, { ...p, src: p.src ?? currentAlignSrc.value ?? undefined })) {
+  function applyFrameAlign(p: FrameAlignPayload, replay = false): void {
+    if (p.match_id != null && p.match_id !== matchId.value) return;
+    if (p.account_id != null && p.account_id !== accountId.value) return;
+    if (alignEngine.setExternalTUs(p.t_us, { ...p, replay, src: p.src ?? currentAlignSrc.value ?? undefined })) {
       frameAlign.value = { tUs: p.t_us, readyA: !!p.ready_a, readyB: !!p.ready_b };
     }
   }
@@ -605,13 +607,12 @@ export const useDirectorStore = defineStore("director", () => {
       | "soon_pause"
       | "soon_reset"
       | "soon_set_target"
-      | "config_update"
-      | "frame_align",
+      | "config_update",
     payload?: Record<string, unknown>,
   ): boolean {
     // 已结束比赛仅锁定会改变比赛/直播配置的操作；场景切换只是舞台展示控制，
     // 仍应允许导播在结束后切换查看比赛详情 / 图池 / 赛程图等回放画面。
-    if (matchEnded.value && action !== "switch_scene" && action !== "frame_align") return false;
+    if (matchEnded.value && action !== "switch_scene") return false;
     // 同步本地状态（config_update 无需：发送方本地已保存，后端广播排除发送者）
     if (action === "switch_scene") {
       currentSceneCmd.value = (payload?.scene as string) ?? null;
@@ -638,22 +639,6 @@ export const useDirectorStore = defineStore("director", () => {
 
     // 发 WS（可排队：连接未就绪时暂存，open 后按序补发，断线窗口点按钮不丢指令）
     return socket.sendQueued(send.directorCommand(action, payload));
-  }
-
-  /** 节流广播虚拟时间 T + A/B 就绪（帧对齐跨文档一致性；发送者=舞台被后端排除不收到自己）。
-   *  由权威页（舞台）调用；观众页不调只收。ready 反映舞台真实上屏态，观众就绪胶囊据此显示。 */
-  let lastAlignT = 0;
-  let alignSeq = 0;
-  function sendFrameAlign(tUs: number, readyA?: boolean, readyB?: boolean, src = ""): void {
-    const now = performance.now();
-    if (now - lastAlignT < 400) return; // ~2.5Hz 足够（帧锁同帧由 30s 缓冲兜底）
-    lastAlignT = now;
-    // Never queue time anchors: replaying old playback positions after reconnect is unsafe.
-    socket.send(send.directorCommand("frame_align", {
-      t_us: tUs, ready_a: readyA ?? false, ready_b: readyB ?? false, src,
-      seq: ++alignSeq, rate: alignEngine.playback.speed,
-      paused: alignEngine.sync.state !== "playing",
-    }));
   }
 
   function nameOf(side: "A" | "B"): string {
@@ -757,7 +742,6 @@ export const useDirectorStore = defineStore("director", () => {
     soonCmdState,
     remoteConfig,
     sendDirectorCommand,
-    sendFrameAlign,
     connect,
     connectWithAuth,
     disconnect,

@@ -454,6 +454,29 @@ export class FrameLockStream {
     }
   }
 
+  canSeek(targetUs: number): boolean {
+    const coverage = this.coverage();
+    const key = this.findStartKeyframe(targetUs);
+    return !this.stopped && !!coverage && targetUs >= coverage.from && targetUs <= coverage.to &&
+      key >= 0 && this.raw[key]!.epoch === this.ingestEpoch;
+  }
+
+  /** Discard old decoder references and callbacks, then rebuild from the target GOP. */
+  seek(targetUs: number): boolean {
+    if (!this.canSeek(targetUs)) return false;
+    this.generation++;
+    this.decoder.close();
+    this.queue.clear();
+    this.pendingConfigure = false;
+    this.ready = false;
+    this.needKey = true;
+    this.decodedEpoch = -1;
+    this.decPos = this.findStartKeyframe(targetUs);
+    this.encapsulation = detectEncapsulation(this.raw[this.decPos]!.payload);
+    this.targetUs = targetUs;
+    return true;
+  }
+
   advance(targetUs: number): void {
     this.targetUs = targetUs;
     this.queue.advance(targetUs);

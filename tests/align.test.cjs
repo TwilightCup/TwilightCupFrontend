@@ -153,8 +153,8 @@ test('external clock interpolates, rejects old epoch/seq/time, then freezes stal
   assert(!c.accept({ t_us: 101e6, src: 'stage', epoch: 1, seq: 99 }, 210));
   assert(!c.accept({ t_us: 101e6, src: 'stage', epoch: 2, seq: 1 }, 210));
   assert(!c.accept({ t_us: 99e6, src: 'stage', epoch: 2, seq: 2 }, 210));
-  assert(c.accept({ t_us: 100.4e6, src: 'stage', epoch: 2, seq: 2, rate: 2 }, 400));
-  assert.equal(c.read(600).t, 100.8e6);
+  assert(c.accept({ t_us: 100.4e6, src: 'stage', epoch: 2, seq: 2, rate: 1.08 }, 400));
+  assert.equal(c.read(600).t, 100.616e6);
   assert(c.read(3000).stale);
   assert.equal(c.read(3000).t, c.read(10000).t);
 });
@@ -175,21 +175,23 @@ const { AlignEngine } = load('src/scenes/align/useFrameAlign.ts');
 const { FrameQueue } = load('src/scenes/align/frameQueue.ts');
 function mockStream(ready = true) {
   const queue = new FrameQueue();
-  return { queue, coverage: () => ({ from: 0, to: 100e6 }), ready,
+  return { queue, coverage: () => ({ from: 0, to: 100e6 }), ready, canSeek: () => true, seek() { queue.clear(); return true; },
     advance(t) { if (this.ready) queue.add({ rtUs: t, isKey: true, handle: {} }); }, stop() {} };
 }
 test('common presentation requires both streams; no committed T or one-sided readiness on miss', () => {
   const e = new AlignEngine(); e.setRequiredSides(['A', 'B']);
+  e.external.accept({ t_us: 70e6, rate: 1 }, 0);
   const a = mockStream(), b = mockStream(false);
   e.streams.set('A', a);
   e.tickLoop(0); assert.equal(e.tUs.value, null);
   e.streams.set('B', b);
   e.tickLoop(16); assert.equal(e.tUs.value, null); assert.equal(e.presented.A, false);
-  b.ready = true; e.tickLoop(32);
-  assert.equal(e.tUs.value, 70e6); assert.equal(e.sync.state, 'playing');
+  b.ready = true;
+  for (let t = 32; t <= 320; t += 16) e.tickLoop(t);
+  assert(e.tUs.value >= 70e6); const committed = e.tUs.value; assert.equal(e.sync.state, 'playing');
   b.ready = false; b.queue.clear();
-  e.tickLoop(48);
-  assert.equal(e.tUs.value, 70e6); assert.equal(e.presented.A, false); assert.equal(e.presented.B, false);
+  e.tickLoop(336);
+  assert.equal(e.tUs.value, committed); assert.equal(e.presented.A, false); assert.equal(e.presented.B, false);
   assert.equal(e.sync.state, 'frozen');
 });
 test('nearest never returns a distant frame', () => {
@@ -198,15 +200,6 @@ test('nearest never returns a distant frame', () => {
   assert(q.nearest(1.02e6));
 });
 
-const { RateController } = load('src/scenes/align/rateControl.ts');
-test('30s lag and 2x/15s catch-up are preserved without an automatic 60s jump', () => {
-  const rate = new RateController();
-  assert.equal(rate.step(0, [100e6, 101e6]), 70e6);
-  assert.equal(rate.step(1000, [200e6]), 71e6);
-  assert.equal(rate.speed, 2);
-  assert.equal(rate.step(15000, [215e6]), 101e6);
-  assert.equal(rate.speed, 1);
-});
 const { PresentationHistory } = load('src/scenes/align/presentationHistory.ts');
 const { TimerHistory } = load('src/scenes/align/timerHistory.ts');
 test('event snapshots preserve old gap/score/round and never reveal first future sample', () => {

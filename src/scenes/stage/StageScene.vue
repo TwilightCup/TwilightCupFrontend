@@ -45,11 +45,7 @@ const { config: alignCfg, load: loadCfg, refresh: refreshCfg } = useDirectorConf
  *  SeiStream 卸载只减自身计数，流不会被停。 */
 const preloadRelease: Partial<Record<Side, () => void>> = {};
 const preloaded = reactive<Record<Side, string>>({ A: "", B: "" });
-// 舞台即对齐权威：自己推进虚拟时间 T 并发广播；控制台/预览读广播的 T（见 store.applyFrameAlign）
-const alignSrcId = Math.random().toString(36).slice(2);
-watch(() => director.currentAlignSrc, src => {
-  alignEngine.setAuthority(!src || src === alignSrcId);
-}, { immediate: true });
+// All documents follow backend anchors; no page elects or publishes a clock.
 
 function ensureAlignPreload(): void {
   alignEngine.setRequiredSides((["A", "B"] as Side[]).filter(side =>
@@ -73,18 +69,6 @@ function ensureAlignPreload(): void {
   alignEngine.start(); // 主循环（珍藏状态解/推进，无 canvas 也持续）
 }
 
-// 作为对齐权威持续广播统一虚拟时间 T + A/B 就绪（节流由 store.sendFrameAlign 控制），
-// 供控制台/预览四路同一 T、就绪反映舞台真实态；后端排除发送方，舞台自己不进回环。
-// src=本文档唯一 id：多个舞台并存时观众页只跟随第一个/当前权威的 T，避免两套 T 对撞。
-let alignHeartbeat: ReturnType<typeof setInterval> | null = null;
-onMounted(() => {
-  alignHeartbeat = setInterval(() => {
-    const t = alignEngine.tUs.value;
-    if (t != null && (!director.currentAlignSrc || director.currentAlignSrc === alignSrcId)) {
-      director.sendFrameAlign(t, alignEngine.presented.A, alignEngine.presented.B, alignSrcId);
-    }
-  }, 400);
-});
 let loadedMatch = "";
 
 watch(
@@ -163,9 +147,7 @@ onMounted(() => {
 onUnmounted(() => {
   unwatchCmd?.();
   unwatchStorage?.();
-  if (alignHeartbeat) clearInterval(alignHeartbeat);
   for (const side of ["A", "B"] as Side[]) preloadRelease[side]?.();
-  alignEngine.setAuthority(false);
   director.disconnect();
 });
 

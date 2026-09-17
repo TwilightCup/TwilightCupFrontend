@@ -1,5 +1,8 @@
 # Frontend alignment stabilization
 
+> Historical record of bb99892. Authority, 2x catch-up and manual-only gap recovery
+> are superseded by [authority/catch-up correction](frame-align-authority-catchup.md).
+
 This change keeps HLS, the 30-second safety margin and the 1x / 2x catch-up rule.
 It does not configure the server or guarantee identical frames across browsers.
 

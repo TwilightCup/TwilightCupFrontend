@@ -1,16 +1,9 @@
-/**
- * 单一对齐权威 `alignEngine`（模块级单例）——四路渲染（舞台 A/B + 控制台 A/B）共用
- * 同一个虚拟时间 T 与同一份解码帧，保证导播在控制台所见与舞台像素一致（§1.2）。
- *
- * - 每条**唯一**流一个 FrameLockStream（Harvester→demux→SEI→WebCodecs→FrameQueue）。
- * - rAF 驱动：RateController 推进 T（§1.1），逐流 advance(T) 淘汰旧帧、nearest(T) 上屏，
- *   画到该侧**所有**已注册展示 canvas（舞台 canvas + 控制台 canvas 同帧同 T）。
- * - `modeOf(side)`='off' 时外层 SeiStream 回退 MSE StreamFrame；该侧其余展示不阻塞。
- */
+/** Per-document follower renderer. Backend anchors drive the target; only canvases
+ * inside this document share decoded frames. No local authority/election exists. */
 import { reactive, ref, type Ref } from "vue";
 import { ExternalClock, type FrameAlignAnchor } from "./externalClock";
 import type { FrameEntry } from "./frameQueue";
-import { RateController } from "./rateControl";
+import { CATCHUP, planCatchup, recoveryGate, type CatchupMode } from "./rateControl";
 import { FrameLockStream } from "./frameLock";
 import { createFrameSource } from "./transport";
 import { logAuth } from "./debugLog";
@@ -36,13 +29,15 @@ export function friendlyStreamError(e: unknown): string {
 export class AlignEngine {
   private streams = new Map<Side, FrameLockStream>();
   private canvases = new Map<Side, HTMLCanvasElement[]>();
-  private cfg = new RateController();
+  private catchupMode: CatchupMode = "normal";
+  private pendingSeek: number | null = null;
+  private stableMs = 0;
+  private missingMs = 0;
   private raf = 0;
   private last = 0;
   private running = false;
   private healthTimer: ReturnType<typeof setInterval> | null = null;
-  /** 隐藏兜底时钟：页面 hidden 时 rAF 全面暂停（OBS 浏览器源不在前台/最小化），
-   *  权威页会停发 frame_align → 所有跟随页冻结。退 setInterval 保底推进 + 广播。 */
+  /** Background readiness checks never publish or elect a clock. */
   private hiddenTimer: ReturnType<typeof setInterval> | null = null;
   private external = new ExternalClock();
   private requiredSides = new Set<Side>();
@@ -50,12 +45,10 @@ export class AlignEngine {
   private streamGenerations = new Map<Side, number>();
   readonly enabled = ref(false);
   readonly sync = reactive({ state: "waiting" as "waiting" | "playing" | "frozen" | "stale",
+    catchup: "wait" as CatchupMode, authorityUs: null as number | null,
     targetUs: null as number | null, pairErrorUs: null as number | null,
     presentedRt: { A: null, B: null } as Record<Side, number | null>,
     targetErrorUs: { A: null, B: null } as Record<Side, number | null> });
-
-  /** 本实例是否是对齐权威（舞台渲染页）：true 时不用外部 T，自己跑速率控制并发广播 */
-  private isAuthority = false;
 
   /** 虚拟对齐时间戳 T（epoch 微秒）；未就绪 null */
   readonly tUs: Ref<number | null> = ref(null);
@@ -75,17 +68,18 @@ export class AlignEngine {
   private lastTickTime = performance.now();
 
   get ready(): boolean {
-    return this.cfg.ready;
-  }
-
-  /** 标记本实例为对齐权威（舞台渲染页，自己推进 T 并广播）——便观众页不要覆盖自身的时钟 */
-  setAuthority(v: boolean): void {
-    this.isAuthority = v;
+    return this.tUs.value != null;
   }
 
   setExternalTUs(us: number | null, meta: Partial<FrameAlignAnchor> = {}): boolean {
-    if (us == null || this.isAuthority) return false;
-    return this.external.accept({ ...meta, t_us: us }, performance.now());
+    if (us == null) return false;
+    const revision = this.external.revision;
+    const accepted = this.external.accept({ ...meta, t_us: us }, performance.now());
+    if (accepted && revision !== this.external.revision) {
+      this.pendingSeek = null; this.stableMs = 0;
+      this.missingMs = CATCHUP.stallSeekMs; this.catchupMode = "normal";
+    }
+    return accepted;
   }
   selectAuthority(src: string): void { this.external.selectSource(src); }
   setRequiredSides(sides: Side[]): void {
@@ -99,7 +93,7 @@ export class AlignEngine {
     if (this.sourceUrls.get(side) !== url && this.streams.has(side)) {
       this.streams.get(side)!.stop();
       this.streams.delete(side);
-      this.cfg = new RateController();
+      this.pendingSeek = null; this.catchupMode = "normal";
     }
     this.enabled.value = true;
     if (!this.streams.has(side)) {
@@ -150,15 +144,17 @@ export class AlignEngine {
     if (!url) return;
     this.streams.get(side)?.stop();
     this.streams.delete(side);
-    this.cfg = new RateController(); // explicit operator recovery, not automatic timeline jump
+    this.pendingSeek = null; this.catchupMode = "normal"; // explicit operator recovery, not automatic timeline jump
     const release = this.startStream(side, url);
     release();
   }
   resetSession(): void {
     for (const stream of this.streams.values()) stream.stop();
     this.streams.clear(); this.refs.clear(); this.sourceUrls.clear();
-    this.external = new ExternalClock(); this.cfg = new RateController();
+    this.external = new ExternalClock(); this.pendingSeek = null; this.catchupMode = "normal";
     this.tUs.value = null; this.sync.state = "waiting";
+    this.stableMs = this.missingMs = 0;
+    this.sync.authorityUs = this.sync.targetUs = null; this.sync.catchup = "wait";
     this.modes.A = this.modes.B = "off";
     this.presented.A = this.presented.B = false;
     this.sync.presentedRt.A = this.sync.presentedRt.B = null;
@@ -234,7 +230,8 @@ export class AlignEngine {
     const sides = this.requiredSides.size ? [...this.requiredSides] : [...this.streams.keys()];
     const streams = sides.map(side => this.streams.get(side));
     const coverage = streams.map(stream => stream?.coverage() ?? null);
-    const freeze = (state: "waiting" | "frozen" | "stale") => {
+    const freeze = (state: "waiting" | "frozen" | "stale", keepRecovery = false) => {
+      if (!keepRecovery) this.stableMs = 0;
       this.sync.state = state;
       this.playback.speed = 0;
       for (const side of sides) this.presented[side] = false;
@@ -242,26 +239,50 @@ export class AlignEngine {
     if (!sides.length || coverage.some(c => !c)) { freeze("waiting"); return; }
     const frontiers = coverage.map(c => c!.to);
     const slow = Math.min(...frontiers);
-    const required = slow - this.cfg.backUs;
+    const required = slow - CATCHUP.backUs;
     const earliest = Math.max(...coverage.map(c => c!.from));
+    const external = this.external.read(now);
+    if (!external) { freeze("waiting"); return; }
+    this.sync.authorityUs = external.t;
+    if (external.stale) { freeze("stale"); return; }
     if (earliest > required) { freeze("waiting"); return; }
-    const previous = this.cfg.checkpoint();
-    const external = this.isAuthority ? null : this.external.read(now);
-    if (external?.stale) { freeze("stale"); return; }
-    const T = external ? external.t : this.cfg.step(elapsed, frontiers);
+    const plan = planCatchup({ current: this.tUs.value, authority: external.t,
+      from: earliest, safeTo: required, elapsedMs: elapsed, rate: external.rate,
+      supply: true, mode: this.catchupMode, recovering: this.missingMs >= CATCHUP.stallSeekMs });
+    if (this.pendingSeek != null && (this.pendingSeek < earliest || this.pendingSeek > required ||
+        this.missingMs >= CATCHUP.stallSeekMs)) {
+      this.pendingSeek = null;
+    }
+    if (this.pendingSeek == null && plan.mode === "seek" && plan.t != null) {
+      if (!streams.every(stream => stream!.canSeek(plan.t!))) { freeze("waiting"); return; }
+      // Preflight both GOPs before invalidating either decoder. Commit T only after both decode.
+      for (const stream of streams) stream!.seek(plan.t);
+      this.pendingSeek = plan.t;
+      this.stableMs = 0;
+      this.missingMs = 0;
+    }
+    const T = this.pendingSeek ?? plan.t;
+    this.sync.catchup = this.pendingSeek != null ? "seek" : plan.mode;
     this.sync.targetUs = T;
-    if (T < earliest || T > required || (this.tUs.value != null && T < this.tUs.value)) {
-      this.cfg.restore(previous); freeze("frozen"); return;
+    if (T == null || (this.pendingSeek == null && plan.mode === "wait") || T > external.t ||
+        T < earliest || T > required || (this.tUs.value != null && T < this.tUs.value)) {
+      freeze("frozen"); return;
     }
     const frames: FrameEntry[] = [];
     for (const stream of streams) {
       stream!.advance(T);
-      const frame = stream!.queue.nearest(T, 40_000);
+      const frame = stream!.queue.nearest(T, CATCHUP.maxFrameErrorUs);
       if (frame) frames.push(frame);
     }
     const pairError = frames.length ? Math.max(...frames.map(f => f.rtUs)) - Math.min(...frames.map(f => f.rtUs)) : null;
-    if (frames.length !== sides.length || (pairError ?? Infinity) > 40_000) {
-      this.cfg.restore(previous); freeze("frozen"); return;
+    if (frames.length !== sides.length || (pairError ?? Infinity) > CATCHUP.maxFrameErrorUs) {
+      this.missingMs += elapsed; this.stableMs = 0; this.catchupMode = "normal";
+      freeze("frozen"); return;
+    }
+    if (this.pendingSeek != null || this.missingMs > 0) {
+      const gate = recoveryGate(this.stableMs, true, elapsed);
+      this.stableMs = gate.stableMs;
+      if (!gate.ready) { freeze("frozen", true); return; }
     }
     // Stage all draws before touching any visible canvas. A missing/closed frame cannot
     // advance one side alone. JS canvas commits run in the same task, before browser paint.
@@ -274,7 +295,8 @@ export class AlignEngine {
         }
       }
     } catch {
-      this.cfg.restore(previous); freeze("frozen"); return;
+      this.missingMs += elapsed; this.stableMs = 0; this.catchupMode = "normal";
+      freeze("frozen"); return;
     }
     for (const { canvas, buffer } of prepared) {
       if (canvas.width !== buffer.width) canvas.width = buffer.width;
@@ -284,7 +306,9 @@ export class AlignEngine {
     this.tUs.value = T; // committed presentation time; overlays must never use targetUs
     this.sync.state = "playing";
     this.sync.pairErrorUs = pairError;
-    this.playback.speed = external ? external.rate : this.cfg.speed;
+    this.playback.speed = this.pendingSeek != null ? 0 : plan.rate;
+    this.catchupMode = plan.mode === "soft" ? "soft" : "normal";
+    this.pendingSeek = null; this.missingMs = 0; this.stableMs = 0;
     this.playback.behindS = (required - T) / 1e6;
     for (let i = 0; i < sides.length; i++) {
       const side = sides[i]!;
@@ -320,5 +344,5 @@ export class AlignEngine {
 
 }
 
-/** 共享单例：舞台与控制台都引用它，读同一 T、同一帧。 */
+/** Document-local singleton; separate pages follow WS anchors independently. */
 export const alignEngine = new AlignEngine();
