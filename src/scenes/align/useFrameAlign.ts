@@ -1,9 +1,9 @@
-/** Per-document follower renderer. Backend anchors drive the target; only canvases
- * inside this document share decoded frames. No local authority/election exists. */
+/** Per-document renderer. The server elects one publisher; other documents follow
+ * its relayed anchors. Only canvases inside this document share decoded frames. */
 import { reactive, ref, type Ref } from "vue";
 import { ExternalClock, type FrameAlignAnchor } from "./externalClock";
 import type { FrameEntry } from "./frameQueue";
-import { CATCHUP, planCatchup, recoveryGate, type CatchupMode } from "./rateControl";
+import { CATCHUP, planCatchup, recoveryGate, publisherTarget, type CatchupMode } from "./rateControl";
 import { FrameLockStream } from "./frameLock";
 import { createFrameSource } from "./transport";
 import { logAuth } from "./debugLog";
@@ -40,11 +40,14 @@ export class AlignEngine {
   /** Background readiness checks never publish or elect a clock. */
   private hiddenTimer: ReturnType<typeof setInterval> | null = null;
   private external = new ExternalClock();
+  private publisher = false;
+  private authorityFloor: number | null = null;
   private requiredSides = new Set<Side>();
   private sourceUrls = new Map<Side, string>();
   private streamGenerations = new Map<Side, number>();
   readonly enabled = ref(false);
   readonly sync = reactive({ state: "waiting" as "waiting" | "playing" | "frozen" | "stale",
+    role: "follower" as "publisher" | "follower",
     catchup: "wait" as CatchupMode, authorityUs: null as number | null,
     targetUs: null as number | null, pairErrorUs: null as number | null,
     presentedRt: { A: null, B: null } as Record<Side, number | null>,
@@ -71,10 +74,30 @@ export class AlignEngine {
     return this.tUs.value != null;
   }
 
+  /** Called only after validating the backend connection-specific role assignment. */
+  setPublisher(selected: boolean): void {
+    if (this.publisher !== selected) {
+      this.pendingSeek = null; this.stableMs = 0; this.catchupMode = "normal";
+    }
+    this.publisher = selected;
+    this.sync.role = selected ? "publisher" : "follower";
+  }
+  resetClockConnection(): void {
+    this.publisher = false; this.sync.role = "follower";
+    this.external = new ExternalClock();
+    this.authorityFloor = this.tUs.value;
+    this.pendingSeek = null; this.stableMs = 0;
+    this.sync.authorityUs = null;
+    this.sync.state = "waiting";
+    this.presented.A = this.presented.B = false;
+    this.playback.speed = 0;
+  }
+
   setExternalTUs(us: number | null, meta: Partial<FrameAlignAnchor> = {}): boolean {
     if (us == null) return false;
     const revision = this.external.revision;
     const accepted = this.external.accept({ ...meta, t_us: us }, performance.now());
+    if (accepted) this.authorityFloor = Math.max(this.authorityFloor ?? us, us);
     if (accepted && revision !== this.external.revision) {
       this.pendingSeek = null; this.stableMs = 0;
       this.missingMs = CATCHUP.stallSeekMs; this.catchupMode = "normal";
@@ -151,6 +174,7 @@ export class AlignEngine {
   resetSession(): void {
     for (const stream of this.streams.values()) stream.stop();
     this.streams.clear(); this.refs.clear(); this.sourceUrls.clear();
+    this.publisher = false; this.sync.role = "follower"; this.authorityFloor = null;
     this.external = new ExternalClock(); this.pendingSeek = null; this.catchupMode = "normal";
     this.tUs.value = null; this.sync.state = "waiting";
     this.stableMs = this.missingMs = 0;
@@ -241,7 +265,11 @@ export class AlignEngine {
     const slow = Math.min(...frontiers);
     const required = slow - CATCHUP.backUs;
     const earliest = Math.max(...coverage.map(c => c!.from));
-    const external = this.external.read(now);
+    const localTarget = this.publisher ? publisherTarget(earliest, slow,
+      Math.max(this.authorityFloor ?? 0, this.tUs.value ?? 0), this.tUs.value == null) : null;
+    const external = this.publisher
+      ? localTarget == null ? null : { t: localTarget, rate: 1, stale: false }
+      : this.external.read(now);
     if (!external) { freeze("waiting"); return; }
     this.sync.authorityUs = external.t;
     if (external.stale) { freeze("stale"); return; }
@@ -303,10 +331,11 @@ export class AlignEngine {
       if (canvas.height !== buffer.height) canvas.height = buffer.height;
       canvas.getContext("2d")!.drawImage(buffer, 0, 0);
     }
+    const advanced = this.tUs.value == null || T > this.tUs.value;
     this.tUs.value = T; // committed presentation time; overlays must never use targetUs
     this.sync.state = "playing";
     this.sync.pairErrorUs = pairError;
-    this.playback.speed = this.pendingSeek != null ? 0 : plan.rate;
+    this.playback.speed = this.pendingSeek != null || !advanced ? 0 : plan.rate;
     this.catchupMode = plan.mode === "soft" ? "soft" : "normal";
     this.pendingSeek = null; this.missingMs = 0; this.stableMs = 0;
     this.playback.behindS = (required - T) / 1e6;

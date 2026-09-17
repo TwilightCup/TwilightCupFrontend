@@ -247,6 +247,11 @@ export const send = {
 
 export interface SrvAuthOk {
   type: "auth_ok";
+  connection_id?: string;
+  align_role?: "publisher" | "follower";
+  align_authority_src?: string;
+  authority_epoch?: number;
+
   account_id: string;
   display_name: string;
   seat: SeatName;

@@ -45,7 +45,7 @@ const { config: alignCfg, load: loadCfg, refresh: refreshCfg } = useDirectorConf
  *  SeiStream 卸载只减自身计数，流不会被停。 */
 const preloadRelease: Partial<Record<Side, () => void>> = {};
 const preloaded = reactive<Record<Side, string>>({ A: "", B: "" });
-// All documents follow backend anchors; no page elects or publishes a clock.
+// Role is assigned by the backend in the director store, including standalone consoles.
 
 function ensureAlignPreload(): void {
   alignEngine.setRequiredSides((["A", "B"] as Side[]).filter(side =>

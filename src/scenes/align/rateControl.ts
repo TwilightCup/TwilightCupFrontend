@@ -1,4 +1,4 @@
-/** Follower presentation policy. Authority time is an input, never elected here.
+/** Shared presentation policy. Role election belongs exclusively to the backend.
  * All positions/errors are SEI epoch microseconds; elapsedMs is local monotonic time.
  */
 export const CATCHUP = {
@@ -45,4 +45,10 @@ export function planCatchup(i: CatchupInput): CatchupPlan {
 export function recoveryGate(stableMs: number, available: boolean, elapsedMs: number) {
   const next = available ? stableMs + Math.max(0, Math.min(100, elapsedMs)) : 0;
   return { stableMs: next, ready: next >= CATCHUP.recoveryMs };
+}
+
+/** 30s safety plus segment cadence at startup; 1.2s covers 1.08x extrapolation and frame error. */
+export function publisherTarget(from: number, slowTo: number, floor: number | null, startup = true): number | null {
+  const target = slowTo - CATCHUP.backUs - (startup ? 3_000_000 : 1_200_000);
+  return target >= from && target >= (floor ?? -Infinity) ? target : null;
 }

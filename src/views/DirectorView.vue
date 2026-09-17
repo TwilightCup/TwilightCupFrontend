@@ -239,7 +239,7 @@ function healthText(side: "A" | "B"): string {
   }
   const sync = alignEngine.sync;
   const errMs = sync.targetErrorUs[side];
-  const timing = ` · ${sync.state}/${sync.catchup} · T误差${errMs == null ? "—" : (errMs / 1000).toFixed(1)}ms · AB${sync.pairErrorUs == null ? "—" : (sync.pairErrorUs / 1000).toFixed(1)}ms`;
+  const timing = ` · ${sync.role}/${sync.state}/${sync.catchup} · T误差${errMs == null ? "—" : (errMs / 1000).toFixed(1)}ms · AB${sync.pairErrorUs == null ? "—" : (sync.pairErrorUs / 1000).toFixed(1)}ms`;
   const diag = timing + ` · ×${pb.speed.toFixed(2)} · 追${pb.behindS.toFixed(1)}s · 队列${h.queueLen} · 重${h.resyncs}${h.resyncGap ? `段${h.resyncGap}` : ""}${h.resyncErr ? `错${h.resyncErr}` : ""}`;
   // 解码流水线：原始环/解码游标/封装/解码累计输出（定位"队列0/没画面"）
   const pipe = ` · raw${h.rawLen}/pos${h.decPos}/${h.enc || "-"}/出${h.decOutput}/qc${h.qc}/pn${h.pendCfg ? "1" : "0"}`;
@@ -283,14 +283,10 @@ function readyState(side: "A" | "B"): { cls: string; label: string } {
   const on = side === "A" ? cfgConfig.alignA : cfgConfig.alignB;
   const url = side === "A" ? cfgConfig.hlsA : cfgConfig.hlsB;
   if (!on || !url) return { cls: "off", label: "未启用" };
-  const fa = director.frameAlign;
-  const stageReady = fa ? side === "A" ? fa.readyA : fa.readyB : null;
-  if (alignEngine.sync.authorityUs == null) return { cls: "wait", label: "等待后端权威时间" };
+  if (alignEngine.sync.authorityUs == null) return { cls: "wait", label: director.alignRole === "publisher" ? "主时钟攒缓冲中" : "等待主时钟" };
   if (alignEngine.sync.state === "stale") return { cls: "wait", label: "同步失联，已冻结" };
   if (alignEngine.sync.state !== "playing") return { cls: "wait", label: "等待共同帧" };
-  if (stageReady === true) return { cls: "ok", label: "已就绪" };
   if (alignEngine.streamError[side]) return { cls: "err", label: "拉不到流" };
-  if (stageReady === false) return { cls: "wait", label: "攒缓冲中" };
   const h = alignEngine.health[side];
   if (h.frames === 0 && !h.hasContent) return { cls: "wait", label: "无内容" };
   if (!alignEngine.presented[side]) return { cls: "wait", label: "攒缓冲中" };
