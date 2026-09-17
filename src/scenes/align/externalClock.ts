@@ -4,6 +4,9 @@
  */
 export interface FrameAlignAnchor {
   t_us: number;
+  /** Publisher-selected presentation membership, independent of local readiness. */
+  active_sides?: ("A" | "B")[];
+  waiting_sides?: ("A" | "B")[];
   src?: string;
   epoch?: number;
   seq?: number;

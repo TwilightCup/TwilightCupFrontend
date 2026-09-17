@@ -15,6 +15,7 @@ import { parseSampleSei, parseAnnexbFrames, splitAvcc } from "./sei";
 import { FrameQueue } from "./frameQueue";
 import { logSeg, logDec, logResync } from "./debugLog";
 import type { FrameSource, RawSegment } from "./transport";
+import { CATCHUP } from "./rateControl";
 import type { Codec, SeiFrameInfo, StreamHealth } from "./types";
 
 /** 解码器薄接口（可替换/测试） */
@@ -518,6 +519,11 @@ export class FrameLockStream {
       this.decPos = start;
       this.needKey = true;
       this.encapsulation = detectEncapsulation(this.raw[start]!.payload);
+    }
+    // Old displayed pixels live in canvas; VideoFrames outside nearest(T)'s
+    // tolerance must not hold the budget while the decoder needs more input.
+    if (this.queue.bytes + (this.decoder.pendingSize + 1) * this.frameBytes > 128 * 1024 * 1024) {
+      this.queue.discardBefore(targetUs - CATCHUP.maxFrameErrorUs);
     }
     let fed = 0;
     while (this.decPos < this.raw.length && this.decoder.queueSize < 12 &&

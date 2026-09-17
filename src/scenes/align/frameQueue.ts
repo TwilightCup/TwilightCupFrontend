@@ -104,6 +104,18 @@ export class FrameQueue {
     return removed;
   }
 
+  /** Release only frames that can no longer qualify for a monotonic target.
+   * Future frames are never discarded to make room for decoder input. */
+  discardBefore(minUs: number): number {
+    let removed = 0;
+    while (this.entries.length && this.entries[0]!.rtUs < minUs) {
+      this.drop(this.entries.shift()!);
+      removed++;
+    }
+    this.dropped += removed;
+    return removed;
+  }
+
   clear(): void {
     for (const e of this.entries) this.drop(e);
     this.entries = [];

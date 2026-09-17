@@ -262,6 +262,8 @@ export const useDirectorStore = defineStore("director", () => {
       rate: playing ? alignEngine.playback.speed : 0,
       paused: !playing, frozen: !playing,
       ready_a: alignEngine.presented.A, ready_b: alignEngine.presented.B,
+      active_sides: [...alignEngine.sync.activeSides],
+      waiting_sides: [...alignEngine.sync.waitingSides],
     })); // Never queue a time anchor across reconnect.
   }
 

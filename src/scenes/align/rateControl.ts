@@ -33,7 +33,7 @@ export function planCatchup(i: CatchupInput): CatchupPlan {
   if (!Number.isFinite(target) || target < i.from || !i.supply ||
       (i.current != null && target < i.current)) return wait;
   const reserve = i.publisher ? CATCHUP.publisherReserveUs : 0;
-  if (i.current == null || i.current < i.from || target - i.current >= CATCHUP.hardUs + reserve || i.recovering) {
+  if (i.current == null || i.current < i.from || (!i.publisher && target - i.current >= CATCHUP.hardUs) || i.recovering) {
     // Recovery must also leave cadence headroom; seeking to the ceiling would
     // immediately recreate the stop/start cycle on the next segment boundary.
     const seekTo = i.publisher && i.current != null ? Math.max(i.current, i.from, target - reserve) : target;
