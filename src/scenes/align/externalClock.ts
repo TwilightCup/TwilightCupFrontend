@@ -37,6 +37,11 @@ export class ExternalClock {
   private lastOutput = -Infinity;
   private seenSources = new Set<string>();
   get attached(): boolean { return this.anchor !== null; }
+  /** Includes paused anchors: a live owner still controls decoder targets. */
+  hasFreshAuthority(now: number): boolean {
+    return this.anchor != null && !this.anchor.staleReplay && now - this.anchor.received <= 1500 &&
+      !(this.selected && this.allowedSource == null);
+  }
 
   selectSource(src: string | null, epoch?: number): void {
     this.selected = true; this.allowedSource = src;

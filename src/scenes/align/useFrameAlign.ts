@@ -134,6 +134,11 @@ export class AlignEngine {
     const revision = this.external.revision;
     const accepted = this.external.accept({ ...meta, t_us: us }, performance.now());
     if (accepted) {
+      if (this.candidateProbe != null && this.external.hasFreshAuthority(performance.now())) {
+        this.candidateProbe = null; this.sync.candidate = "off";
+        this.pendingSeek = null; this.waitingT = null;
+        this.takeoverSeek = true; this.lastSeekAt = -Infinity;
+      }
       this.authorityFloor = Math.max(this.authorityFloor ?? us, us);
       this.remoteSides = meta.active_sides == null ? null : [...meta.active_sides];
       this.remoteWaiting = [...(meta.waiting_sides ?? [])];
@@ -162,7 +167,9 @@ export class AlignEngine {
     let active = this.sync.activeSides.filter(s => required.includes(s));
     let media = false, decoded = false;
     const progress = Math.floor(this.tUs.value ?? 0);
-    const preparing = !this.publisher && (this.tUs.value == null || !this.external.attached || this.sync.state === "stale" || !active.length);
+    // First presentation may be pending even with a valid authority. Never let
+    // lease sampling seek the same decoder away from normal follower startup.
+    const preparing = !this.publisher && !this.external.hasFreshAuthority(now);
     if (preparing) {
       active = required.filter(s => {
         const c = this.streams.get(s)?.coverage();
