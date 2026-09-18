@@ -7,6 +7,7 @@
  * side='A' 蓝（左）、'B' 红（右）。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { usePanelVisibility } from "@/scenes/composables/usePanelVisibility";
 import { streamWaitingText } from "@/scenes/align/streamStatus";
 import { bi } from "@/utils/bilingual";
 import { alignEngine, type Side } from "@/scenes/align/useFrameAlign";
@@ -14,6 +15,9 @@ import { alignEngine, type Side } from "@/scenes/align/useFrameAlign";
 const props = withDefaults(
   defineProps<{
     side: Side;
+    /** Director-only output budget; standalone stage remains full resolution. */
+    previewWidth?: number;
+    previewHeight?: number;
     /** 该侧对齐流 URL（m3u8）；空则不启动 */
     url: string;
     /** 对齐开关（配置 alignA/B）；关 → 父组件换 StreamFrame */
@@ -30,6 +34,7 @@ const props = withDefaults(
 );
 
 const cv = ref<HTMLCanvasElement | null>(null);
+const panelVisible = props.previewWidth ? usePanelVisibility(cv) : null;
 const aligned = ref(false);
 /** 本侧拉流错误（可读文案；无则 null）。来自 alignEngine.streamError（响应式） */
 const pullErr = computed(() => alignEngine.streamError[props.side]);
@@ -75,7 +80,10 @@ watch(
 // canvas 元素随 aligned 出现/消失 → 注册/注销到权威（同一侧可多 canvas）
 watch(cv, (c) => {
   unreg?.();
-  unreg = c ? alignEngine.registerCanvas(props.side, c) : null;
+  unreg = c ? alignEngine.registerCanvas(props.side, c, props.previewWidth ? {
+    maxWidth: props.previewWidth, maxHeight: props.previewHeight ?? 360,
+    visible: () => panelVisible?.value ?? false,
+  } : undefined) : null;
 }, { flush: "post" });
 </script>
 

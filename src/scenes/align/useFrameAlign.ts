@@ -2,6 +2,7 @@
  * its relayed anchors. Only canvases inside this document share decoded frames. */
 import { reactive, ref, type Ref } from "vue";
 import type { LeaseSample } from "./frameLeaseClient";
+import { DirectorFrameRenderer, type DirectorSurfaceOptions } from "./directorFrameRenderer";
 import { PlaybackDriver } from "./playbackDriver";
 import { SignalRecovery, SIGNAL } from "./signalPolicy";
 import { ExternalClock, type FrameAlignAnchor } from "./externalClock";
@@ -35,6 +36,8 @@ export class AlignEngine {
   hasCanvasImage(canvas: HTMLCanvasElement | null): boolean {
     return canvas != null && this.paintedCanvases.has(canvas);
   }
+  private directorRenderer = new DirectorFrameRenderer();
+  private surfaceOptions = new WeakMap<HTMLCanvasElement, DirectorSurfaceOptions>();
   private canvases = new Map<Side, HTMLCanvasElement[]>();
   private catchupMode: CatchupMode = "normal";
   private pendingSeek: number | null = null;
@@ -278,6 +281,7 @@ export class AlignEngine {
   resetSession(): void {
     for (const stream of this.streams.values()) stream.stop();
     this.streams.clear(); this.refs.clear(); this.sourceUrls.clear();
+    this.directorRenderer.clear();
     this.paintedCanvases.clear(); this.candidateProbe = null; this.sync.candidate = "off";
     this.takeoverSeek = false;
     this.publisher = false; this.sync.role = "follower"; this.authorityFloor = null;
@@ -300,7 +304,9 @@ export class AlignEngine {
   }
   /** 重挂流时还原"未上屏"状态（下轮攒够缓冲再提） */
   private resetPresented(side: Side): void {
-    for (const canvas of this.canvases.get(side) ?? []) this.paintedCanvases.delete(canvas);
+    for (const canvas of this.canvases.get(side) ?? []) {
+      this.paintedCanvases.delete(canvas); this.directorRenderer.forget(canvas);
+    }
     this.presented[side] = false;
     this.sync.presentedRt[side] = null;
     this.sync.targetErrorUs[side] = null;
@@ -309,19 +315,21 @@ export class AlignEngine {
     return this.streams.get(side)?.frontier() ?? null;
   }
   /** 已注册展示 canvas 数（供监控统计） */
-  registerCanvas(side: Side, canvas: HTMLCanvasElement): () => void {
+  registerCanvas(side: Side, canvas: HTMLCanvasElement, options?: DirectorSurfaceOptions): () => void {
+    if (options) this.surfaceOptions.set(canvas, options);
     const arr = this.canvases.get(side) ?? [];
     arr.push(canvas);
     this.canvases.set(side, arr);
     return () => this.unregisterCanvas(side, canvas);
   }
   private unregisterCanvas(side: Side, canvas: HTMLCanvasElement): void {
+    this.surfaceOptions.delete(canvas); this.directorRenderer.forget(canvas);
     this.paintedCanvases.delete(canvas);
     const arr = this.canvases.get(side);
     if (!arr) return;
     const i = arr.indexOf(canvas);
     if (i >= 0) arr.splice(i, 1);
-    if (arr.length === 0) this.canvases.delete(side);
+    if (arr.length === 0) { this.canvases.delete(side); this.directorRenderer.release(side); }
   }
   /* ---- 主循环 ---- */
   private refreshHealth(): void {
@@ -495,10 +503,17 @@ export class AlignEngine {
     }
     // Stage all draws before touching any visible canvas. A missing/closed frame cannot
     // advance one side alone. JS canvas commits run in the same task, before browser paint.
+    const directorCommits: (() => HTMLCanvasElement[])[] = [];
     const prepared: { canvas: HTMLCanvasElement; buffer: HTMLCanvasElement }[] = [];
     try {
       for (let i = 0; i < sides.length; i++) {
+        const side = sides[i]!;
+        const optimized = (this.canvases.get(side) ?? []).filter(c => this.surfaceOptions.has(c));
+        if (optimized.length) directorCommits.push(this.directorRenderer.prepare(side,
+          frames[i]!.handle as globalThis.VideoFrame, this.streamGenerations.get(side) ?? 0,
+          optimized.map(canvas => ({ canvas, options: this.surfaceOptions.get(canvas)! }))));
         for (const canvas of this.canvases.get(sides[i]!) ?? []) {
+          if (this.surfaceOptions.has(canvas)) continue;
           const buffer = this.drawBuffer(canvas, frames[i]!.handle as globalThis.VideoFrame);
           prepared.push({ canvas, buffer });
         }
@@ -514,6 +529,7 @@ export class AlignEngine {
       canvas.getContext("2d")!.drawImage(buffer, 0, 0);
       this.paintedCanvases.add(canvas);
     }
+    for (const commit of directorCommits) for (const canvas of commit()) this.paintedCanvases.add(canvas);
     const advanced = this.tUs.value == null || T > this.tUs.value;
     this.tUs.value = T; // committed presentation time; overlays must never use targetUs
     this.sync.state = "playing";

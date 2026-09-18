@@ -10,6 +10,7 @@ import AccountMenu from "@/components/AccountMenu.vue";
 import ColorField from "@/components/ColorField.vue";
 import StreamFrame from "@/scenes/match/StreamFrame.vue";
 import SeiStream from "@/scenes/match/SeiStream.vue";
+import { usePanelVisibility } from "@/scenes/composables/usePanelVisibility";
 import { alignEngine } from "@/scenes/align/useFrameAlign";
 import AuthFailMask from "@/components/AuthFailMask.vue";
 import { requestSpeedrunRefresh } from "@/api/speedrun";
@@ -430,14 +431,18 @@ const previewManual = ref<SceneKey | null>(null);
 const previewScene = computed<SceneKey>(() => previewManual.value ?? autoPreviewScene.value);
 /**
  * 各可预览场景的独立入口页链接：每个场景一个常驻 iframe，全部加载后仅切显隐（v-show），
- * 场景保持连接与数据，切场景不重载（与 OBS 舞台观感一致）。配置经同源 localStorage +
+ * 场景保持连接与数据；非活动比赛预览只停媒体，不改背景。配置经同源 localStorage +
  * WS config_update 实时并入场景，不经 URL 重载，故此处不放配置参数，URL 只随
  * token / 比赛 / 赛事变化（换场才重载）。
  */
 const previewUrlMap = computed<Partial<Record<SceneKey, string>>>(() => {
   const map: Partial<Record<SceneKey, string>> = {};
   for (const k of MANUAL_PREVIEW_SCENES) {
-    map[k] = directorPageUrl(PREVIEW_PAGES[k] ?? "mappool.html");
+    const base = directorPageUrl(PREVIEW_PAGES[k] ?? "mappool.html");
+    if (!base) continue;
+    const url = new URL(base, location.href);
+    url.searchParams.set("director_preview", "1");
+    map[k] = url.href;
   }
   return map;
 });
@@ -454,6 +459,22 @@ function onPickPreviewScene(v: unknown): void {
 // iframe 固定按 1920×1080 渲染再整体缩放到面板宽（与 OBS 浏览器源同口径，
 // 场景内 vw/clamp 版式不随面板尺寸变形）
 const previewWrapEl = ref<HTMLDivElement | null>(null);
+const previewVisible = usePanelVisibility(previewWrapEl);
+const monitorEl = ref<HTMLDivElement | null>(null);
+const monitorVisible = usePanelVisibility(monitorEl);
+function syncPreviewMedia(): void {
+  for (const frame of previewWrapEl.value?.querySelectorAll<HTMLIFrameElement>("iframe") ?? []) {
+    frame.contentWindow?.postMessage({ type: "director-preview-media",
+      active: previewVisible.value && frame.dataset.scene === previewScene.value }, location.origin);
+  }
+}
+function previewReady(event: MessageEvent): void {
+  if (event.origin !== location.origin || event.data?.type !== "director-preview-ready") return;
+  if ([...(previewWrapEl.value?.querySelectorAll("iframe") ?? [])].some(frame => frame.contentWindow === event.source)) syncPreviewMedia();
+}
+watch([previewScene, previewVisible], syncPreviewMedia, { flush: "post" });
+onMounted(() => window.addEventListener("message", previewReady));
+onUnmounted(() => window.removeEventListener("message", previewReady));
 const previewScale = ref(0.18);
 let previewRo: ResizeObserver | null = null;
 onMounted(() => {
@@ -727,6 +748,8 @@ onUnmounted(() => {
             <template v-for="key in MANUAL_PREVIEW_SCENES" :key="key">
               <iframe
                 :src="previewUrlMap[key] || undefined"
+                :data-scene="key"
+                @load="syncPreviewMedia"
                 v-show="previewScene === key"
                 class="preview-frame"
                 :style="{ transform: `scale(${previewScale})` }"
@@ -843,7 +866,7 @@ onUnmounted(() => {
               <span class="h-val" :class="healthCls('B')">{{ healthText('B') }}</span>
             </div>
           </div>
-          <div class="stream-preview">
+          <div ref="monitorEl" class="stream-preview">
             <div class="sp-col">
               <!-- 隐藏态仅作视觉提示（画面本身仍实时播放供监控），舞台已切等待占位 -->
               <div class="sp-frame">
@@ -854,10 +877,12 @@ onUnmounted(() => {
                   :url="cfgConfig.hlsA"
                   :refresh-nonce="cfgConfig.refreshA"
                   :enabled="previewAlignedA"
+                  :preview-width="640"
+                  :preview-height="360"
                   :crop4to3="true"
                 />
                 <StreamFrame
-                  v-else
+                  v-else-if="monitorVisible"
                   side="A"
                   :hls-url="cfgConfig.hlsA"
                   :embed-url="cfgConfig.embedA"
@@ -880,10 +905,12 @@ onUnmounted(() => {
                   :url="cfgConfig.hlsB"
                   :refresh-nonce="cfgConfig.refreshB"
                   :enabled="previewAlignedB"
+                  :preview-width="640"
+                  :preview-height="360"
                   :crop4to3="true"
                 />
                 <StreamFrame
-                  v-else
+                  v-else-if="monitorVisible"
                   side="B"
                   :hls-url="cfgConfig.hlsB"
                   :embed-url="cfgConfig.embedB"
