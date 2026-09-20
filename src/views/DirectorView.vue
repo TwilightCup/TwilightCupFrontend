@@ -214,6 +214,7 @@ const showB = computed({
 // 否则 MSE StreamFrame 兜底
 const previewAlignedA = computed(() => !!cfgConfig.alignA && !!cfgConfig.hlsA);
 const previewAlignedB = computed(() => !!cfgConfig.alignB && !!cfgConfig.hlsB);
+const showStreamDebug = ref(true);
 
 // 拉流失败只内联显示在 A/B 位置（指标条/画面占位），不弹窗打扰
 
@@ -712,7 +713,17 @@ onUnmounted(() => {
         <!-- 选手画面监控：与舞台同源同配置实时预览（不受隐藏开关影响——先验证
              画面加载正常，再开上方显示开关放上台；刷新按钮同时重拉预览与舞台） -->
         <div class="card">
-          <div class="card-title">{{ $t("directorView.previewTitle") }}</div>
+          <div class="card-title monitor-title">
+            <span>{{ $t("directorView.previewTitle") }}</span>
+            <el-button
+              size="small"
+              :aria-expanded="showStreamDebug"
+              aria-controls="stream-debug-info"
+              @click="showStreamDebug = !showStreamDebug"
+            >
+              {{ $t(showStreamDebug ? "directorView.hideStreamDebug" : "directorView.showStreamDebug") }}
+            </el-button>
+          </div>
           <p class="hint">{{ $t("directorView.previewHint") }}</p>
           <!-- 直播画面实时控制：显示开关 + 应急重拉流（独立管 A/B，即时广播到舞台，与下方预览列对齐） -->
           <div class="cfg-ctl">
@@ -731,7 +742,7 @@ onUnmounted(() => {
               </el-button>
             </div>
           </div>
-          <div class="align-health">
+          <div v-if="showStreamDebug" id="stream-debug-info" class="align-health">
             <div v-if="!alignEngine.loopAlive.value || alignEngine.loopErr.value" class="h-row loop">
               <span class="h-ready err">
                 {{ alignEngine.loopAlive.value ? "循环异常" : "主循环卡死" }}：{{ alignEngine.loopErr.value || "无报错（看门狗）" }}
@@ -1081,6 +1092,13 @@ onUnmounted(() => {
   color: var(--tc-text-dim);
   margin-bottom: 8px;
   letter-spacing: 0.5px;
+}
+.monitor-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 .round-line {
   display: flex;

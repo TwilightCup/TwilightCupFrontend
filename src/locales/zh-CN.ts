@@ -532,6 +532,8 @@ const messages = {
   "directorView.refreshSpeedrun": "重拉Speedrun",
   "directorView.speedrunRefreshDone": "已请求重新拉取 speedrun.com 数据",
   "directorView.previewTitle": "选手画面监控",
+  "directorView.hideStreamDebug": "隐藏调试信息",
+  "directorView.showStreamDebug": "显示调试信息",
   "directorView.previewHint": "与舞台同源同配置实时预览，不受显示开关影响——确认画面加载正常后，再开下方开关放上台；「重拉流」同时刷新预览与舞台。",
   "directorView.delayTitle": "计时显示延迟",
   "directorView.delayDiff": "偏差条",

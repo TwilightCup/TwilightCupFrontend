@@ -528,6 +528,8 @@ const messages: MessageSchema = {
   "directorView.refreshSpeedrun": "Refresh speedrun",
   "directorView.speedrunRefreshDone": "Speedrun.com refresh requested",
   "directorView.previewTitle": "Stream monitor",
+  "directorView.hideStreamDebug": "Hide debug info",
+  "directorView.showStreamDebug": "Show debug info",
   "directorView.previewHint": "Live preview sharing the stage's exact config, unaffected by the show/hide switches — verify the feed loads, then flip the switch below to put it on the stage; \"Reload\" refreshes both the preview and the stage.",
   "directorView.delayTitle": "Timer display delay",
   "directorView.delayDiff": "Diff bar",
