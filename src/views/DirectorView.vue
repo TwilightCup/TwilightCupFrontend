@@ -8,6 +8,7 @@ import { useDirectorStore } from "@/stores/director";
 import RoleSwitcher from "@/components/RoleSwitcher.vue";
 import AccountMenu from "@/components/AccountMenu.vue";
 import ColorField from "@/components/ColorField.vue";
+import DirectorSpeedrunInfo from "@/components/DirectorSpeedrunInfo.vue";
 import StreamFrame from "@/scenes/match/StreamFrame.vue";
 import SeiStream from "@/scenes/match/SeiStream.vue";
 import { usePanelVisibility } from "@/scenes/composables/usePanelVisibility";
@@ -18,7 +19,6 @@ import { AttemptStatus, MatchPhase } from "@/api/types";
 import { formatMs, formatUtcTime, phaseInfo, playerStatusInfo, preloadTagInfo, shortTime } from "@/utils/format";
 import {
   DEFAULT_SCENE,
-  isSceneKey,
   readStoredScene,
   writeStoredScene,
   type SceneKey,
@@ -404,89 +404,8 @@ watch(
   },
 );
 
-// ---- 场景预览（左栏日志上方）：自动跟随播报流程，也可下拉临时手动指定 ----
-// 自动切换随时开启：默认预览场景跟随舞台当前场景的下一个
-// （图池→项目信息→比赛详情→图池 循环；其它场景（待开始/赛程图）兜底为图池）。
-// 下拉仅临时手动指定预览某场景（不改舞台广播——广播场景仍由顶部 radio 切换）；
-// 一旦切换广播场景即重置手动指定、回到自动跟随。下拉可预览的场景均有独立入口页。
-const PREVIEW_NEXT: Partial<Record<SceneKey, SceneKey>> = {
-  mappool: "categoryinfo",
-  categoryinfo: "match",
-};
-/** 各预览场景对应的独立入口页（页面名，不带斜杠；standalone 模式自连 WS） */
-const PREVIEW_PAGES: Partial<Record<SceneKey, string>> = {
-  mappool: "mappool.html",
-  categoryinfo: "categoryinfo.html",
-  match: "match-scene.html",
-  bracket: "bracket.html",
-};
-/** 可在下拉中手动预览的场景（均有独立入口页；soon 仅存活于合并舞台，无单页预览） */
-const MANUAL_PREVIEW_SCENES: SceneKey[] = ["mappool", "categoryinfo", "match", "bracket"];
-/** 自动预览场景：跟随舞台当前场景推演下一个 */
-const autoPreviewScene = computed<SceneKey>(
-  () => PREVIEW_NEXT[activeScene.value] ?? "mappool",
-);
-/** 手动指定预览场景；null = 跟随自动（默认） */
-const previewManual = ref<SceneKey | null>(null);
-const previewScene = computed<SceneKey>(() => previewManual.value ?? autoPreviewScene.value);
-/**
- * 各预览入口的链接；只挂载当前可见场景，避免隐藏文档仍持有渲染循环。
- * 切回时重新加载场景，配置经同源 localStorage +
- * WS config_update 实时并入场景，不经 URL 重载，故此处不放配置参数，URL 只随
- * token / 比赛 / 赛事变化（换场才重载）。
- */
-const previewUrlMap = computed<Partial<Record<SceneKey, string>>>(() => {
-  const map: Partial<Record<SceneKey, string>> = {};
-  for (const k of MANUAL_PREVIEW_SCENES) {
-    const base = directorPageUrl(PREVIEW_PAGES[k] ?? "mappool.html");
-    if (!base) continue;
-    const url = new URL(base, location.href);
-    url.searchParams.set("director_preview", "1");
-    map[k] = url.href;
-  }
-  return map;
-});
-// 自动切换随时开启：一旦切换广播场景（顶部 radio / WS 远端）即重置手动预览，回到自动跟随
-watch(activeScene, () => {
-  previewManual.value = null;
-});
-function onPickPreviewScene(v: unknown): void {
-  if (typeof v === "string" && isSceneKey(v) && MANUAL_PREVIEW_SCENES.includes(v)) {
-    previewManual.value = v;
-  }
-}
-
-// iframe 固定按 1920×1080 渲染再整体缩放到面板宽（与 OBS 浏览器源同口径，
-// 场景内 vw/clamp 版式不随面板尺寸变形）
-const previewWrapEl = ref<HTMLDivElement | null>(null);
-const previewVisible = usePanelVisibility(previewWrapEl);
-// Local-only: never broadcasts config or changes the on-air scene.
-const previewEnabled = ref(true);
 const monitorEl = ref<HTMLDivElement | null>(null);
 const monitorVisible = usePanelVisibility(monitorEl);
-function syncPreviewMedia(): void {
-  for (const frame of previewWrapEl.value?.querySelectorAll<HTMLIFrameElement>("iframe") ?? []) {
-    frame.contentWindow?.postMessage({ type: "director-preview-media",
-      active: previewEnabled.value && previewVisible.value && frame.dataset.scene === previewScene.value }, location.origin);
-  }
-}
-function previewReady(event: MessageEvent): void {
-  if (event.origin !== location.origin || event.data?.type !== "director-preview-ready") return;
-  if ([...(previewWrapEl.value?.querySelectorAll("iframe") ?? [])].some(frame => frame.contentWindow === event.source)) syncPreviewMedia();
-}
-watch([previewScene, previewVisible, previewEnabled], syncPreviewMedia, { flush: "post" });
-onMounted(() => window.addEventListener("message", previewReady));
-onUnmounted(() => window.removeEventListener("message", previewReady));
-const previewScale = ref(0.18);
-let previewRo: ResizeObserver | null = null;
-onMounted(() => {
-  previewRo = new ResizeObserver((entries) => {
-    const w = entries[0]?.contentRect.width ?? 0;
-    if (w > 0) previewScale.value = w / 1920;
-  });
-  if (previewWrapEl.value) previewRo.observe(previewWrapEl.value);
-});
-onUnmounted(() => previewRo?.disconnect());
 
 // ---- Coming Soon 倒计时控制（WS 广播 → 舞台 SoonScene 跨进程同步）----
 
@@ -721,48 +640,10 @@ onUnmounted(() => {
 
     <main class="main">
       <section class="col-left">
-        <!-- 场景预览：自动切换随时开启，默认跟随播报流程预览下一个场景（图池→项目信息→
-             比赛详情→图池循环，其它场景兜底图池）；右上角下拉可临时手动指定预览某场景
-             （仅影响预览 iframe，不改舞台广播；切换广播场景即回到自动跟随）。
-             仅加载当前可见预览（1920×1080 布局缩放），隐藏场景不创建文档。 -->
         <div class="card">
-          <div class="card-title preview-head">
-            <span>{{ $t("directorView.scenePreviewTitle") }}</span>
-            <el-button size="small" @click="previewEnabled = !previewEnabled">
-              {{ previewEnabled ? "暂停预览" : "恢复预览" }}
-            </el-button>
-            <el-select
-              :model-value="previewScene"
-              size="small"
-              class="preview-select"
-              :disabled="readOnly"
-              @update:model-value="(v: string | number | boolean | undefined) => onPickPreviewScene(v)"
-            >
-              <el-option
-                v-for="key in MANUAL_PREVIEW_SCENES"
-                :key="key"
-                :value="key"
-                :label="$t(sceneBtnLabels[key])"
-              />
-            </el-select>
-          </div>
-          <div ref="previewWrapEl" class="scene-preview">
-            <!-- Unmount inactive documents, including their render contexts. Active backgrounds are unchanged. -->
-            <iframe
-              v-if="previewEnabled && previewVisible && previewUrlMap[previewScene]"
-              :key="previewScene"
-              :src="previewUrlMap[previewScene]"
-              :data-scene="previewScene"
-              @load="syncPreviewMedia"
-              class="preview-frame"
-              :style="{ transform: `scale(${previewScale})` }"
-              allow="autoplay; fullscreen"
-            ></iframe>
-            <div v-if="!previewEnabled" class="preview-empty">预览已暂停（不切换舞台场景）</div>
-            <div v-else-if="!previewUrlMap[previewScene]" class="preview-empty">
-              {{ $t("directorView.sceneUnavailable") }}
-            </div>
-          </div>
+          <div class="card-title">speedrun.com · 当前项目</div>
+          <DirectorSpeedrunInfo v-if="auth.token && director.matchId" :key="director.matchId" />
+          <p v-else class="hint">等待比赛连接…</p>
         </div>
 
         <!-- 日志 -->
@@ -1165,7 +1046,7 @@ onUnmounted(() => {
   gap: 12px;
   padding: 12px;
 }
-/* 左栏细（场景预览 + 日志占满），右栏粗（画面监控/回合/进度占主视觉） */
+/* 左栏细（speedrun 信息 + 日志占满），右栏粗（画面监控/回合/进度占主视觉） */
 .col-left {
   width: 380px;
   flex-shrink: 0;
@@ -1202,25 +1083,6 @@ onUnmounted(() => {
   color: var(--tc-text-dim);
   margin-bottom: 8px;
   letter-spacing: 0.5px;
-}
-/* 场景预览卡标题行：标题居左，场景下拉居右对齐基线 */
-.preview-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.preview-select {
-  width: 168px;
-}
-.preview-select :deep(.el-select__wrapper) {
-  padding: 1px 8px;
-  min-height: 24px;
-  font-weight: 500;
-  letter-spacing: 0;
-}
-.preview-select :deep(.el-select__selected-item) {
-  font-size: 12px;
 }
 .round-line {
   display: flex;
@@ -1523,35 +1385,6 @@ onUnmounted(() => {
   font-size: 12px;
   color: #ffc67a;
   line-height: 1.6;
-}
-/* 场景预览：16:9 容器裁切 1920×1080 缩放帧（与 OBS 浏览器源同口径） */
-.scene-preview {
-  position: relative;
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  overflow: hidden;
-  border-radius: 6px;
-  background: #050010;
-}
-.preview-frame {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 1920px;
-  height: 1080px;
-  border: 0;
-  transform-origin: 0 0;
-  /* 预览只读：不响应鼠标，防误触场景内交互 */
-  pointer-events: none;
-}
-.preview-empty {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--tc-text-dim);
-  font-size: 12px;
 }
 .log-card {
   flex: 1;

@@ -1,23 +1,24 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');
-const {parse}=require('@vue/compiler-sfc');const {parse:parseDom,compile}=require('@vue/compiler-dom');const vue=require('vue');
-const source=fs.readFileSync('src/views/DirectorView.vue','utf8');
-const ast=parseDom(parse(source).descriptor.template.content);
-function find(node,predicate){if(predicate(node))return node;for(const child of node.children??[]){const found=find(child,predicate);if(found)return found;}}
-const panel=find(ast,n=>n.type===1&&n.props.some(p=>p.name==='ref'&&p.value?.content==='previewWrapEl'));
-const render=new Function('Vue',compile(panel.loc.source,{mode:'function'}).code)({...vue,withDirectives:vnode=>vnode});
-function frames(vnode){return (vnode.type==='iframe'?[vnode]:[]).concat(...(Array.isArray(vnode.children)?vnode.children.filter(n=>n&&typeof n==='object').map(frames):[]));}
-function context(){return {previewVisible:true,previewEnabled:true,previewScene:'match',previewScale:0.18,syncPreviewMedia(){},$t:x=>x,
- MANUAL_PREVIEW_SCENES:['mappool','categoryinfo','match','bracket'],previewUrlMap:{mappool:'/mappool',categoryinfo:'/categoryinfo',match:'/match',bracket:'/bracket'}};}
-test('actual director template mounts only selected preview, with no hidden scene documents',()=>{
- const ctx=context();let mounted=frames(render(ctx,[]));assert.equal(mounted.length,1);assert.equal(mounted[0].props.src,'/match');
- const oldKey=mounted[0].key;ctx.previewScene='mappool';mounted=frames(render(ctx,[]));assert.equal(mounted.length,1);assert.equal(mounted[0].props.src,'/mappool');assert.notEqual(mounted[0].key,oldKey);
+const {parse}=require('@vue/compiler-sfc');const {compile}=require('@vue/compiler-dom');const vue=require('vue');
+const director=fs.readFileSync('src/views/DirectorView.vue','utf8');
+const panel=fs.readFileSync('src/components/DirectorSpeedrunInfo.vue','utf8');
+const render=new Function('Vue',compile(parse(panel).descriptor.template.content,{mode:'function'}).code)(vue);
+function text(node){if(typeof node==='string')return node;return Array.isArray(node?.children)?node.children.map(text).join(' '):typeof node?.children==='string'?node.children:'';}
+function context(patch={}){return {title:'Any%',status:'ok',players:[{side:'A',name:'Alice',binding:'alice',pb:{place:7,timeSec:42}},{side:'B',name:'Bob',binding:null,pb:null}],rows:[{place:1,playerName:'Runner',timeSec:30,highlight:'A'}],updated:'2026-09-21',messages:{idle:'等待选图',loading:'正在拉取',error:'拉取失败',noMapping:'无映射',rateLimit:'限流'},errDetail:'',formatRunTime:t=>`${t}s`,...patch};}
+test('director has no scene iframe or preview controller and mounts speedrun info instead',()=>{
+ assert(!director.includes('<iframe'));assert(!director.includes('previewUrlMap'));assert(!director.includes('previewReady'));assert(director.includes('<DirectorSpeedrunInfo'));
+ assert(director.includes('<SeiStream'));assert(director.includes('switch_scene'));
+ assert(!panel.includes('<canvas'));assert(!panel.includes('requestAnimationFrame'));
 });
-test('paused, offscreen or unauthenticated preview mounts no iframe',()=>{
- for(const patch of [{previewEnabled:false},{previewVisible:false},{previewUrlMap:{}}])assert.equal(frames(render({...context(),...patch},[])).length,0);
+test('speedrun panel renders leaderboard, highlighted side, PB and update time',()=>{
+ const result=text(render(context(),[]));for(const value of ['Any%','Alice','42s','Runner','30s','2026-09-21','未绑定 speedrun'])assert(result.includes(value));
 });
-test('director and match preview no longer pass reduced resolution budgets',()=>{
- for(const file of ['src/views/DirectorView.vue','src/scenes/match/MatchScene.vue']){
-  const template=parse(fs.readFileSync(file,'utf8')).descriptor.template.content;
-  assert(!template.includes(':preview-width='));assert(!template.includes(':preview-height='));assert(template.includes('director-output'));
+test('loading/errors never show previous board; empty board and missing PB are explicit',()=>{
+ for(const status of ['idle','loading','error','noMapping','rateLimit']){
+  const ctx=context({status,errDetail:'HTTP 420'}),result=text(render(ctx,[]));assert(result.includes(ctx.messages[status]));assert(!result.includes('Runner'));
+  if(status==='error'||status==='rateLimit')assert(result.includes('HTTP 420'));
  }
+ assert(text(render(context({rows:[]}),[])).includes('当前榜单暂无成绩'));
+ assert(text(render(context({players:[{side:'A',name:'Alice',binding:'alice',pb:null}]}),[])).includes('暂无 PB'));
+ assert(text(render(context({players:[{side:'A',name:'Alice',binding:'alice',pb:undefined}]}),[])).includes('PB 待获取'));
 });

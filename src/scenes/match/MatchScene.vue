@@ -62,14 +62,12 @@ import SeiStream from "./SeiStream.vue";
 import PickCornerCard from "./PickCornerCard.vue";
 import PbCornerCard from "./PbCornerCard.vue";
 import { useAlignedTiming } from "./useAlignedTiming";
-import { useDirectorPreviewMedia } from "@/scenes/composables/useDirectorPreviewMedia";
 import { alignEngine } from "@/scenes/align/useFrameAlign";
 
 const { t } = useI18n();
 const director = useDirectorStore();
 const { params, hosted, sharedBg, sharedTopBar } = useSceneContext();
 const { config, load, save } = useDirectorConfig();
-const { preview: directorPreview, active: previewMediaActive } = useDirectorPreviewMedia();
 
 const broadcast = computed(() =>
   (config.alignA && !!config.hlsA) || (config.alignB && !!config.hlsB)
@@ -602,50 +600,46 @@ onUnmounted(() => {
         <!-- 双 4:3 选手画面：水平居中、无缝衔接、满屏宽。
              对齐开且能力可用 → SeiStream（SEI 帧级对齐/共享 T）；否则 StreamFrame(MSE) 兜底 -->
         <section class="streams">
-          <template v-if="previewMediaActive">
-            <SeiStream
-              v-if="seiA"
-              side="A"
-              :key="'A:' + director.matchId"
-              :url="config.hlsA"
-              :refresh-nonce="config.refreshA"
-              :director-output="directorPreview"
-              :enabled="seiA"
-              :hidden="config.hideA"
-              bare
-            />
-            <StreamFrame
-              v-else
-              side="A"
-              :hls-url="config.hlsA"
-              :embed-url="config.embedA"
-              :token="params.token"
-              :hidden="config.hideA"
-              :refresh-nonce="config.refreshA"
-              hide-url
-            />
-            <SeiStream
-              v-if="seiB"
-              side="B"
-              :key="'B:' + director.matchId"
-              :url="config.hlsB"
-              :refresh-nonce="config.refreshB"
-              :director-output="directorPreview"
-              :enabled="seiB"
-              :hidden="config.hideB"
-              bare
-            />
-            <StreamFrame
-              v-else
-              side="B"
-              :hls-url="config.hlsB"
-              :embed-url="config.embedB"
-              :token="params.token"
-              :hidden="config.hideB"
-              :refresh-nonce="config.refreshB"
-              hide-url
-            />
-          </template>
+          <SeiStream
+            v-if="seiA"
+            side="A"
+            :key="'A:' + director.matchId"
+            :url="config.hlsA"
+            :refresh-nonce="config.refreshA"
+            :enabled="seiA"
+            :hidden="config.hideA"
+            bare
+          />
+          <StreamFrame
+            v-else
+            side="A"
+            :hls-url="config.hlsA"
+            :embed-url="config.embedA"
+            :token="params.token"
+            :hidden="config.hideA"
+            :refresh-nonce="config.refreshA"
+            hide-url
+          />
+          <SeiStream
+            v-if="seiB"
+            side="B"
+            :key="'B:' + director.matchId"
+            :url="config.hlsB"
+            :refresh-nonce="config.refreshB"
+            :enabled="seiB"
+            :hidden="config.hideB"
+            bare
+          />
+          <StreamFrame
+            v-else
+            side="B"
+            :hls-url="config.hlsB"
+            :embed-url="config.embedB"
+            :token="params.token"
+            :hidden="config.hideB"
+            :refresh-nonce="config.refreshB"
+            hide-url
+          />
         </section>
 
         <!-- 多关偏差条（单关模式降为透明占位，不参与布局收缩）；diffV 为
