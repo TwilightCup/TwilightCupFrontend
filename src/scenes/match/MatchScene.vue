@@ -139,7 +139,7 @@ const seiB = computed(() => config.alignB && !!config.hlsB);
 
 // Both the combined stage and standalone match scene only receive console T.
 // Gate both aligned canvases and MSE/embed fallback; cached pixels are not authority.
-const waitingForAuthority = computed(() => !alignEngine.authorityReady.value);
+const waitingForAuthority = computed(() => !alignEngine.authorityReady.value && alignEngine.pictureExpired.value);
 
 const { liveMsA, liveMsB, liveSegA, liveSegB } = useLiveTimers(
   (side) =>

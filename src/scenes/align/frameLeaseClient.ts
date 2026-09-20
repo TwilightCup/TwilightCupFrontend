@@ -40,6 +40,10 @@ export class FrameLeaseClient {
       if (p.t_floor_us != null && p.t_floor_us > this.floor) this.floor = p.t_floor_us;
     }
   }
+  /** A server-approved reset retains the existing owner, not a new takeover. */
+  retainResetOwner(role: AuthorityRole): void {
+    if (role.publisher && this.epoch === role.epoch) this.confirmed = role.epoch;
+  }
   deliveryFailed(): void { this.confirmed = -1; this.lastAt = -Infinity; this.signature = ""; }
   canPublish(role: AuthorityRole): boolean { return role.publisher && (!this.required || this.confirmed === role.epoch); }
   report(role: AuthorityRole, account: string, match: string, sample: LeaseSample,

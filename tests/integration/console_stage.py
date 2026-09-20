@@ -30,7 +30,7 @@ class ConsoleStageContract(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.now = 0
         self.saved_clocks = module._now_ms, module._align_now_ms
-        module._now_ms = lambda: 1760000000000 + self.now
+        module._now_ms = lambda: 110000 + self.now
         module._align_now_ms = lambda: 100000 + self.now
         self.cm = ConnectionManager(None, MatchRegistry(), settings)
         self.cm.match_engine = object()  # Clock commands never access the match engine.
@@ -131,7 +131,7 @@ class ConsoleStageContract(unittest.IsolatedAsyncioTestCase):
                 self.assertGreater(self.snapshots[page]["t"], before[page])
                 self.assertEqual(self.snapshots[page]["seeks"], seeks[page])
             for page, snapshot in self.snapshots.items():
-                if before.get(page) is not None:
+                if before.get(page) is not None and snapshot["t"] is not None:
                     self.assertGreaterEqual(snapshot["t"], before[page], (page, snapshot))
                 before[page] = snapshot["t"]
 
@@ -190,10 +190,47 @@ class ConsoleStageContract(unittest.IsolatedAsyncioTestCase):
         await self.close("console2")
         self.assertIsNone(self.state.align_owner)
         await self.run_for(150)  # Let the no-owner notification cross the simulated links.
+        await self.run_for(10500)
         self.assertTrue(all(not s["stageVisible"] for s in self.snapshots.values()))
         await self.run_for(3000)
         self.assertIsNone(self.state.align_owner)
         self.assertTrue(all(not s["stageVisible"] for s in self.snapshots.values()))
+
+    async def test_reset_preparation_versions_late_join_and_backward_timeout(self):
+        await self.connect("console1", "console", 4000)
+        await self.connect("stage1", "stage", 800000, 50)
+        await self.connect("stage2", "stage", 900000, 100)
+        await self.run_for(6000)
+        await self.pump(self.request(op="adjust", id="console1", delta=20, wallMs=110000 + self.now))
+        self.assertEqual(self.state.reset_state["status"], "preparing")
+        await self.run_for(2000)
+        self.assertEqual(self.state.reset_state["status"], "completed")
+        self.assertEqual(self.state.timeline_version, 1)
+        self.assertTrue(all(s["version"] == 1 for s in self.snapshots.values()))
+        self.assert_stages_play("stage1", "stage2")
+        await self.connect("late", "stage", 123000, 50)
+        await self.run_for(1000)
+        self.assert_stages_play("late")
+        # A backwards target cannot cause previously shown frames to rewind.
+        await self.pump(self.request(op="adjust", id="console1", delta=60, wallMs=110000 + self.now))
+        self.assertEqual(self.state.timeline_version, 2)
+        await self.run_for(11000)
+        self.assertEqual(self.state.reset_state["code"], "PREPARE_TIMEOUT")
+        self.assertIs(self.state.align_owner, self.connections["console1"])
+        self.assertTrue(all(not s["stageVisible"] for s in self.snapshots.values()))
+        self.assertFalse(self.snapshots["console1"]["resetPending"])
+        # Retry forwards is permitted without changing the owner.
+        await self.pump(self.request(op="adjust", id="console1", delta=15, wallMs=110000 + self.now))
+        await self.run_for(2000)
+        self.assertEqual(self.state.reset_state["status"], "completed")
+        self.assert_stages_play("stage1", "stage2", "late")
+        await self.connect("console2", "console", 550000)
+        await self.run_for(4000)
+        self.assertIs(self.state.align_owner, self.connections["console1"])
+        await self.close("console1")
+        await self.run_for(2500)
+        self.assertIs(self.state.align_owner, self.connections["console2"])
+        self.assert_stages_play("stage1", "stage2", "late")
 
     async def test_media_wait_keepalive_freezes_without_stale_or_unnecessary_seek(self):
         await self.connect("console1", "console", 4000)

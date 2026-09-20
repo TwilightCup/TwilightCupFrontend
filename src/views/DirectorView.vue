@@ -215,6 +215,20 @@ const showB = computed({
 const previewAlignedA = computed(() => !!cfgConfig.alignA && !!cfgConfig.hlsA);
 const previewAlignedB = computed(() => !!cfgConfig.alignB && !!cfgConfig.hlsB);
 const showStreamDebug = ref(true);
+const anchorDelta = ref<number | undefined>(30);
+const wallNow = ref(Date.now());
+let wallTimer: ReturnType<typeof setInterval> | undefined;
+const displayedAnchor = computed(() => director.alignRole === "publisher"
+  ? director.resetPending ? alignEngine.sync.authorityUs : alignEngine.tUs.value
+  : alignEngine.sync.authorityUs);
+function clockText(us: number | null): string {
+  if (us == null) return "—";
+  const date = new Date(us / 1000);
+  return `${date.toLocaleString()} .${String(date.getMilliseconds()).padStart(3, "0")}`;
+}
+function applyAnchor(): void {
+  if (anchorDelta.value != null) director.applyAnchorDelay(anchorDelta.value);
+}
 
 // 拉流失败只内联显示在 A/B 位置（指标条/画面占位），不弹窗打扰
 
@@ -456,6 +470,7 @@ function logout(): void {
 }
 
 onMounted(() => {
+  wallTimer = setInterval(() => { wallNow.value = Date.now(); }, 100);
   if (!auth.isLoggedIn) {
     router.replace("/login");
     return;
@@ -468,6 +483,7 @@ onMounted(() => {
   director.connectWithAuth(sid);
 });
 onUnmounted(() => {
+  if (wallTimer) clearInterval(wallTimer);
   director.disconnect();
 });
 </script>
@@ -742,7 +758,18 @@ onUnmounted(() => {
               </el-button>
             </div>
           </div>
+          <div class="anchor-controls">
+            <label for="anchor-delta">{{ $t("directorView.anchorDelay") }}</label>
+            <el-input-number id="anchor-delta" v-model="anchorDelta" :min="0" :max="86400" :precision="1" :step="1" size="small" :disabled="!director.canAdjustAnchor || readOnly" />
+            <el-button size="small" :disabled="!director.canAdjustAnchor || readOnly || anchorDelta == null" @click="applyAnchor">{{ $t("directorView.applyAnchor") }}</el-button>
+            <span class="hint" role="status">{{ director.anchorAdjustment || (director.alignRole !== 'publisher' ? $t("directorView.anchorOwnerOnly") : '') }}</span>
+          </div>
           <div v-if="showStreamDebug" id="stream-debug-info" class="align-health">
+            <div class="h-row anchor-clock">
+              <span>T：{{ clockText(displayedAnchor) }}</span>
+              <span>{{ $t("directorView.wallTime") }}：{{ clockText(wallNow * 1000) }}</span>
+              <span>Δ：{{ displayedAnchor == null ? '—' : ((wallNow * 1000 - displayedAnchor) / 1e6).toFixed(3) }} s</span>
+            </div>
             <div v-if="!alignEngine.loopAlive.value || alignEngine.loopErr.value" class="h-row loop">
               <span class="h-ready err">
                 {{ alignEngine.loopAlive.value ? "循环异常" : "主循环卡死" }}：{{ alignEngine.loopErr.value || "无报错（看门狗）" }}
@@ -1093,6 +1120,10 @@ onUnmounted(() => {
   margin-bottom: 8px;
   letter-spacing: 0.5px;
 }
+.anchor-controls, .anchor-clock {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+}
+.anchor-controls { margin-bottom: 10px; font-size: 12px; }
 .monitor-title {
   display: flex;
   align-items: center;

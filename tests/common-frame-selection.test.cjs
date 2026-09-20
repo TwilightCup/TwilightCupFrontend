@@ -6,12 +6,12 @@ const {FrameQueue}=load('src/scenes/align/frameQueue.ts');
 function engine(){const e=new AlignEngine();e.setPublisher(true);e.setRequiredSides(['A','B']);e.tUs.value=65e6;
  for(const side of ['A','B'])e.streams.set(side,{queue:new FrameQueue(),coverage:()=>({from:0,to:100e6}),canSeek:()=>true,seek(){},advance(){}});return e;}
 function add(q,t){q.add({rtUs:t,isKey:false,handle:{}});}
-test('an available common pair is not rejected because independent nearest frames disagree',()=>{
+test('three-second presentation tolerance permits the closest target pair',()=>{
  const e=engine(),target=65e6+16000;
  add(e.streams.get('A').queue,target-30000);add(e.streams.get('A').queue,target+35000);
  add(e.streams.get('B').queue,target+30000);
  e.tickLoop(16);
- assert.equal(e.sync.state,'playing');assert.equal(e.sync.pairErrorUs,5000);assert.equal(e.tUs.value,target);
+ assert.equal(e.sync.state,'playing');assert.equal(e.sync.pairErrorUs,60000);assert.equal(e.tUs.value,target);
 });
 test('a rebuffer target does not move with requestAnimationFrame jitter',()=>{
  const e=engine();e.tickLoop(16);const target=e.sync.targetUs;

@@ -60,6 +60,11 @@ function createPage({ id, kind = 'stage', offset = 0 }) {
     id, kind, engine, store, socket, canvases,
     deliver(message, at = now) { now = at; ports(() => socket.onMessage(message)); },
     tick(at) { now = at; ports(() => { engine.tickLoop(now + offset); engine.clockPulse?.(); }); },
+    adjust(delta, wallMs) {
+      const saved = Date.now;
+      Date.now = () => wallMs;
+      try { return ports(() => store.applyAnchorDelay(delta)); } finally { Date.now = saved; }
+    },
     heartbeat(at) { now = at; ports(() => { for (const fn of timers.values()) fn(); }); },
     media(available) {
       for (const stream of engine.streams.values()) {
@@ -68,10 +73,10 @@ function createPage({ id, kind = 'stage', offset = 0 }) {
       }
     },
     drain() { return sent.splice(0); },
-    snapshot() { return { alignClient: socket.args[4], role: engine.sync.role, state: engine.sync.state, reason: engine.sync.reason,
+    snapshot() { return { alignClient: socket.args[4], version: store.timelineVersion, resetPending: store.resetPending, adjustment: store.anchorAdjustment, canAdjust: store.canAdjustAnchor, role: engine.sync.role, state: engine.sync.state, reason: engine.sync.reason,
       t: engine.tUs.value, authorityReady: engine.authorityReady.value, candidate: engine.sync.candidate,
       seeks: [...engine.streams.values()].map(s => s.seeks),
-      stageVisible: engine.authorityReady.value && canvases.every(c => engine.hasCanvasImage(c)) }; },
+      stageVisible: !engine.pictureExpired.value && canvases.every(c => engine.hasCanvasImage(c)) }; },
     close() { ports(() => store.disconnect()); disposePinia(pinia); },
   };
 }
@@ -86,6 +91,7 @@ if (require.main === module) {
       if (cmd.op === 'create') pages.set(cmd.id, createPage(cmd));
       if (cmd.op === 'deliver') pages.get(cmd.id).deliver(cmd.message, cmd.now);
       if (cmd.op === 'tick') for (const p of pages.values()) p.tick(cmd.now);
+      if (cmd.op === 'adjust') pages.get(cmd.id).adjust(cmd.delta, cmd.wallMs);
       if (cmd.op === 'media') pages.get(cmd.id).media(cmd.available);
       if (cmd.op === 'close') { pages.get(cmd.id).close(); pages.delete(cmd.id); }
       const out = [...pages.values()].flatMap(p => p.drain().map(message => ({ id: p.id, message })));

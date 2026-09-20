@@ -1,5 +1,7 @@
 /** Server election, never a browser race. Reset fencing only on a new authenticated socket. */
 export interface AuthorityAssignment {
+  timeline_version?: number;
+  reset?: unknown;
   connection_id?: string;
   src?: string | null;
   lease_required?: boolean;

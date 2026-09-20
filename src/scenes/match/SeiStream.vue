@@ -46,7 +46,7 @@ const decodeErr = computed(() => alignEngine.health[props.side].decodeError);
 /** 本侧是否已真正上屏过一帧（用于决定舞台显示等待信号还是画面） */
 // Canvas pixels outlive VideoFrames. Readiness may fall without erasing the last image.
 const signalWaiting = computed(() => alignEngine.sync.waitingSides.includes(props.side));
-const hasImage = computed(() => !signalWaiting.value && alignEngine.hasCanvasImage(cv.value));
+const hasImage = computed(() => !alignEngine.pictureExpired.value && alignEngine.hasCanvasImage(cv.value));
 
 let release: (() => void) | null = null;
 function refresh(): void {
@@ -92,7 +92,7 @@ watch(cv, (c) => {
       <!-- 舞台在真正出画面(已上屏)前一律显示等待信号 Awaiting；不显示"攒缓冲中/已就绪"这类对齐相位 -->
       <div v-if="!hasImage" class="ph-abs">
         <!-- bare(舞台)：任何情况下只露扫描器式等待，错误码/解码/地址一律不写 -->
-        <template v-if="bare || signalWaiting">
+        <template v-if="bare || signalWaiting || alignEngine.pictureExpired.value">
           <div class="live">● {{ bi("scenes.match.waitingSignal") }}</div>
         </template>
         <template v-else>
@@ -103,7 +103,7 @@ watch(cv, (c) => {
       </div>
     </div>
     <div v-else class="placeholder">
-      <template v-if="bare || signalWaiting">
+      <template v-if="bare || signalWaiting || alignEngine.pictureExpired.value">
         <div class="live">● {{ bi("scenes.match.waitingSignal") }}</div>
       </template>
       <template v-else>

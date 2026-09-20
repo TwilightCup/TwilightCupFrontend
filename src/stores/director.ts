@@ -232,12 +232,70 @@ export const useDirectorStore = defineStore("director", () => {
   const authorityRole = new AuthorityRole();
   const frameLease = new FrameLeaseClient();
   const alignRole = ref<"publisher" | "follower">("follower");
+  const timelineVersion = ref(0);
+  const anchorAdjustment = ref("");
+  const resetPending = ref(false);
+  let requestedReset: string | null = null;
+  let resetRecord: { request_id: string; status: "preparing" | "completed" | "failed"; target_t_us: number; owner_id: string; authority_epoch: number } | null = null;
+  let ackSent = false;
+  const canAdjustAnchor = computed(() => connStatus.value === "open" && alignRole.value === "publisher" && !resetPending.value);
+  function applyAnchorDelay(delta: number): boolean {
+    if (!canAdjustAnchor.value || !Number.isFinite(delta) || delta < 0 || delta > 86400) return false;
+    const target = Math.round((Date.now() - delta * 1000) * 1000);
+    if (!Number.isSafeInteger(target) || target <= 0) return false;
+    const id = globalThis.crypto?.randomUUID?.() ?? `reset_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+    if (!socket.send(send.directorCommand("frame_align_reset", {
+      request_id: id, connection_id: authorityRole.connectionId, account_id: accountId.value,
+      match_id: matchId.value, authority_epoch: authorityRole.epoch,
+      timeline_version: timelineVersion.value, target_t_us: target,
+    }))) { anchorAdjustment.value = "发送失败，请重试"; return false; }
+    requestedReset = id; resetPending.value = true; anchorAdjustment.value = "等待服务器接受";
+    return true;
+  }
+  function acceptTimeline(p: { timeline_version?: number; t_floor_us?: number | null; t_us?: number; reset?: unknown }): boolean {
+    const v = p.timeline_version ?? 0;
+    if (!Number.isSafeInteger(v) || v < timelineVersion.value) return false;
+    if (v > timelineVersion.value) {
+      const r = p.reset as { target_t_us?: number } | null;
+      const target = p.t_floor_us ?? p.t_us ?? r?.target_t_us;
+      if (target == null || !Number.isSafeInteger(target) || target <= 0) return false;
+      timelineVersion.value = v;
+      alignEngine.beginTimeline(target); ackSent = false; lastAlignPublish = -Infinity;
+    }
+    if (p.reset) applyResetResult(p.reset);
+    return true;
+  }
+  function applyResetResult(value: unknown): void {
+    const p = value as Record<string, unknown>;
+    if (!p || p.timeline_version !== timelineVersion.value ||
+        (p.account_id != null && p.account_id !== accountId.value) ||
+        (p.match_id != null && p.match_id !== matchId.value)) return;
+    if (p.status === "rejected") {
+      if (p.request_id === requestedReset) {
+        resetPending.value = false; anchorAdjustment.value = `调整被拒绝：${p.code}`;
+      }
+      return;
+    }
+    if (!["preparing", "completed", "failed"].includes(String(p.status)) ||
+        typeof p.request_id !== "string" || typeof p.owner_id !== "string" ||
+        !Number.isSafeInteger(p.target_t_us) || !Number.isSafeInteger(p.authority_epoch)) return;
+    // History in a later owner's snapshot is not an instruction for that owner.
+    if (p.authority_epoch !== authorityRole.epoch) return;
+    if (resetRecord?.request_id === p.request_id && resetRecord.status !== "preparing" && p.status === "preparing") return;
+    resetRecord = p as unknown as NonNullable<typeof resetRecord>;
+    alignEngine.finishTimeline(resetRecord.status, resetRecord.target_t_us);
+    resetPending.value = p.status === "preparing";
+    anchorAdjustment.value = p.status === "preparing" ? "准备目标画面中（最长 10 秒）"
+      : p.status === "completed" ? "应用成功" : `调整失败：${p.code}`;
+  }
   let awaitingPromotionAnchor = false;
   let lastAlignPublish = -Infinity;
   let alignHeartbeat: ReturnType<typeof setInterval> | null = null;
   function stopPublishing(): void {
     if (alignHeartbeat) clearInterval(alignHeartbeat);
     alignHeartbeat = null;
+    requestedReset = null; resetRecord = null; resetPending.value = false; timelineVersion.value = 0; ackSent = false;
+    anchorAdjustment.value = "";
     awaitingPromotionAnchor = false;
     lastAlignPublish = -Infinity; alignEngine.setClockPulse(null);
     frameLease.reset(); authorityRole.disconnect(); alignRole.value = "follower";
@@ -245,8 +303,15 @@ export const useDirectorStore = defineStore("director", () => {
   }
   function applyAuthority(p: AuthorityAssignment, initial = false): void {
     const wasPublisher = authorityRole.publisher;
-    if (!authorityRole.assign(p)) return;
+    if ((p.timeline_version ?? 0) < timelineVersion.value || !authorityRole.assign(p)) return;
+    if (!acceptTimeline(p)) return;
+    const priorReset = p.reset as { authority_epoch?: number; target_t_us?: number } | undefined;
+    if (priorReset && priorReset.authority_epoch !== authorityRole.epoch && typeof priorReset.target_t_us === "number") {
+      alignEngine.finishTimeline("completed", Math.max(priorReset.target_t_us, p.t_floor_us ?? 0));
+      resetPending.value = false;
+    }
     frameLease.observe(p, authorityRole, performance.now());
+    if (resetRecord?.status === "preparing" && resetRecord.owner_id === authorityRole.connectionId && resetRecord.authority_epoch === authorityRole.epoch) frameLease.retainResetOwner(authorityRole);
     alignEngine.setAuthorityFloor(p.t_floor_us ?? null);
     if (alignEngine.canCompete && frameLease.required && authorityRole.publisher) {
       awaitingPromotionAnchor = p.t_floor_us === undefined;
@@ -265,15 +330,27 @@ export const useDirectorStore = defineStore("director", () => {
     alignEngine.refreshAuthority(now);
     if (!alignEngine.canCompete) return; // Stage connections receive only; the backend ignores their leases.
     let leaseRunning = true;
+    let reportedReady = false;
     if (frameLease.supported && accountId.value && matchId.value) {
       const sample = alignEngine.leaseSample(now);
       leaseRunning = sample.state === "running";
       const status = frameLease.report(authorityRole, accountId.value, matchId.value, sample,
         document.hidden ? "hidden" : "visible", now);
       // WebSocket ordering: new-epoch readiness confirmation precedes any T.
-      if (status && !socket.send(send.directorCommand("frame_align_status", status))) {
+      if (status && !socket.send(send.directorCommand("frame_align_status", { ...status, timeline_version: timelineVersion.value }))) {
         frameLease.deliveryFailed(); return;
       }
+      reportedReady = sample.state === "running" && sample.decode_ready && sample.media_ready;
+    }
+    if (resetRecord?.owner_id === authorityRole.connectionId && resetRecord.authority_epoch === authorityRole.epoch && resetRecord.status !== "completed") {
+      const t = alignEngine.resetPresentedUs.value;
+      if (resetRecord.status === "preparing" && !ackSent && t != null && reportedReady) {
+        ackSent = socket.send(send.directorCommand("frame_align_reset_ack", {
+          request_id: resetRecord.request_id, authority_epoch: authorityRole.epoch,
+          timeline_version: timelineVersion.value, outcome: "presented", presented_t_us: t,
+        }));
+      }
+      return;
     }
     const t = alignEngine.tUs.value;
     if (!authorityRole.publisher || awaitingPromotionAnchor || t == null ||
@@ -282,7 +359,7 @@ export const useDirectorStore = defineStore("director", () => {
     lastAlignPublish = now;
     const playing = alignEngine.sync.state === "playing";
     socket.send(send.directorCommand("frame_align", {
-      t_us: Math.floor(t), epoch: authorityRole.epoch, seq: ++authorityRole.sequence,
+      timeline_version: timelineVersion.value, t_us: Math.floor(t), epoch: authorityRole.epoch, seq: ++authorityRole.sequence,
       src: authorityRole.connectionId, source_id: authorityRole.connectionId,
       scene: "shared-playback", account_id: accountId.value, match_id: matchId.value,
       rate: playing ? alignEngine.playback.speed : 0,
@@ -347,7 +424,7 @@ export const useDirectorStore = defineStore("director", () => {
         if (msg.seat === "DIRECTOR" && msg.connection_id) {
           authorityRole.connect(msg.connection_id);
           applyAuthority({ connection_id: msg.connection_id, src: msg.align_authority_src,
-            epoch: msg.authority_epoch, role: msg.align_role, lease_required: msg.align_lease_required }, true);
+            timeline_version: timelineVersion.value, epoch: msg.authority_epoch, role: msg.align_role, lease_required: msg.align_lease_required }, true);
           alignEngine.setClockPulse(publishFrameAlign);
           alignHeartbeat = setInterval(publishFrameAlign, 400);
         }
@@ -497,6 +574,9 @@ export const useDirectorStore = defineStore("director", () => {
         pushChatLine({ ts: msg.ts, kind: "system", seat: "", sender: msg.sender ?? "Twilight", text: msg.text });
         break;
       case "error":
+        if (requestedReset && resetPending.value && resetRecord?.request_id !== requestedReset) {
+          resetPending.value = false; anchorAdjustment.value = `调整失败：${msg.msg}`;
+        }
         log("error", tr("log.errorLog", { code: msg.code, msg: msg.msg }));
         break;
       case "draft_state":
@@ -518,6 +598,7 @@ export const useDirectorStore = defineStore("director", () => {
             src: asrc as string | null | undefined, role: replay.align_role as string | undefined,
             epoch: replayFrame?.epoch ?? authorityRole.epoch,
             lease_required: replay.align_lease_required as boolean | undefined,
+            timeline_version: replay.timeline_version as number | undefined, reset: replay.reset,
             t_floor_us: replayFrame?.t_us ?? null });
           const fa = s?.frame_align as
             | { t_us?: unknown; ready_a?: unknown; ready_b?: unknown }
@@ -528,6 +609,8 @@ export const useDirectorStore = defineStore("director", () => {
           if (msg.payload.account_id != null && msg.payload.account_id !== accountId.value) break;
           if (msg.payload.match_id != null && msg.payload.match_id !== matchId.value) break;
           applyAuthority(msg.payload as AuthorityAssignment);
+        } else if (msg.action === "frame_align_reset_result") {
+          applyResetResult(msg.payload);
         } else if (msg.action === "switch_scene") {
           currentSceneCmd.value = (msg.payload?.scene as string) ?? null;
         } else if (msg.action === "soon_set_target" && msg.payload?.target_ms) {
@@ -645,6 +728,8 @@ export const useDirectorStore = defineStore("director", () => {
   function applyFrameAlign(p: FrameAlignPayload, replay = false): void {
     if (p.match_id != null && p.match_id !== matchId.value) return;
     if (p.account_id != null && p.account_id !== accountId.value) return;
+    if ((p.timeline_version ?? 0) !== timelineVersion.value || (p.epoch != null && p.epoch < authorityRole.epoch)) return;
+    if (!acceptTimeline(p)) return;
     if (alignEngine.setExternalTUs(p.t_us, { ...p, replay, src: p.src === undefined ? currentAlignSrc.value ?? undefined : p.src })) {
       if (alignEngine.canCompete && authorityRole.publisher && p.epoch === authorityRole.epoch && p.src === authorityRole.connectionId) {
         frameLease.observe({ t_floor_us: p.t_us }, authorityRole, performance.now());
@@ -817,7 +902,7 @@ export const useDirectorStore = defineStore("director", () => {
     subsegmentGapAt,
     // 主控制台上报的帧对齐统一虚拟时间 T + A/B 就绪（跨文档一致性）
     frameAlign,
-    alignRole,
+    alignRole, timelineVersion, anchorAdjustment, resetPending, canAdjustAnchor, applyAnchorDelay,
     // 双席 live_time 实时计时（主计时器实时走表数据源）
     liveTimeA,
     liveTimeB,

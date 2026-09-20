@@ -244,7 +244,7 @@ export class FrameLockStream {
     this.queue = new FrameQueue((e) => {
       const f = e.handle as globalThis.VideoFrame | null;
       try { f?.close(); } catch { /* noop */ }
-    });
+    }, CATCHUP.maxFrameErrorUs, CATCHUP.maxFrameErrorUs);
     this.source.setOnSegment((seg) => { if (!this.stopped) this.onSegment(seg); });
     this.source.setOnError((e) => { if (this.stopped) return; this.lastErr = e; this.opts.onError?.(e); });
   }
@@ -522,8 +522,12 @@ export class FrameLockStream {
     }
     // Old displayed pixels live in canvas; VideoFrames outside nearest(T)'s
     // tolerance must not hold the budget while the decoder needs more input.
-    if (this.queue.bytes + (this.decoder.pendingSize + 1) * this.frameBytes > 128 * 1024 * 1024) {
+    if (this.queue.length >= 96 || this.queue.bytes + (this.decoder.pendingSize + 1) * this.frameBytes > 128 * 1024 * 1024) {
       this.queue.discardBefore(targetUs - CATCHUP.maxFrameErrorUs);
+      // The wider presentation tolerance must not let old candidates block
+      // decoding. Keep the closest past candidate and every future frame.
+      const past = this.queue.candidates(targetUs, CATCHUP.maxFrameErrorUs).filter(f => f.rtUs <= targetUs);
+      if (past.length) this.queue.discardBefore(past[past.length - 1]!.rtUs);
     }
     let fed = 0;
     while (this.decPos < this.raw.length && this.decoder.queueSize < 12 &&

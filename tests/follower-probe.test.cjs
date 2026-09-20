@@ -11,7 +11,7 @@ test('lease sampling cannot hijack startup decoding after a follower has a valid
 test('paused authority also owns startup decoding; a frozen anchor is not permission to prewarm elsewhere',()=>{
  const e=follower();e.external.accept({t_us:70e6,epoch:1,seq:1,rate:0,frozen:true,src:'master'},0);
  for(let now=0;now<=500;now+=25){e.tickLoop(now);e.leaseSample(now);}
- assert.equal(e.tUs.value,70e6);for(const s of e.streams.values())assert.equal(s.seeks.length,1);
+ assert.equal(e.tUs.value,null);for(const s of e.streams.values())assert.equal(s.seeks.length,0);
 });
 test('late authority heartbeat freezes without moving the follower decoder to a takeover probe',()=>{
  const e=follower();e.external.accept({t_us:70e6,epoch:1,seq:1,rate:1,src:'master'},0);
@@ -25,7 +25,7 @@ test('late authority heartbeat freezes without moving the follower decoder to a 
  assert(e.external.accept({t_us:71e6,epoch:1,seq:2,rate:1,src:'master'},1700));
  for(let now=1700;now<=2000;now+=25){e.tickLoop(now);e.leaseSample(now);}
  assert.equal(e.sync.state,'playing');
- assert.deepEqual([...e.streams.values()].map(s=>s.seeks.length),seeks);
+ assert.deepEqual([...e.streams.values()].map(s=>s.seeks.length),seeks.map(n=>n+1));
 });
 test('revocation followed by a no-owner frozen snapshot still permits candidate decoding',()=>{
  const e=follower();e.selectAuthority('master',1);

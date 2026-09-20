@@ -30,7 +30,8 @@ test('canvas retains last common image while readiness and committed T freeze',(
   assert.equal(e.tUs.value,T);assert.equal(e.presented.A,false);assert.equal(e.presented.B,false);
   assert(canvases.every(c=>e.hasCanvasImage(c)));
   b.available=true;e.tickLoop(352);assert.equal(e.sync.state,'playing');
-  e.resetPresented('A');assert(!e.hasCanvasImage(canvases[0]));
+  e.resetPresented('A');assert(e.hasCanvasImage(canvases[0]));
+  assert.equal(e.presented.A,false);assert(e.sync.presentedRt.A != null);
 });
 test('publisher hard recovery retains segment reserve without reversing T',()=>{
   const p=planCatchup({current:50e6,authority:70e6,from:0,safeTo:75e6,elapsedMs:16,rate:1,supply:true,publisher:true,recovering:true});

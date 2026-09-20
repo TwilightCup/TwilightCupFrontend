@@ -11,7 +11,7 @@ export const CATCHUP = {
   transientMissMs: 100,
   publisherReserveUs: 4_000_000,
   stallSeekMs: 2000,
-  maxFrameErrorUs: 40_000,
+  maxFrameErrorUs: 3_000_000,
 } as const;
 export type CatchupMode = "normal" | "soft" | "seek" | "wait";
 export interface CatchupInput {

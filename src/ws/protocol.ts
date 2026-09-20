@@ -121,6 +121,8 @@ export interface ClientDirectorCommand {
     | "soon_set_target"
     | "config_update"
     | "frame_align"
+    | "frame_align_reset"
+    | "frame_align_reset_ack"
     | "frame_align_status";
   /** 指令载荷（按 action 不同含义） */
   payload: Record<string, unknown>;
@@ -252,6 +254,7 @@ export interface SrvAuthOk {
   align_role?: "publisher" | "follower";
   align_authority_src?: string | null;
   align_lease_required?: boolean;
+  timeline_version?: number;
   authority_epoch?: number;
 
   account_id: string;

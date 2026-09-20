@@ -37,30 +37,31 @@ test('console entry opts into election and confirms readiness before publishing'
   } finally { p.close(); }
 });
 
-test('stage hides cached video on stale, explicit revocation and socket loss, then follows recovery', () => {
+test('stage retains cached pixels during interruptions and expires them after ten seconds', () => {
   const p = createPage({ id: 'stage', offset: 500000 });
   try {
     p.deliver(auth('stage', { align_role: 'follower', align_authority_src: 'console' }));
     p.deliver(anchor(75e6, 1));
     for (let now = 0; now <= 500; now += 25) p.tick(now);
     assert(p.snapshot().stageVisible); const t = p.snapshot().t;
-    p.heartbeat(1600); assert.equal(p.snapshot().stageVisible, false); assert.equal(p.snapshot().t, t);
+    p.heartbeat(1600); assert.equal(p.snapshot().stageVisible, true); assert.equal(p.snapshot().t, t);
     assert(p.canvases.every(c => p.engine.hasCanvasImage(c)), 'test includes previously painted pixels');
     p.deliver(anchor(76e6, 2), 1700);
     for (let now = 1700; now <= 2000; now += 25) p.tick(now);
     assert(p.snapshot().stageVisible);
     p.deliver(anchor(76.4e6, 3, { frozen: true, stale: true }), 2100);
-    assert.equal(p.snapshot().stageVisible, false);
+    assert.equal(p.snapshot().stageVisible, true);
     p.deliver(assignment('stage', null, 2), 2200);
-    assert.equal(p.snapshot().stageVisible, false);
+    assert.equal(p.snapshot().stageVisible, true);
     p.deliver(anchor(76.4e6, 0, { src: null, epoch: 2, frozen: true, stale: true }), 2200);
-    p.tick(2250); assert.equal(p.snapshot().stageVisible, false);
+    p.tick(2250); assert.equal(p.snapshot().stageVisible, true);
     p.deliver(assignment('stage', 'console', 3), 2300);
-    assert.equal(p.snapshot().stageVisible, false);
+    assert.equal(p.snapshot().stageVisible, true);
     p.deliver(anchor(76.5e6, 1, { epoch: 3 }), 2300);
     for (let now = 2300; now <= 2800; now += 25) p.tick(now);
     assert(p.snapshot().stageVisible);
-    p.socket.onStatusChange('closed'); assert.equal(p.snapshot().stageVisible, false);
+    p.socket.onStatusChange('closed'); assert.equal(p.snapshot().stageVisible, true);
+    p.engine.refreshAuthority(513000); assert.equal(p.snapshot().stageVisible, false);
     assert(p.drain().every(m => m.action !== 'frame_align'));
   } finally { p.close(); }
 });

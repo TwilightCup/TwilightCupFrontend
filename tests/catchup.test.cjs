@@ -67,7 +67,7 @@ test('legacy late-join snapshot is stale, modern timed replay is immediately usa
   assert(!c.read(100).stale); assert.equal(c.read(100).t, 61.1e6);
 });
 
-test('A/B hard recovery uses one pinned target and waits for both before overlay T changes', () => {
+test('A/B recovery waits for both and presents the latest moving target', () => {
   const { FrameQueue } = load('src/scenes/align/frameQueue.ts');
   const e = new AlignEngine(); e.setRequiredSides(['A', 'B']); e.tUs.value = 40e6;
   e.external.accept({ t_us: 70e6, epoch: 1, seq: 1, rate: 1 }, 0);
@@ -81,7 +81,7 @@ test('A/B hard recovery uses one pinned target and waits for both before overlay
   assert.equal(e.tUs.value, 40e6); assert.equal(e.playback.speed, 0);
   b.ready = true;
   for (let t = 176; t <= 416; t += 16) e.tickLoop(t);
-  assert.equal(e.tUs.value, 70e6);
+  assert.equal(e.tUs.value, 70.416e6);
   assert.equal(e.sync.presentedRt.A, e.sync.presentedRt.B);
   assert.equal(a.seeks.length, 1); assert.equal(b.seeks.length, 1);
 });

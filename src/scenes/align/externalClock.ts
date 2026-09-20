@@ -3,6 +3,8 @@
  * (network latency remains an explicit cross-document limitation).
  */
 export interface FrameAlignAnchor {
+  timeline_version?: number;
+  reset?: unknown;
   t_us: number;
   /** Publisher-selected presentation membership, independent of local readiness. */
   active_sides?: ("A" | "B")[];
