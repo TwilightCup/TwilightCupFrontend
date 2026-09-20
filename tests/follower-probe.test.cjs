@@ -13,6 +13,36 @@ test('paused authority also owns startup decoding; a frozen anchor is not permis
  for(let now=0;now<=500;now+=25){e.tickLoop(now);e.leaseSample(now);}
  assert.equal(e.tUs.value,70e6);for(const s of e.streams.values())assert.equal(s.seeks.length,1);
 });
+test('late authority heartbeat freezes without moving the follower decoder to a takeover probe',()=>{
+ const e=follower();e.external.accept({t_us:70e6,epoch:1,seq:1,rate:1,src:'master'},0);
+ for(let now=0;now<=500;now+=25){e.tickLoop(now);e.leaseSample(now);}
+ const seeks=[...e.streams.values()].map(s=>s.seeks.length);
+ e.tickLoop(1600);assert.equal(e.sync.state,'stale');
+ const sample=e.leaseSample(1600);
+ assert.equal(e.candidateProbe,null);assert.equal(e.sync.candidate,'off');
+ assert.equal(sample.progress_t_us,Math.floor(e.tUs.value));
+ assert.deepEqual([...e.streams.values()].map(s=>s.seeks.length),seeks);
+ assert(e.external.accept({t_us:71e6,epoch:1,seq:2,rate:1,src:'master'},1700));
+ for(let now=1700;now<=2000;now+=25){e.tickLoop(now);e.leaseSample(now);}
+ assert.equal(e.sync.state,'playing');
+ assert.deepEqual([...e.streams.values()].map(s=>s.seeks.length),seeks);
+});
+test('revocation followed by a no-owner frozen snapshot still permits candidate decoding',()=>{
+ const e=follower();e.selectAuthority('master',1);
+ assert(e.external.accept({t_us:70e6,epoch:1,seq:1,rate:1,src:'master'},0));
+ for(let now=0;now<=500;now+=25){e.tickLoop(now);e.leaseSample(now);}
+ const committed=e.tUs.value;
+ e.selectAuthority(null,2);
+ assert(e.setExternalTUs(committed,{epoch:2,seq:0,src:null,source_id:null,frozen:true,rate:0}));
+ const sample=e.leaseSample(600);
+ assert(sample.decode_ready);assert.equal(e.sync.candidate,'ready');
+ assert(e.candidateProbe);assert.equal(e.tUs.value,committed);
+ for(let now=625;now<=3000;now+=25){
+  e.tickLoop(now);assert(e.leaseSample(now).decode_ready);
+  assert.equal(e.sync.state,'waiting');assert.equal(e.tUs.value,committed);
+ }
+ for(const s of e.streams.values())assert.equal(s.seeks.length,2);
+});
 test('a fresh anchor reclaims a stale private probe and resets its decoder cursor once',()=>{
  const e=follower();e.tUs.value=69e6;e.selectAuthority(null,1);e.leaseSample(0);
  for(const s of e.streams.values())assert.equal(s.cursor,75e6);

@@ -172,7 +172,10 @@ export class AlignEngine {
     const progress = Math.floor(this.tUs.value ?? 0);
     // First presentation may be pending even with a valid authority. Never let
     // lease sampling seek the same decoder away from normal follower startup.
-    const preparing = !this.publisher && !this.external.hasFreshAuthority(now);
+    // A late heartbeat must not move the live follower decoder to a private
+    // takeover target. The backend clears the selected source on revocation;
+    // only then may candidate preparation seek away from public T.
+    const preparing = !this.publisher && !this.external.hasAuthority;
     if (preparing) {
       active = required.filter(s => {
         const c = this.streams.get(s)?.coverage();

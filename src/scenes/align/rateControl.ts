@@ -58,6 +58,10 @@ export function recoveryGate(stableMs: number, available: boolean, elapsedMs: nu
 
 /** 30s safety plus segment cadence at startup; 1.2s covers 1.08x extrapolation and frame error. */
 export function publisherTarget(from: number, slowTo: number, floor: number | null, startup = true): number | null {
-  const target = slowTo - CATCHUP.backUs - (startup ? 5_000_000 : 1_200_000);
-  return target >= from && target >= (floor ?? -Infinity) ? target : null;
+  const safeTo = slowTo - CATCHUP.backUs - 1_200_000;
+  // A replacement with no local presentation must honor the old publisher's
+  // floor even when that leaves less than the preferred cold-start reserve.
+  // Waiting for another 3.8s of media can exceed the 3s takeover deadline.
+  const target = Math.max(slowTo - CATCHUP.backUs - (startup ? 5_000_000 : 1_200_000), floor ?? -Infinity);
+  return target >= from && target <= safeTo ? target : null;
 }

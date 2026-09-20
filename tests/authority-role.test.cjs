@@ -21,6 +21,33 @@ test('publisher bootstraps without external T; followers cannot; safety floor su
   assert.equal(publisherTarget(0,110e6,75e6),75e6);
 });
 
+test('a sole cold director can confirm takeover at a safe floor before its deadline', () => {
+  const { AlignEngine } = load('src/scenes/align/useFrameAlign.ts');
+  const { FrameQueue } = load('src/scenes/align/frameQueue.ts');
+  const { AuthorityRole } = load('src/scenes/align/authorityRole.ts');
+  const { FrameLeaseClient } = load('src/scenes/align/frameLeaseClient.ts');
+  const e = new AlignEngine(); e.setRequiredSides(['A', 'B']);
+  for (const side of ['A', 'B']) e.streams.set(side, {
+    queue: new FrameQueue(), coverage: () => ({ from: 0, to: 100e6 }),
+    canSeek: () => true, seek() { this.queue.clear(); return true; },
+    advance(t) { this.queue.add({ rtUs: t, isKey: true, handle: {} }); },
+  });
+  e.selectAuthority(null, 1); e.setAuthorityFloor(68e6);
+  assert(e.setExternalTUs(68e6, { epoch: 1, seq: 0, src: null, frozen: true }));
+  assert(e.leaseSample(0).decode_ready); assert.equal(e.tUs.value, null);
+  const role = new AuthorityRole(); role.connect('director');
+  const assignment = { connection_id: 'director', src: 'director', role: 'publisher',
+    epoch: 2, lease_required: true, t_floor_us: 68e6, takeover_timeout_ms: 3000 };
+  assert(role.assign(assignment));
+  const lease = new FrameLeaseClient(); lease.observe(assignment, role, 0);
+  e.selectAuthority('director', 2); e.setPublisher(true);
+  for (let now = 0; now <= 500; now += 25) {
+    e.tickLoop(now); lease.report(role, 'account', 'match', e.leaseSample(now), 'visible', now);
+  }
+  assert(lease.canPublish(role)); assert(e.tUs.value >= 68e6);
+  assert(e.tUs.value <= 68.8e6); assert.equal(e.sync.state, 'playing');
+});
+
 test('elected publisher starts both frames; two followers wait then track its anchor', () => {
   const { AlignEngine } = load('src/scenes/align/useFrameAlign.ts');
   const { FrameQueue } = load('src/scenes/align/frameQueue.ts');

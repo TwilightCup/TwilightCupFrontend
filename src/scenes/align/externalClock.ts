@@ -37,13 +37,20 @@ export class ExternalClock {
   private lastOutput = -Infinity;
   private seenSources = new Set<string>();
   get attached(): boolean { return this.anchor !== null; }
+  /** Ownership survives a late heartbeat. A server no-owner freeze is only a
+   * timeline floor and must not block private candidate preparation. */
+  get hasAuthority(): boolean {
+    return this.anchor != null && !(this.selected && this.allowedSource == null);
+  }
   /** Includes paused anchors: a live owner still controls decoder targets. */
   hasFreshAuthority(now: number): boolean {
-    return this.anchor != null && !this.anchor.staleReplay && now - this.anchor.received <= 1500 &&
-      !(this.selected && this.allowedSource == null);
+    return this.hasAuthority && !this.anchor!.staleReplay && now - this.anchor!.received <= 1500;
   }
 
   selectSource(src: string | null, epoch?: number): void {
+    // A selection is not an anchor from the newly elected publisher. Keep the
+    // monotonic floor, but do not play or prewarm against the previous owner.
+    if (src !== this.allowedSource || (epoch != null && epoch > this.selectedEpoch)) this.anchor = null;
     this.selected = true; this.allowedSource = src;
     if (epoch != null) this.selectedEpoch = Math.max(this.selectedEpoch, epoch);
     if (src == null) this.anchor = null;
@@ -81,8 +88,8 @@ export class ExternalClock {
     return true;
   }
   read(now: number): { t: number; rate: number; stale: boolean } | null {
-    if (!this.anchor) return null;
-    const a = this.anchor;
+    if (!this.hasAuthority) return null;
+    const a = this.anchor!;
     const stale = a.staleReplay || now - a.received > 1500;
     // Bound speculative travel when the authority disappears, then freeze permanently.
     const elapsed = a.staleReplay ? 0 : Math.max(0, Math.min(now - a.at, 1000));
