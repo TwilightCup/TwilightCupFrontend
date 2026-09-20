@@ -430,8 +430,8 @@ const autoPreviewScene = computed<SceneKey>(
 const previewManual = ref<SceneKey | null>(null);
 const previewScene = computed<SceneKey>(() => previewManual.value ?? autoPreviewScene.value);
 /**
- * 各可预览场景的独立入口页链接：每个场景一个常驻 iframe，全部加载后仅切显隐（v-show），
- * 场景保持连接与数据；非活动比赛预览只停媒体，不改背景。配置经同源 localStorage +
+ * 各预览入口的链接；只挂载当前可见场景，避免隐藏文档仍持有渲染循环。
+ * 切回时重新加载场景，配置经同源 localStorage +
  * WS config_update 实时并入场景，不经 URL 重载，故此处不放配置参数，URL 只随
  * token / 比赛 / 赛事变化（换场才重载）。
  */
@@ -460,19 +460,21 @@ function onPickPreviewScene(v: unknown): void {
 // 场景内 vw/clamp 版式不随面板尺寸变形）
 const previewWrapEl = ref<HTMLDivElement | null>(null);
 const previewVisible = usePanelVisibility(previewWrapEl);
+// Local-only: never broadcasts config or changes the on-air scene.
+const previewEnabled = ref(true);
 const monitorEl = ref<HTMLDivElement | null>(null);
 const monitorVisible = usePanelVisibility(monitorEl);
 function syncPreviewMedia(): void {
   for (const frame of previewWrapEl.value?.querySelectorAll<HTMLIFrameElement>("iframe") ?? []) {
     frame.contentWindow?.postMessage({ type: "director-preview-media",
-      active: previewVisible.value && frame.dataset.scene === previewScene.value }, location.origin);
+      active: previewEnabled.value && previewVisible.value && frame.dataset.scene === previewScene.value }, location.origin);
   }
 }
 function previewReady(event: MessageEvent): void {
   if (event.origin !== location.origin || event.data?.type !== "director-preview-ready") return;
   if ([...(previewWrapEl.value?.querySelectorAll("iframe") ?? [])].some(frame => frame.contentWindow === event.source)) syncPreviewMedia();
 }
-watch([previewScene, previewVisible], syncPreviewMedia, { flush: "post" });
+watch([previewScene, previewVisible, previewEnabled], syncPreviewMedia, { flush: "post" });
 onMounted(() => window.addEventListener("message", previewReady));
 onUnmounted(() => window.removeEventListener("message", previewReady));
 const previewScale = ref(0.18);
@@ -722,11 +724,13 @@ onUnmounted(() => {
         <!-- 场景预览：自动切换随时开启，默认跟随播报流程预览下一个场景（图池→项目信息→
              比赛详情→图池循环，其它场景兜底图池）；右上角下拉可临时手动指定预览某场景
              （仅影响预览 iframe，不改舞台广播；切换广播场景即回到自动跟随）。
-             每个可预览场景一个常驻 iframe（同源同参加载，1920×1080 缩放），
-             切换仅显隐不等重载 —— 与 OBS 舞台多源无缝切台观感一致 -->
+             仅加载当前可见预览（1920×1080 布局缩放），隐藏场景不创建文档。 -->
         <div class="card">
           <div class="card-title preview-head">
             <span>{{ $t("directorView.scenePreviewTitle") }}</span>
+            <el-button size="small" @click="previewEnabled = !previewEnabled">
+              {{ previewEnabled ? "暂停预览" : "恢复预览" }}
+            </el-button>
             <el-select
               :model-value="previewScene"
               size="small"
@@ -743,20 +747,19 @@ onUnmounted(() => {
             </el-select>
           </div>
           <div ref="previewWrapEl" class="scene-preview">
-            <!-- 每个可预览场景一个常驻 iframe：全部加载后仅 v-show 切换显隐，
-                 场景保持连接与数据，切换预览场景不重载（与 OBS 舞台观感一致） -->
-            <template v-for="key in MANUAL_PREVIEW_SCENES" :key="key">
-              <iframe
-                :src="previewUrlMap[key] || undefined"
-                :data-scene="key"
-                @load="syncPreviewMedia"
-                v-show="previewScene === key"
-                class="preview-frame"
-                :style="{ transform: `scale(${previewScale})` }"
-                allow="autoplay; fullscreen"
-              ></iframe>
-            </template>
-            <div v-if="!previewUrlMap[previewScene]" class="preview-empty">
+            <!-- Unmount inactive documents, including their render contexts. Active backgrounds are unchanged. -->
+            <iframe
+              v-if="previewEnabled && previewVisible && previewUrlMap[previewScene]"
+              :key="previewScene"
+              :src="previewUrlMap[previewScene]"
+              :data-scene="previewScene"
+              @load="syncPreviewMedia"
+              class="preview-frame"
+              :style="{ transform: `scale(${previewScale})` }"
+              allow="autoplay; fullscreen"
+            ></iframe>
+            <div v-if="!previewEnabled" class="preview-empty">预览已暂停（不切换舞台场景）</div>
+            <div v-else-if="!previewUrlMap[previewScene]" class="preview-empty">
               {{ $t("directorView.sceneUnavailable") }}
             </div>
           </div>
@@ -877,8 +880,7 @@ onUnmounted(() => {
                   :url="cfgConfig.hlsA"
                   :refresh-nonce="cfgConfig.refreshA"
                   :enabled="previewAlignedA"
-                  :preview-width="640"
-                  :preview-height="360"
+                  director-output
                   :crop4to3="true"
                 />
                 <StreamFrame
@@ -905,8 +907,7 @@ onUnmounted(() => {
                   :url="cfgConfig.hlsB"
                   :refresh-nonce="cfgConfig.refreshB"
                   :enabled="previewAlignedB"
-                  :preview-width="640"
-                  :preview-height="360"
+                  director-output
                   :crop4to3="true"
                 />
                 <StreamFrame

@@ -1,15 +1,16 @@
 /** Opt-in director surfaces only. No ownership of VideoFrames: the decode queue
  * still closes them. Canvas pixels remain valid after those frames are closed. */
 export interface DirectorSurfaceOptions {
-  maxWidth: number;
-  maxHeight: number;
+  maxWidth?: number;
+  maxHeight?: number;
   visible(): boolean;
 }
 interface Identity { frame: VideoFrame; generation: number; width: number; height: number }
 interface Surface { canvas: HTMLCanvasElement; options: DirectorSurfaceOptions }
 function dimensions(frame: VideoFrame, options: DirectorSurfaceOptions): [number, number] {
   if (!frame.displayWidth || !frame.displayHeight) throw new Error("Invalid presentation surface");
-  const scale = Math.min(1, options.maxWidth / frame.displayWidth, options.maxHeight / frame.displayHeight);
+  const scale = Math.min(1, (options.maxWidth ?? frame.displayWidth) / frame.displayWidth,
+    (options.maxHeight ?? frame.displayHeight) / frame.displayHeight);
   return [Math.max(1, Math.round(frame.displayWidth * scale)), Math.max(1, Math.round(frame.displayHeight * scale))];
 }
 export class DirectorFrameRenderer {

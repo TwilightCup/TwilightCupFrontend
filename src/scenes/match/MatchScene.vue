@@ -609,8 +609,7 @@ onUnmounted(() => {
               :key="'A:' + director.matchId"
               :url="config.hlsA"
               :refresh-nonce="config.refreshA"
-              :preview-width="directorPreview ? 960 : undefined"
-              :preview-height="540"
+              :director-output="directorPreview"
               :enabled="seiA"
               :hidden="config.hideA"
               bare
@@ -631,8 +630,7 @@ onUnmounted(() => {
               :key="'B:' + director.matchId"
               :url="config.hlsB"
               :refresh-nonce="config.refreshB"
-              :preview-width="directorPreview ? 960 : undefined"
-              :preview-height="540"
+              :director-output="directorPreview"
               :enabled="seiB"
               :hidden="config.hideB"
               bare

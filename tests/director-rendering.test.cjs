@@ -69,3 +69,9 @@ test('mixed output budgets convert once at the largest required size',()=>{
  assert.equal(small.width,640);assert.equal(large.width,960);
  r.release('A');r.prepare('A',frame(),2,[{canvas:small,options:options()}])();assert.equal(scratch.length,2);
 });
+test('director native output retains full source resolution and identity deduplication',()=>{
+ const r=new DirectorFrameRenderer(canvas),c=canvas(),f={displayWidth:3840,displayHeight:2160};
+ const surfaces=[{canvas:c,options:{visible:()=>true}}];
+ r.prepare('A',f,1,surfaces)();r.prepare('A',f,1,surfaces)();
+ assert.equal(c.width,3840);assert.equal(c.height,2160);assert.equal(c.draws.length,1);
+});
