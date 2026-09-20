@@ -45,7 +45,7 @@ const { config: alignCfg, load: loadCfg, refresh: refreshCfg } = useDirectorConf
  *  SeiStream 卸载只减自身计数，流不会被停。 */
 const preloadRelease: Partial<Record<Side, () => void>> = {};
 const preloaded = reactive<Record<Side, string>>({ A: "", B: "" });
-// Role is assigned by the backend in the director store, including standalone consoles.
+// Stage keeps media warm for following, but never competes for console authority.
 
 function ensureAlignPreload(): void {
   alignEngine.setRequiredSides((["A", "B"] as Side[]).filter(side =>

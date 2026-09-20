@@ -248,19 +248,21 @@ export const useDirectorStore = defineStore("director", () => {
     if (!authorityRole.assign(p)) return;
     frameLease.observe(p, authorityRole, performance.now());
     alignEngine.setAuthorityFloor(p.t_floor_us ?? null);
-    if (frameLease.required && authorityRole.publisher) {
+    if (alignEngine.canCompete && frameLease.required && authorityRole.publisher) {
       awaitingPromotionAnchor = p.t_floor_us === undefined;
-    } else if (!initial && !wasPublisher && authorityRole.publisher && alignEngine.tUs.value != null) {
+    } else if (alignEngine.canCompete && !initial && !wasPublisher && authorityRole.publisher && alignEngine.tUs.value != null) {
       awaitingPromotionAnchor = true;
     }
-    if (!authorityRole.publisher) awaitingPromotionAnchor = false;
+    if (!alignEngine.canCompete || !authorityRole.publisher) awaitingPromotionAnchor = false;
     currentAlignSrc.value = authorityRole.src;
     alignEngine.selectAuthority(authorityRole.src, authorityRole.epoch);
-    alignRole.value = authorityRole.role;
+    alignRole.value = alignEngine.canCompete ? authorityRole.role : "follower";
     alignEngine.setPublisher(authorityRole.publisher && !awaitingPromotionAnchor);
   }
   function publishFrameAlign(): void {
     const now = performance.now();
+    // Also expire stage visibility when no aligned media component is mounted.
+    alignEngine.refreshAuthority(now);
     let leaseRunning = true;
     if (frameLease.supported && accountId.value && matchId.value) {
       const sample = alignEngine.leaseSample(now);
@@ -273,7 +275,7 @@ export const useDirectorStore = defineStore("director", () => {
       }
     }
     const t = alignEngine.tUs.value;
-    if (!authorityRole.publisher || awaitingPromotionAnchor || t == null ||
+    if (!alignEngine.canCompete || !authorityRole.publisher || awaitingPromotionAnchor || t == null ||
         !frameLease.canPublish(authorityRole) || (frameLease.required && !leaseRunning)) return;
     if (now - lastAlignPublish < 400) return;
     lastAlignPublish = now;
@@ -550,8 +552,8 @@ export const useDirectorStore = defineStore("director", () => {
           remoteConfig.value = patch;
           if (matchId.value) mergeStoredConfig(matchId.value, patch);
         } else if (msg.action === "frame_align" && typeof msg.payload?.t_us === "number") {
-          // 跨文档一致性：权威页（舞台）广播的虚拟时间 T（µs）+ A/B 就绪 → 观众/预览复用同 T、
-          // 就绪读舞台上报值。发送者（舞台）被后端排除，不收到自己。
+          // 控制台主页面广播 T（µs）和 A/B 就绪；舞台及其他控制台跟随。
+          // 正常广播排除发送者，冻结和换主快照可能发给所有连接。
           applyFrameAlign(msg.payload as unknown as FrameAlignPayload);
         }
         break;
@@ -596,13 +598,14 @@ export const useDirectorStore = defineStore("director", () => {
     metaReady.value = true;
   }
 
-  function connect(token: string, matchId?: string): void {
+  function connect(token: string, matchId?: string, mode: "receiver" | "console" = "receiver"): void {
+    alignEngine.setCandidateEnabled(mode === "console");
     tokenRef.value = token;
-    socket.connect(token, "DIRECTOR", matchId);
+    socket.connect(token, "DIRECTOR", matchId, false, mode === "console" ? "console" : "stage");
   }
 
   function connectWithAuth(matchId?: string): void {
-    if (auth.token) connect(auth.token, matchId);
+    if (auth.token) connect(auth.token, matchId, "console");
   }
 
   function disconnect(): void {
@@ -628,7 +631,7 @@ export const useDirectorStore = defineStore("director", () => {
   /** 最近一次 config_update 广播的配置（已同步落库；ref 供已挂载场景响应） */
   const remoteConfig = ref<Partial<DirectorConfig> | null>(null);
 
-  /** 权威页（舞台）上报的最近一次帧对齐状态：统一虚拟时间 T + A/B 就绪 */
+  /** 主控制台上报的最近一次帧对齐状态：统一虚拟时间 T + A/B 就绪 */
   interface FrameAlignPayload extends FrameAlignAnchor {
     ready_a?: boolean;
     ready_b?: boolean;
@@ -642,7 +645,7 @@ export const useDirectorStore = defineStore("director", () => {
     if (p.match_id != null && p.match_id !== matchId.value) return;
     if (p.account_id != null && p.account_id !== accountId.value) return;
     if (alignEngine.setExternalTUs(p.t_us, { ...p, replay, src: p.src === undefined ? currentAlignSrc.value ?? undefined : p.src })) {
-      if (authorityRole.publisher && p.epoch === authorityRole.epoch && p.src === authorityRole.connectionId) {
+      if (alignEngine.canCompete && authorityRole.publisher && p.epoch === authorityRole.epoch && p.src === authorityRole.connectionId) {
         frameLease.observe({ t_floor_us: p.t_us }, authorityRole, performance.now());
         alignEngine.setAuthorityFloor(p.t_us);
         awaitingPromotionAnchor = false;
@@ -811,7 +814,7 @@ export const useDirectorStore = defineStore("director", () => {
     // subsegment 实时时间差（偏差条数据源）+ 到达时刻（防剧透门控）
     subsegmentGap,
     subsegmentGapAt,
-    // 权威页（舞台）上报的帧对齐统一虚拟时间 T + A/B 就绪（跨文档一致性）
+    // 主控制台上报的帧对齐统一虚拟时间 T + A/B 就绪（跨文档一致性）
     frameAlign,
     alignRole,
     // 双席 live_time 实时计时（主计时器实时走表数据源）

@@ -7,7 +7,7 @@
  * - exclusive 连接（裁判/选手端）被同身份新连接顶掉时为终态（displaced，
  *   close 码 4001）：停止重连，由 UI 弹窗告知「已在其他窗口打开」。
  */
-import { wsUrl } from "@/api/config";
+import { wsUrl, type AlignClient } from "@/api/config";
 import { notifySessionExpired } from "@/api/client";
 import { isTokenExpired } from "@/utils/jwt";
 import type { ClientMessage, ServerMessage } from "./protocol";
@@ -39,6 +39,7 @@ export class MatchSocket {
   private seat: string | undefined;
   private session: string | undefined;
   private exclusive = false;
+  private alignClient: AlignClient | undefined;
   private hbTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   /** sendQueued 暂存的待发指令（连接建立后 flush） */
@@ -49,11 +50,12 @@ export class MatchSocket {
   private displaced = false;
 
   /** exclusive=1 的连接要求独占身份 key（账号+座位+比赛）：同 key 旧连接被顶掉 */
-  connect(token: string, seat?: string, session?: string, exclusive = false): void {
+  connect(token: string, seat?: string, session?: string, exclusive = false, alignClient?: AlignClient): void {
     this.token = token;
     this.seat = seat;
     this.session = session;
     this.exclusive = exclusive;
+    this.alignClient = alignClient;
     this.displaced = false;
     this.shouldReconnect = true;
     this.attempt = 0;
@@ -65,7 +67,7 @@ export class MatchSocket {
     this.setStatus(this.attempt === 0 ? "connecting" : "reconnecting");
     let ws: WebSocket;
     try {
-      ws = new WebSocket(wsUrl(this.token, this.seat, this.session, this.exclusive));
+      ws = new WebSocket(wsUrl(this.token, this.seat, this.session, this.exclusive, this.alignClient));
     } catch {
       this.scheduleReconnect();
       return;

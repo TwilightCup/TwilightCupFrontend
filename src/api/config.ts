@@ -10,6 +10,7 @@ const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL ?? "").trim();
 
 /** REST 请求基址 */
 export const restBase: string = BACKEND_URL ? BACKEND_URL.replace(/\/$/, "") : "/api";
+export type AlignClient = "console" | "stage";
 
 /**
  * 根据 REST 基址推导 WebSocket 端点。
@@ -17,12 +18,14 @@ export const restBase: string = BACKEND_URL ? BACKEND_URL.replace(/\/$/, "") : "
  * - session：可选，裁判/导播多标签页选场（后端 WS 端点读 query 参数 ``match``）；
  * - exclusive：可选，裁判/选手端独占身份 key（账号+座位+比赛）——同 key 既有
  *   连接先收 displaced 再被 close(4001) 顶掉；导播 OBS 多源不带，保持并存。
+ * - alignClient：导播连接用途；只有 console 可参与主 T 选举，stage 只接收。
  */
 export function wsUrl(
   token: string,
   seat?: string,
   session?: string,
   exclusive = false,
+  alignClient?: AlignClient,
 ): string {
   let base: string;
   if (BACKEND_URL) {
@@ -37,6 +40,7 @@ export function wsUrl(
   if (seat) params.set("seat", seat);
   if (session) params.set("match", session);
   if (exclusive) params.set("exclusive", "1");
+  if (alignClient) params.set("align_client", alignClient);
   const qs = params.toString();
   return qs ? `${base}?${qs}` : base;
 }

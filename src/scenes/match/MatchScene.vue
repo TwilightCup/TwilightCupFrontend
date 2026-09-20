@@ -137,7 +137,9 @@ const alignedB = useAlignedTiming("B", {
 const seiA = computed(() => config.alignA && !!config.hlsA);
 const seiB = computed(() => config.alignB && !!config.hlsB);
 
-// （舞台根 StageScene 作为对齐权威持续广播 frame_align(t_us, ready_a/b)，本场景不重复发）
+// Both the combined stage and standalone match scene only receive console T.
+// Gate both aligned canvases and MSE/embed fallback; cached pixels are not authority.
+const waitingForAuthority = computed(() => !alignEngine.authorityReady.value);
 
 const { liveMsA, liveMsB, liveSegA, liveSegB } = useLiveTimers(
   (side) =>
@@ -607,7 +609,7 @@ onUnmounted(() => {
             :url="config.hlsA"
             :refresh-nonce="config.refreshA"
             :enabled="seiA"
-            :hidden="config.hideA"
+            :hidden="config.hideA || waitingForAuthority"
             bare
           />
           <StreamFrame
@@ -616,7 +618,7 @@ onUnmounted(() => {
             :hls-url="config.hlsA"
             :embed-url="config.embedA"
             :token="params.token"
-            :hidden="config.hideA"
+            :hidden="config.hideA || waitingForAuthority"
             :refresh-nonce="config.refreshA"
             hide-url
           />
@@ -627,7 +629,7 @@ onUnmounted(() => {
             :url="config.hlsB"
             :refresh-nonce="config.refreshB"
             :enabled="seiB"
-            :hidden="config.hideB"
+            :hidden="config.hideB || waitingForAuthority"
             bare
           />
           <StreamFrame
@@ -636,7 +638,7 @@ onUnmounted(() => {
             :hls-url="config.hlsB"
             :embed-url="config.embedB"
             :token="params.token"
-            :hidden="config.hideB"
+            :hidden="config.hideB || waitingForAuthority"
             :refresh-nonce="config.refreshB"
             hide-url
           />

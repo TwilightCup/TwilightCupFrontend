@@ -277,9 +277,7 @@ function healthCls(side: "A" | "B"): "h-ok" | "h-err" | "" {
   return alignEngine.health[side].frames > 0 ? "h-ok" : "";
 }
 
-/** 该侧"切到比赛场景能否直接出画"的就绪标记（放 A/B 信息行）。
- *  优先读舞台（权威）经 WS 广播上报的 ready_a/b——反映的是真正渲染的舞台就绪态；
- *  一轮广播还没到时回退本地引擎判断。 */
+/** A/B 信息行显示本控制台的同步、解码和呈现状态。舞台不参与主 T 选举。 */
 function readyState(side: "A" | "B"): { cls: string; label: string } {
   const on = side === "A" ? cfgConfig.alignA : cfgConfig.alignB;
   const url = side === "A" ? cfgConfig.hlsA : cfgConfig.hlsB;

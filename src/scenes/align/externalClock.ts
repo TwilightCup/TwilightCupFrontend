@@ -13,6 +13,8 @@ export interface FrameAlignAnchor {
   rate?: number;
   paused?: boolean;
   frozen?: boolean;
+  /** Server freeze/awaiting-publisher snapshots are not a live publisher anchor. */
+  stale?: boolean;
   match_id?: string;
   account_id?: string;
   scene?: string;
@@ -24,7 +26,7 @@ export interface FrameAlignAnchor {
 }
 
 export class ExternalClock {
-  private anchor: { t: number; at: number; rate: number; received: number; staleReplay: boolean } | null = null;
+  private anchor: { t: number; at: number; rate: number; received: number; unusable: boolean } | null = null;
   private epoch: number | null = null;
   private seq: number | null = null;
   private scope: { scene?: string; source_id?: string | null } | null = null;
@@ -44,7 +46,7 @@ export class ExternalClock {
   }
   /** Includes paused anchors: a live owner still controls decoder targets. */
   hasFreshAuthority(now: number): boolean {
-    return this.hasAuthority && !this.anchor!.staleReplay && now - this.anchor!.received <= 1500;
+    return this.hasAuthority && !this.anchor!.unusable && now - this.anchor!.received <= 1500;
   }
 
   selectSource(src: string | null, epoch?: number): void {
@@ -83,16 +85,16 @@ export class ExternalClock {
     this.seq = p.seq ?? null;
     const rate = p.paused || p.frozen ? 0 : p.rate ?? (p.t_us === this.lastInput ? 0 : 1);
     this.anchor = { t: p.t_us, at: now - age, rate, received: now - age,
-      staleReplay: !!p.replay && (p.epoch == null || p.seq == null || p.server_now_ms == null || p.effective_at_ms == null) };
+      unusable: p.stale === true || (!!p.replay && (p.epoch == null || p.seq == null || p.server_now_ms == null || p.effective_at_ms == null)) };
     this.lastInput = p.t_us;
     return true;
   }
   read(now: number): { t: number; rate: number; stale: boolean } | null {
     if (!this.hasAuthority) return null;
     const a = this.anchor!;
-    const stale = a.staleReplay || now - a.received > 1500;
+    const stale = a.unusable || now - a.received > 1500;
     // Bound speculative travel when the authority disappears, then freeze permanently.
-    const elapsed = a.staleReplay ? 0 : Math.max(0, Math.min(now - a.at, 1000));
+    const elapsed = a.unusable ? 0 : Math.max(0, Math.min(now - a.at, 1000));
     this.lastOutput = Math.max(this.lastOutput, a.t + elapsed * 1000 * a.rate);
     return { t: this.lastOutput, rate: stale ? 0 : a.rate, stale };
   }

@@ -31,6 +31,22 @@ export function friendlyStreamError(e: unknown): string {
 }
 
 export class AlignEngine {
+  constructor(private candidateEnabled = true) {}
+
+  /** Only the authenticated console entry point enables publisher candidacy. */
+  setCandidateEnabled(enabled: boolean): void {
+    this.candidateEnabled = enabled;
+    if (!enabled) {
+      this.setPublisher(false);
+      this.candidateProbe = null; this.sync.candidate = "off";
+    }
+  }
+  get canCompete(): boolean { return this.candidateEnabled; }
+  readonly authorityReady = ref(false);
+  refreshAuthority(now: number): void {
+    this.authorityReady.value = this.publisher || this.external.hasFreshAuthority(now);
+  }
+
   private streams = new Map<Side, FrameLockStream>();
   private paintedCanvases = reactive(new Set<HTMLCanvasElement>());
   hasCanvasImage(canvas: HTMLCanvasElement | null): boolean {
@@ -99,6 +115,7 @@ export class AlignEngine {
 
   /** Called only after validating the backend connection-specific role assignment. */
   setPublisher(selected: boolean): void {
+    selected = selected && this.candidateEnabled;
     if (this.publisher !== selected) {
       this.pendingSeek = null; this.waitingT = null; this.stableMs = 0; this.catchupMode = "normal";
       this.signalPolicy.reset(selected ? this.remoteWaiting : []); this.warming.clear();
@@ -112,6 +129,7 @@ export class AlignEngine {
     if (!selected) this.takeoverSeek = false;
     this.publisher = selected;
     this.sync.role = selected ? "publisher" : "follower";
+    this.refreshAuthority(performance.now());
   }
   resetClockConnection(): void {
     this.takeoverSeek = false;
@@ -122,6 +140,7 @@ export class AlignEngine {
     this.authorityFloor = this.tUs.value;
     this.pendingSeek = null; this.waitingT = null; this.stableMs = 0;
     this.sync.authorityUs = null;
+    this.authorityReady.value = false;
     this.sync.state = "waiting";
     this.presented.A = this.presented.B = false;
     this.playback.speed = 0;
@@ -136,6 +155,7 @@ export class AlignEngine {
         meta.waiting_sides?.some(s => meta.active_sides?.includes(s))) return false;
     const revision = this.external.revision;
     const accepted = this.external.accept({ ...meta, t_us: us }, performance.now());
+    this.refreshAuthority(performance.now());
     if (accepted) {
       if (this.candidateProbe != null && this.external.hasFreshAuthority(performance.now())) {
         this.candidateProbe = null; this.sync.candidate = "off";
@@ -158,6 +178,7 @@ export class AlignEngine {
       this.setPublisher(false); this.sync.state = "waiting"; this.sync.authorityUs = null;
       this.playback.speed = 0; this.presented.A = this.presented.B = false;
     }
+    this.refreshAuthority(performance.now());
   }
   setAuthorityFloor(floor: number | null): void {
     if (floor != null) this.authorityFloor = Math.max(this.authorityFloor ?? 0, floor);
@@ -165,6 +186,15 @@ export class AlignEngine {
   /** Private cold-start probe: decode a shared safe point without publishing or
    * advancing presentation T. Once elected, normal common presentation owns T. */
   leaseSample(now: number): LeaseSample {
+    this.refreshAuthority(now);
+    if (!this.candidateEnabled) {
+      // Decode capability is not election eligibility. Receivers renew an
+      // explicitly ineligible status so even an initial legacy assignment is
+      // relinquished by the lease-aware backend, without seeking a private T.
+      return { capability: false, media_ready: false, decode_ready: false,
+        progress_t_us: Math.floor(this.tUs.value ?? 0), active_sides: [],
+        waiting_sides: ["A", "B"], state: "media_wait" };
+    }
     const required = [...this.requiredSides];
     const capability = this.enabled.value && required.some(s => this.streams.has(s));
     let active = this.sync.activeSides.filter(s => required.includes(s));
@@ -290,6 +320,7 @@ export class AlignEngine {
     this.publisher = false; this.sync.role = "follower"; this.authorityFloor = null;
     this.external = new ExternalClock(); this.pendingSeek = null; this.waitingT = null; this.catchupMode = "normal";
     this.tUs.value = null; this.sync.state = "waiting";
+    this.authorityReady.value = false;
     this.sync.reason = "startup"; this.sync.seekCount = 0;
     this.sync.lastSeekReason = ""; this.sync.lastJumpUs = 0;
     this.stableMs = this.missingMs = 0;
@@ -426,6 +457,7 @@ export class AlignEngine {
   }
 
   private tickLoop(now: number): void {
+    this.refreshAuthority(now);
     const elapsed = Math.max(0, Math.min(now - this.last, 100));
     this.last = now;
     const requiredSides = this.requiredSides.size ? [...this.requiredSides] : [...this.streams.keys()];
@@ -572,4 +604,5 @@ export class AlignEngine {
 }
 
 /** Document-local singleton; separate pages follow WS anchors independently. */
-export const alignEngine = new AlignEngine();
+// Scene and preview documents start as receivers. Console connect opts in.
+export const alignEngine = new AlignEngine(false);
