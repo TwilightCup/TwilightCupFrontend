@@ -263,6 +263,7 @@ export const useDirectorStore = defineStore("director", () => {
     const now = performance.now();
     // Also expire stage visibility when no aligned media component is mounted.
     alignEngine.refreshAuthority(now);
+    if (!alignEngine.canCompete) return; // Stage connections receive only; the backend ignores their leases.
     let leaseRunning = true;
     if (frameLease.supported && accountId.value && matchId.value) {
       const sample = alignEngine.leaseSample(now);
@@ -275,7 +276,7 @@ export const useDirectorStore = defineStore("director", () => {
       }
     }
     const t = alignEngine.tUs.value;
-    if (!alignEngine.canCompete || !authorityRole.publisher || awaitingPromotionAnchor || t == null ||
+    if (!authorityRole.publisher || awaitingPromotionAnchor || t == null ||
         !frameLease.canPublish(authorityRole) || (frameLease.required && !leaseRunning)) return;
     if (now - lastAlignPublish < 400) return;
     lastAlignPublish = now;

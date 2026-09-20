@@ -50,6 +50,15 @@ test('failed status send cannot authorize a T, retry has a fresh sequence',()=>{
  const first=l.report(r,'a','m',ready,'visible',0);l.deliveryFailed();assert(!l.canPublish(r));
  const next=l.report(r,'a','m',ready,'visible',1);assert(next.seq>first.seq);assert(l.canPublish(r));
 });
+test('same-epoch frozen keepalive cannot revoke a confirmed owner after the takeover deadline',()=>{
+ const r=role(),l=new FrameLeaseClient();l.observe({lease_required:true,t_floor_us:0},r,0);
+ l.report(r,'a','m',ready,'visible',0);assert(l.canPublish(r));
+ l.observe({t_floor_us:1000},r,6000);
+ const held=l.report(r,'a','m',{...ready,progress_t_us:1000,decode_ready:false,state:'media_wait'},'visible',6000);
+ assert.equal(held.state,'media_wait');assert(l.canPublish(r));
+ const resumed=l.report(r,'a','m',{...ready,progress_t_us:1100},'visible',6500);
+ assert.equal(resumed.state,'running');assert(l.canPublish(r));
+});
 test('invalid takeover floor cannot poison role or timeline',()=>{
  const r=role();assert(!r.assign({connection_id:'c',src:'c',epoch:2,role:'publisher',t_floor_us:NaN}));assert.equal(r.epoch,1);
 });

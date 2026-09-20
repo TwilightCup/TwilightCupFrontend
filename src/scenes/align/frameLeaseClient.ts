@@ -34,7 +34,10 @@ export class FrameLeaseClient {
       this.deadline = now + (p.takeover_timeout_ms ?? 3000) - 250;
     } else if (p.t_floor_us !== undefined) {
       this.floorKnown = true;
-      if (p.t_floor_us != null && p.t_floor_us > this.floor) { this.floor = p.t_floor_us; this.confirmed = -1; }
+      // Same-epoch server keepalives echo the owner's latest committed T.
+      // Raising that floor does not revoke a completed takeover or restart its
+      // expired confirmation deadline. Only a new epoch requires confirmation.
+      if (p.t_floor_us != null && p.t_floor_us > this.floor) this.floor = p.t_floor_us;
     }
   }
   deliveryFailed(): void { this.confirmed = -1; this.lastAt = -Infinity; this.signature = ""; }

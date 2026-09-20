@@ -166,7 +166,9 @@ export class AlignEngine {
       this.remoteSides = meta.active_sides == null ? null : [...meta.active_sides];
       this.remoteWaiting = [...(meta.waiting_sides ?? [])];
     }
-    if (accepted && revision !== this.external.revision) {
+    // The publisher receives its own server freeze/keepalive, not a new decoder
+    // target. Only followers rebuild when their external authority changes.
+    if (accepted && !this.publisher && revision !== this.external.revision) {
       this.pendingSeek = null; this.waitingT = null; this.stableMs = 0;
       this.missingMs = CATCHUP.stallSeekMs; this.catchupMode = "normal";
     }
@@ -188,9 +190,8 @@ export class AlignEngine {
   leaseSample(now: number): LeaseSample {
     this.refreshAuthority(now);
     if (!this.candidateEnabled) {
-      // Decode capability is not election eligibility. Receivers renew an
-      // explicitly ineligible status so even an initial legacy assignment is
-      // relinquished by the lease-aware backend, without seeking a private T.
+      // Defensive ineligible sample: decoding does not confer election rights.
+      // Receiver connections neither send leases nor seek a private candidate T.
       return { capability: false, media_ready: false, decode_ready: false,
         progress_t_us: Math.floor(this.tUs.value ?? 0), active_sides: [],
         waiting_sides: ["A", "B"], state: "media_wait" };

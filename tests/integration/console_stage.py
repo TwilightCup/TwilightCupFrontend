@@ -91,7 +91,9 @@ class ConsoleStageContract(unittest.IsolatedAsyncioTestCase):
             async def send_text(self, text):
                 hub.incoming.append((hub.now + hub.latency[page_id], page_id, json.loads(text)))
 
-        conn = Connection(Wire(), "account", page_id, Seat.DIRECTOR, "match", connection_id=page_id)
+        # Use the actual page's connection purpose, just as the WS handshake does.
+        conn = Connection(Wire(), "account", page_id, Seat.DIRECTOR, "match", connection_id=page_id,
+            align_client=self.snapshots[page_id]["alignClient"])
         self.connections[page_id], self.kinds[page_id] = conn, kind
         self.cm._add_director(self.store, conn)
         conn.auth_sent = True
@@ -192,6 +194,41 @@ class ConsoleStageContract(unittest.IsolatedAsyncioTestCase):
         await self.run_for(3000)
         self.assertIsNone(self.state.align_owner)
         self.assertTrue(all(not s["stageVisible"] for s in self.snapshots.values()))
+
+    async def test_media_wait_keepalive_freezes_without_stale_or_unnecessary_seek(self):
+        await self.connect("console1", "console", 4000)
+        await self.connect("stage1", "stage", 700000, 50)
+        await self.run_for(6000)
+        self.assert_stages_play("stage1")
+        epoch = self.state.align_epoch
+        seeks = self.snapshots["console1"]["seeks"]
+        self.request(op="media", id="console1", available=False)
+        await self.run_for(500, owner="console1", epoch=epoch)
+        self.assertEqual(self.state.align_anchor["reason"], "media_wait")
+        self.assertFalse(self.state.align_anchor["stale"])
+        self.assertEqual(self.snapshots["console1"]["seeks"], seeks)
+        self.request(op="media", id="console1", available=True)
+        await self.run_for(1500, owner="console1", epoch=epoch)
+        self.assert_stages_play("stage1")
+        self.assertEqual(self.snapshots["console1"]["seeks"], seeks)
+
+        self.request(op="media", id="console1", available=False)
+        await self.run_for(250)
+        frozen_t, frozen_seq = self.state.frame_align_t_us, self.state.align_seq
+        await self.run_for(3500, owner="console1", epoch=epoch)
+        self.assertEqual(self.state.frame_align_t_us, frozen_t)
+        self.assertGreater(self.state.align_seq, frozen_seq)
+        self.assertFalse(self.state.align_anchor["stale"])
+        self.assertTrue(self.snapshots["stage1"]["authorityReady"])
+        self.assertEqual(self.snapshots["stage1"]["state"], "frozen")
+        self.request(op="media", id="console1", available=True)
+        await self.run_for(6000, owner="console1", epoch=epoch)
+        self.assertEqual(self.snapshots["stage1"]["state"], "playing")
+        self.assertGreater(self.snapshots["stage1"]["t"], frozen_t)
+        # A genuine >2s decoder stall can invoke publisher recovery. Followers
+        # retain the existing <=1.08x soft catchup policy for gaps below 5s.
+        await self.run_for(120000, owner="console1", epoch=epoch)
+        self.assert_stages_play("stage1")
 
 
 if __name__ == "__main__":

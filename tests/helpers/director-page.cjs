@@ -23,11 +23,11 @@ function createPage({ id, kind = 'stage', offset = 0 }) {
   const canvases = [];
   for (const side of ['A', 'B']) {
     const queue = new FrameQueue();
-    engine.streams.set(side, { queue, cursor: null, seeks: 0,
+    engine.streams.set(side, { queue, cursor: null, seeks: 0, available: true,
       coverage: () => ({ from: 0, to: 110e6 + now * 1000 }), canSeek: () => true,
       seek(t) { this.cursor = t; this.seeks++; queue.clear(); return true; },
       advance(t) {
-        if (this.cursor != null && Math.abs(t - this.cursor) < 400000) {
+        if (this.available && this.cursor != null && Math.abs(t - this.cursor) < 400000) {
           this.cursor = t;
           queue.add({ rtUs: t, isKey: true, handle: { displayWidth: 1, displayHeight: 1 } });
         }
@@ -61,8 +61,14 @@ function createPage({ id, kind = 'stage', offset = 0 }) {
     deliver(message, at = now) { now = at; ports(() => socket.onMessage(message)); },
     tick(at) { now = at; ports(() => { engine.tickLoop(now + offset); engine.clockPulse?.(); }); },
     heartbeat(at) { now = at; ports(() => { for (const fn of timers.values()) fn(); }); },
+    media(available) {
+      for (const stream of engine.streams.values()) {
+        stream.available = available;
+        if (!available) stream.queue.clear();
+      }
+    },
     drain() { return sent.splice(0); },
-    snapshot() { return { role: engine.sync.role, state: engine.sync.state, reason: engine.sync.reason,
+    snapshot() { return { alignClient: socket.args[4], role: engine.sync.role, state: engine.sync.state, reason: engine.sync.reason,
       t: engine.tUs.value, authorityReady: engine.authorityReady.value, candidate: engine.sync.candidate,
       seeks: [...engine.streams.values()].map(s => s.seeks),
       stageVisible: engine.authorityReady.value && canvases.every(c => engine.hasCanvasImage(c)) }; },
@@ -80,6 +86,7 @@ if (require.main === module) {
       if (cmd.op === 'create') pages.set(cmd.id, createPage(cmd));
       if (cmd.op === 'deliver') pages.get(cmd.id).deliver(cmd.message, cmd.now);
       if (cmd.op === 'tick') for (const p of pages.values()) p.tick(cmd.now);
+      if (cmd.op === 'media') pages.get(cmd.id).media(cmd.available);
       if (cmd.op === 'close') { pages.get(cmd.id).close(); pages.delete(cmd.id); }
       const out = [...pages.values()].flatMap(p => p.drain().map(message => ({ id: p.id, message })));
       const snapshots = Object.fromEntries([...pages].map(([id, p]) => [id, p.snapshot()]));

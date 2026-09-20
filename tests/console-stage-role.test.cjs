@@ -18,9 +18,8 @@ test('stage declines even a publisher assignment and never probes or publishes a
     assert.equal(p.socket.args[4], 'stage');
     p.deliver(auth('stage')); p.deliver(assignment('stage', 'stage'));
     for (let now = 0; now <= 5000; now += 25) p.tick(now);
-    const sent = p.drain(); assert(sent.some(m => m.action === 'frame_align_status'));
-    assert(sent.every(m => m.action !== 'frame_align'));
-    assert(sent.filter(m => m.action === 'frame_align_status').every(m => !m.payload.capability));
+    const sent = p.drain(); assert.equal(sent.length, 0);
+    assert.equal(p.engine.leaseSample(5000).capability, false);
     assert.equal(p.snapshot().role, 'follower'); assert.equal(p.snapshot().t, null);
     assert.equal(p.snapshot().stageVisible, false); assert.deepEqual(p.snapshot().seeks, [0, 0]);
   } finally { p.close(); }
@@ -45,7 +44,7 @@ test('stage hides cached video on stale, explicit revocation and socket loss, th
     p.deliver(anchor(75e6, 1));
     for (let now = 0; now <= 500; now += 25) p.tick(now);
     assert(p.snapshot().stageVisible); const t = p.snapshot().t;
-    p.tick(1600); assert.equal(p.snapshot().stageVisible, false); assert.equal(p.snapshot().t, t);
+    p.heartbeat(1600); assert.equal(p.snapshot().stageVisible, false); assert.equal(p.snapshot().t, t);
     assert(p.canvases.every(c => p.engine.hasCanvasImage(c)), 'test includes previously painted pixels');
     p.deliver(anchor(76e6, 2), 1700);
     for (let now = 1700; now <= 2000; now += 25) p.tick(now);
