@@ -32,6 +32,7 @@ import {
   type SrVariable,
 } from "@/api/speedrun";
 import { officialDisplayName } from "@/utils/officialLevels";
+import { inherentPickTags } from "@/utils/mappool";
 
 /** 榜单的展示信息（项目名面板用：分类/关卡名 + 已选子分类值标签） */
 export interface BoardDisplay {
@@ -117,11 +118,17 @@ const ENDPOINT_PROJECTS: Readonly<Record<string, string>> = {
   intro_reprise: "Any%",
 };
 
-/** 子分类解析线索：标题中的 Glitchless + 全部 CT 词条。 */
+/** 子分类解析线索：标题中的 Glitchless + 固有 Glitchless 标签 + 全部 CT 词条。 */
 function subcategoryTokens(pick: Pick): string[] {
   const tokens: string[] = [];
   if (/glitchless/i.test(pick.name ?? "")) tokens.push("Glitchless");
-  tokens.push(...(pick.tags ?? []));
+  // ML/IL/CP/TB 的固有 Glitchless（图池编辑器写入 Pick.tag）——名称未写时也生效
+  for (const t of inherentPickTags(pick)) {
+    if (!tokens.includes(t)) tokens.push(t);
+  }
+  for (const t of pick.tags ?? []) {
+    if (!tokens.includes(t)) tokens.push(t);
+  }
   return tokens;
 }
 

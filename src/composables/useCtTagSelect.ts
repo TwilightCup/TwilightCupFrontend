@@ -13,7 +13,7 @@ import { useMatchStore } from "@/stores/match";
 import { useDraftStore } from "@/stores/draft";
 import { CategoryKind, PickType } from "@/api/types";
 import { CT_TAG_CONFLICTS } from "@/api/types";
-import { ctTagsFor } from "@/utils/mappool";
+import { ctTagsFor, inherentPickTags, mergeInherentTags } from "@/utils/mappool";
 
 export function useCtTagSelect() {
   const match = useMatchStore();
@@ -80,10 +80,16 @@ export function useCtTagSelect() {
     isExPick.value ? [] : tagInput.value.filter((t) => draft.state.bannedTags.includes(t)),
   );
 
-  /** 本轮选图要随消息提交的词条（CP 恒 Checkpoint，非词条类别恒为空数组）。 */
+  /** 本轮选图要随消息提交的词条：CP 恒 Checkpoint，CT/EX 取裁判选择，
+   *  ML/IL/CP/TB 另并入选图固有 Glitchless（图池编辑器所设，不受词条上限约束）。 */
   const tagsToSubmit = computed(() => {
-    if (isCpPick.value) return ["Checkpoint"];
-    return isCtPick.value ? [...tagInput.value] : [];
+    const base = isCpPick.value
+      ? ["Checkpoint"]
+      : isCtPick.value
+        ? [...tagInput.value]
+        : [];
+    const p = currentPick.value;
+    return p ? mergeInherentTags(base, p) : base;
   });
 
   function resetTags(): void {
@@ -91,13 +97,15 @@ export function useCtTagSelect() {
   }
 
   /**
-   * 提交前整理词条：换 pick 时丢弃上一 pick 的词条选择（避免误随新 pick 提交），
-   * 返回本次应随 referee_select_pick 携带的词条数组。
+   * 提交前整理词条：换 pick 时丢弃上一 pick 的裁判词条选择（避免误随新 pick
+   * 提交），但新 pick 的固有词条（Glitchless）无条件保留；返回本次应随
+   * referee_select_pick 携带的词条数组。
    */
   function prepareSubmit(code: string): string[] {
     if (code !== match.pendingPickCode) {
       resetTags();
-      return [];
+      const p = draft.pickByCode(code);
+      return p ? inherentPickTags(p) : [];
     }
     return tagsToSubmit.value;
   }

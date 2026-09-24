@@ -5,7 +5,13 @@ import { Delete } from "@element-plus/icons-vue";
 import { useI18n } from "vue-i18n";
 import { useAdminStore } from "@/stores/admin";
 import { CategoryKind, PickType, type Level, type Pick } from "@/api/types";
-import { categoryKindOf } from "@/utils/mappool";
+import {
+  GLITCHLESS_TAG,
+  inherentPickTags,
+  setGlitchlessTag,
+  supportsGlitchless,
+  categoryKindOf,
+} from "@/utils/mappool";
 import { officialDisplayName } from "@/utils/officialLevels";
 import SpeedrunMappingEditor from "@/components/admin/SpeedrunMappingEditor.vue";
 
@@ -55,6 +61,26 @@ watch(
     if (k === CategoryKind.CT || k === CategoryKind.EX) {
       if (props.pick.type === PickType.SINGLE) props.pick.retry_count = null;
     }
+  },
+  { immediate: true },
+);
+
+// ── 固有词条「Glitchless」：仅 ML/IL/CP/TB 类别展示；勾选即写入 pick.tag ──────────
+// （CT/EX 的词条由裁判选图时选定，不在此处编辑。）
+const showGlitchless = computed(() => supportsGlitchless(categoryKindOf(props.categoryName)));
+const glitchless = computed<boolean>({
+  get: () => inherentPickTags(props.pick).includes(GLITCHLESS_TAG),
+  set: (v) => {
+    if (showGlitchless.value) setGlitchlessTag(props.pick, v);
+  },
+});
+// 名称输入含 "Glitchless"（大小写不敏感）时自动勾选；仅自动勾选、不自动取消
+// （用户可手动取消，之后名称再变化会重新触发检测）。
+watch(
+  () => props.pick.name,
+  (n) => {
+    if (!showGlitchless.value || glitchless.value) return;
+    if (/glitchless/i.test(n ?? "")) setGlitchlessTag(props.pick, true);
   },
   { immediate: true },
 );
@@ -340,6 +366,13 @@ async function onRemove(): Promise<void> {
         </el-form-item>
       </div>
 
+      <!-- 固有词条 Glitchless（仅 ML/IL/CP/TB）：勾选后该选图自带 Glitchless 标签，
+           名称含 Glitchless 文本时自动勾选；裁判选图时随选图自动提交 -->
+      <el-form-item v-if="showGlitchless" :label="$t('pickEditor.labelGlitchless')">
+        <el-checkbox v-model="glitchless">{{ $t("pickEditor.glitchlessOption") }}</el-checkbox>
+        <span class="glitchless-hint">{{ $t("pickEditor.glitchlessHint") }}</span>
+      </el-form-item>
+
       <!-- logo 展示图：仅只读展示，不可在选图面板中修改 -->
       <el-form-item v-if="logoPreview" :label="$t('pickEditor.labelLogo')">
         <div class="logo-preview">
@@ -579,6 +612,11 @@ async function onRemove(): Promise<void> {
 }
 .single-hint {
   padding: 2px 0 4px;
+}
+.glitchless-hint {
+  margin-left: 10px;
+  color: var(--tc-text-dim);
+  font-size: 12px;
 }
 .logo-preview {
   display: flex;

@@ -35,6 +35,56 @@ export function ctTagsFor(single: boolean): string[] {
   return single ? [...CT_TAG_BASE, CT_TAG_ACHIEVEMENT] : [...CT_TAG_BASE];
 }
 
+// ── 选图固有词条（图池编辑器「Glitchless」单选，写入持久化的 Pick.tag）──────────
+/** 「Glitchless」固有词条原文（与 speedrun.com 子分类值名一致）。 */
+export const GLITCHLESS_TAG = "Glitchless";
+/** 支持「Glitchless」固有词条的类别（文档：ML/IL/CP/TB；CT/EX 走裁判词条机制）。 */
+export const GLITCHLESS_CATEGORIES: readonly CK[] = [
+  CategoryKind.ML,
+  CategoryKind.IL,
+  CategoryKind.CP,
+  CategoryKind.TB,
+];
+
+/** 该类别是否支持「Glitchless」固有词条。 */
+export function supportsGlitchless(kind: CK | null | undefined): boolean {
+  return !!kind && GLITCHLESS_CATEGORIES.includes(kind);
+}
+
+/** Pick.tag 的逗号分隔 token（去空白、去重保序；兼容遗留自由文本）。 */
+export function pickTagTokens(pick: Pick): string[] {
+  const raw = pick.tag;
+  if (!raw) return [];
+  const out: string[] = [];
+  for (const part of raw.split(",")) {
+    const t = part.trim();
+    if (t && !out.includes(t)) out.push(t);
+  }
+  return out;
+}
+
+/** 选图固有词条（仅 ML/IL/CP/TB 且 tag 含 Glitchless 时返回 ["Glitchless"]）。 */
+export function inherentPickTags(pick: Pick): string[] {
+  if (!supportsGlitchless(categoryKindOf(pick.category))) return [];
+  return pickTagTokens(pick).filter((t) => t === GLITCHLESS_TAG);
+}
+
+/** 设置 / 清除选图固有 Glitchless 标签，保留 tag 中其它 token（空则写 null）。 */
+export function setGlitchlessTag(pick: Pick, on: boolean): void {
+  const tokens = pickTagTokens(pick).filter((t) => t !== GLITCHLESS_TAG);
+  if (on) tokens.push(GLITCHLESS_TAG);
+  pick.tag = tokens.length > 0 ? tokens.join(",") : null;
+}
+
+/** 把选图固有词条并入待提交词条数组（保留原顺序、去重）。 */
+export function mergeInherentTags(tags: string[], pick: Pick): string[] {
+  const out = [...tags];
+  for (const t of inherentPickTags(pick)) {
+    if (!out.includes(t)) out.push(t);
+  }
+  return out;
+}
+
 /**
  * 选图默认背景图：无自定义展示图（logo_url）时按名称回退官方关卡背景。
  * 名称解析（容忍「Carry 12」「Dark% CP」这类带重试/模式后缀的写法，取整串与首词分别匹配）：

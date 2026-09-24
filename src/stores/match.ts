@@ -688,8 +688,8 @@ export const useMatchStore = defineStore("match", () => {
   function selectPick(code: string, tags?: string[], retryCount?: number): void {
     const c = code.trim();
     if (!c) return;
-    // 仅 CT/EX/CP 选图携带词条、CT/EX 单关携带重试次数；
-    // 发送失败（含服务端校验 error）时保留原选择，不清空
+    // 词条：CT/EX/CP 选图携带，以及 ML/IL/CP/TB 的固有 Glitchless；
+    // CT/EX 单关携带重试次数；发送失败（含服务端校验 error）时保留原选择，不清空
     const sendTags = tags && tags.length > 0 ? tags : undefined;
     const sendRetry = retryCount != null ? retryCount : undefined;
     if (socket?.send(send.refereeSelectPick(c, sendTags, sendRetry))) {

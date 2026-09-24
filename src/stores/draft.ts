@@ -28,6 +28,7 @@ import {
 import {
   CT_TAG_BASE,
   categoryKindOf,
+  mergeInherentTags,
   normalizeMappool,
   validateMappool,
 } from "@/utils/mappool";
@@ -219,6 +220,11 @@ export const useDraftStore = defineStore("draft", () => {
 
   function pickByCode(code: string): Pick | null {
     return mappool.value?.categories.flatMap((c) => c.picks).find((p) => p.code === code) ?? null;
+  }
+  /** 并入当前选图的固有词条（ML/IL/CP/TB 的 Glitchless，图池编辑器所设）。 */
+  function withInherentTags(code: string, tags: string[]): string[] {
+    const p = pickByCode(code);
+    return p ? mergeInherentTags(tags, p) : tags;
   }
   function kindOfCode(code: string): CK | null {
     const cat = mappool.value?.categories.find((c) => c.picks.some((p) => p.code === code));
@@ -534,8 +540,9 @@ export const useDraftStore = defineStore("draft", () => {
     const legal = legalPicks.value.some((p) => p.code === code);
     if (!legal) return;
     const picker = state.nextPicker ?? "A";
-    state.picks.push({ by: picker, code });
-    enterPrep(code);
+    const tags = withInherentTags(code, []);
+    state.picks.push({ by: picker, code, ...(tags.length > 0 ? { tags } : {}) });
+    enterPrep(code, tags);
     state.nextPicker = other(picker);
   }
 
@@ -544,13 +551,14 @@ export const useDraftStore = defineStore("draft", () => {
     const legal = legalPicks.value.some((p) => p.code === code);
     if (!legal) return;
     const picker = state.nextPicker ?? "A";
+    const merged = withInherentTags(code, tags);
     state.picks.push({
       by: picker,
       code,
-      ...(tags.length > 0 ? { tags } : {}),
+      ...(merged.length > 0 ? { tags: merged } : {}),
       ...(retry != null ? { retry } : {}),
     });
-    enterPrep(code, tags, retry);
+    enterPrep(code, merged, retry);
     state.nextPicker = other(picker);
   }
 
@@ -568,8 +576,9 @@ export const useDraftStore = defineStore("draft", () => {
     if (finalPool.length === 0) return;
     const pick = finalPool[Math.floor(Math.random() * finalPool.length)];
     const picker = state.nextPicker ?? "A";
-    state.picks.push({ by: picker, code: pick.code });
-    enterPrep(pick.code);
+    const tags = withInherentTags(pick.code, []);
+    state.picks.push({ by: picker, code: pick.code, ...(tags.length > 0 ? { tags } : {}) });
+    enterPrep(pick.code, tags);
     state.nextPicker = other(picker);
   }
 
@@ -579,8 +588,13 @@ export const useDraftStore = defineStore("draft", () => {
 
   function forceTB(): void {
     if (!tbCode.value) return;
-    state.picks.push({ by: state.nextPicker ?? "A", code: tbCode.value });
-    enterPrep(tbCode.value);
+    const tags = withInherentTags(tbCode.value, []);
+    state.picks.push({
+      by: state.nextPicker ?? "A",
+      code: tbCode.value,
+      ...(tags.length > 0 ? { tags } : {}),
+    });
+    enterPrep(tbCode.value, tags);
   }
 
   // =========================================================================
