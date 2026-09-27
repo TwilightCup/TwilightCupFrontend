@@ -7,6 +7,7 @@
 import { onBeforeUnmount, onMounted, ref, type Ref } from "vue";
 import { alignEngine, type Side } from "@/scenes/align/useFrameAlign";
 import type { LiveTime } from "@/stores/director";
+import { projectTimer } from "./timerProjection";
 
 export interface AlignedTimingCtx {
   /** 本侧是否启用对齐（config.alignX && 有流） */
@@ -47,19 +48,12 @@ export function useAlignedTiming(_side: Side, ctx: AlignedTimingCtx): AlignedTim
       const rt = alignEngine.sync.presentedRt[_side];
       const tw = T == null || rt == null ? null : Math.min(T, rt) / 1000 - Math.max(0, ctx.offsetMs());
       const state = tw == null ? null : ctx.sampleAt(tw);
-      const sample = state?.sample;
-      if (tw == null || !sample || sample.receivedAt > tw) {
-        main.value = seg.value = null;
-        return;
-      }
-      // realTimeMs is elapsed round time, NOT epoch. Unknown/old state is held,
-      // not extrapolated indefinitely through pauses or a disconnected timer.
-      const dt = state.running ? Math.min(1500, Math.max(0, tw - sample.receivedAt)) : 0;
-      main.value = sample.totalMs + dt;
-      seg.value = (sample.segmentMs ?? 0) + dt;
+      const value = projectTimer(state?.sample ?? null, tw, state?.running ?? false);
+      main.value = value.main;
+      seg.value = value.seg;
     };
     tick();
-    timer = window.setInterval(tick, 100);
+    timer = window.setInterval(tick, 50);
   });
   onBeforeUnmount(() => window.clearInterval(timer));
 

@@ -31,6 +31,7 @@ import { send } from "@/ws/protocol";
 import { ConnStatus, MatchSocket } from "@/ws/socket";
 import { useAuthStore } from "./auth";
 import { PresentationHistory } from "@/scenes/align/presentationHistory";
+import { timerIsAdvancing } from "@/scenes/match/timerProjection";
 import type { FrameAlignAnchor } from "@/scenes/align/externalClock";
 import { FrameLeaseClient } from "@/scenes/align/frameLeaseClient";
 import { AuthorityRole, type AuthorityAssignment } from "@/scenes/align/authorityRole";
@@ -80,6 +81,8 @@ export interface LiveTime {
   segmentMs: number;
   /** 现实/墙钟累计（毫秒）；提供方支持时存在 */
   realTimeMs?: number | null;
+  /** Inferred growth from consecutive reports, not a protocol pause guarantee. */
+  advancing?: boolean;
   receivedAt: number;
 }
 
@@ -532,6 +535,7 @@ export const useDirectorStore = defineStore("director", () => {
           realTimeMs: msg.real_time_ms ?? null,
           receivedAt: Date.now(),
         };
+        sample.advancing = timerIsAdvancing(msg.seat === "PLAYER_A" ? liveTimeA.value : liveTimeB.value, sample);
         if (msg.seat === "PLAYER_A") liveTimeA.value = sample;
         else if (msg.seat === "PLAYER_B") liveTimeB.value = sample;
         break;

@@ -77,9 +77,11 @@ function displayLive(side: "A" | "B") { return side === "A" ? broadcast.value.li
 function timerStateAt(side: "A" | "B", wallMs: number) {
   const state = director.presentationAt(wallMs);
   if (!state) return null;
-  // IN_GAME does not prove the game timer is running (pause/loading).
-  // Hold the historical sample until the protocol supplies an explicit timer rate.
-  return { sample: side === "A" ? state.liveTimeA : state.liveTimeB, running: false };
+  const sample = side === "A" ? state.liveTimeA : state.liveTimeB;
+  const player = side === "A" ? state.playerA : state.playerB;
+  // Status alone cannot prove running: also require observed timer growth.
+  return { sample, running: state.phase === MatchPhase.IN_ROUND &&
+    player.status === PlayerStatus.IN_GAME && sample?.advancing === true };
 }
 watch(() => [config.alignA, config.hlsA, config.alignB, config.hlsB], () => {
   alignEngine.setRequiredSides((["A", "B"] as const).filter(side =>
