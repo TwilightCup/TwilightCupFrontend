@@ -12,6 +12,7 @@ import DirectorSpeedrunInfo from "@/components/DirectorSpeedrunInfo.vue";
 import StreamFrame from "@/scenes/match/StreamFrame.vue";
 import SeiStream from "@/scenes/match/SeiStream.vue";
 import { usePanelVisibility } from "@/scenes/composables/usePanelVisibility";
+import { PlaybackRecovery } from "@/scenes/align/playbackRecovery";
 import { alignEngine } from "@/scenes/align/useFrameAlign";
 import AuthFailMask from "@/components/AuthFailMask.vue";
 import { requestSpeedrunRefresh } from "@/api/speedrun";
@@ -218,6 +219,7 @@ const showStreamDebug = ref(true);
 const anchorDelta = ref<number | undefined>(15);
 const wallNow = ref(Date.now());
 let wallTimer: ReturnType<typeof setInterval> | undefined;
+const playbackRecovery = new PlaybackRecovery();
 const displayedAnchor = computed(() => director.alignRole === "publisher"
   ? director.resetPending ? alignEngine.sync.authorityUs : alignEngine.tUs.value
   : alignEngine.sync.authorityUs);
@@ -477,7 +479,18 @@ function logout(): void {
 }
 
 onMounted(() => {
-  wallTimer = setInterval(() => { wallNow.value = Date.now(); }, 100);
+  wallTimer = setInterval(() => {
+    wallNow.value = Date.now();
+    const receiving = (["A", "B"] as const).every(side => {
+      const h = alignEngine.health[side];
+      return h.arrivalAgeMs != null && h.arrivalAgeMs < 4000 && h.frames > 0;
+    });
+    if (playbackRecovery.check(performance.now(),
+      [alignEngine.sync.presentedRt.A, alignEngine.sync.presentedRt.B],
+      receiving && director.canAdjustAnchor && !readOnly.value && !!director.matchId && anchorDelta.value != null)) {
+      resyncStreams();
+    }
+  }, 100);
   if (!auth.isLoggedIn) {
     router.replace("/login");
     return;
