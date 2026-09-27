@@ -655,7 +655,10 @@ export const useDirectorStore = defineStore("director", () => {
           // 后端把最近一次 frame_align 作为 state_sync 的独立子键补发（权威 T + 就绪），
           // 并带 align_authority_src 指明该跟谁（晚连一致跟随）
           const s = msg.payload as { frame_align?: unknown; align_authority_src?: unknown } | undefined;
-          const asrc = s?.align_authority_src;
+          // The backend omits this key when there is no owner. Normalize it
+          // before restoring the timeline, so the frozen floor cannot become
+          // an apparent live authority and block candidate decoder preparation.
+          const asrc = s?.align_authority_src ?? null;
           if (!authorityRole.connectionId && typeof asrc === "string") { currentAlignSrc.value = asrc; alignEngine.selectAuthority(asrc); }
           const replay = msg.payload ?? {};
           const replayFrame = replay.frame_align as Partial<FrameAlignAnchor> | undefined;

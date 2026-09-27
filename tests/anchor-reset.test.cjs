@@ -204,3 +204,28 @@ test('publisher can edit and resync without synchronized frames; pending reset o
   assert(!p.store.canEditAnchor);assert(!p.store.canAdjustAnchor);
  } finally {p.close();}
 });
+
+test('server snapshot omitting absent authority does not deadlock candidate preparation',()=>{
+ for(const kind of ['console','stage']) {
+  const p=createPage({id:kind,kind});
+  try {
+   p.deliver({...auth(p.id),align_authority_src:null,align_role:'follower',authority_epoch:7,timeline_version:1});
+   p.deliver({type:'director_cmd',action:'state_sync',payload:{connection_id:p.id,align_role:'follower',
+    align_lease_required:true,timeline_version:1,
+    reset:{...reset(p,80e6,'failed'),owner_id:'old',authority_epoch:6,code:'OWNER_LOST'},
+    frame_align:{t_us:80e6,epoch:7,seq:0,timeline_version:1,src:null,stale:true,frozen:true,rate:0}}});
+   for(let now=0;now<=1000;now+=25)p.tick(now);
+   assert.equal(p.engine.external.hasAuthority,false);
+   const sent=p.drain();
+   if(kind==='stage') {
+    assert(!sent.some(m=>m.action==='frame_align_status'||m.action==='frame_align'));
+   } else {
+    assert(sent.some(m=>m.action==='frame_align_status'&&m.payload.media_ready&&m.payload.decode_ready));
+    authority(p,1,undefined,p.id,8);
+    for(let now=1025;now<=1800;now+=25)p.tick(now);
+    assert(p.store.canAdjustAnchor);
+    assert(p.drain().some(m=>m.action==='frame_align'));
+   }
+  } finally {p.close();}
+ }
+});

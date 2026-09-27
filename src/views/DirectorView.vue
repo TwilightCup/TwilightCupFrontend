@@ -501,7 +501,7 @@ onUnmounted(() => {
       <div class="top-side left">
         <div class="brand">
           🎬 {{ $t("directorView.brand") }}
-          <el-tag size="small" type="warning" effect="dark">{{ $t("directorView.readOnlyTag") }}</el-tag>
+          <el-tag v-if="readOnly" size="small" type="warning" effect="dark">{{ $t("directorView.readOnlyTag") }}</el-tag>
         </div>
         <el-button size="small" :disabled="readOnly" @click="refreshSpeedrun">
           {{ $t("directorView.refreshSpeedrun") }}
