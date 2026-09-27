@@ -215,7 +215,7 @@ const showB = computed({
 const previewAlignedA = computed(() => !!cfgConfig.alignA && !!cfgConfig.hlsA);
 const previewAlignedB = computed(() => !!cfgConfig.alignB && !!cfgConfig.hlsB);
 const showStreamDebug = ref(true);
-const anchorDelta = ref<number | undefined>(30);
+const anchorDelta = ref<number | undefined>(10);
 const wallNow = ref(Date.now());
 let wallTimer: ReturnType<typeof setInterval> | undefined;
 const displayedAnchor = computed(() => director.alignRole === "publisher"
@@ -322,7 +322,7 @@ function resyncStreams(): void {
     alignEngine.restartStream("A", patch.refreshA);
     alignEngine.restartStream("B", patch.refreshB);
     return true;
-  });
+  }, () => { anchorDelta.value = 20; });
 }
 
 /** 计时显示延迟（秒）：把比赛详情场景的计时器 / 偏差条回放对齐有延迟的

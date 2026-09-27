@@ -84,3 +84,36 @@ test('lost authority cancels pending resync; failed reload is not reported as pl
   assert.equal(calls,1);assert(!p.store.canAdjustAnchor);
  } finally {p.close();}
 });
+test('10 second resync retries once at 20 seconds after preparation timeout',()=>{
+ const p=boot();let reloads=0,fallbacks=0;const realNow=Date.now;Date.now=()=>110000;
+ try {
+  assert(p.store.applyAnchorDelay(10,()=>{reloads++;return true;},()=>fallbacks++));
+  let req=p.drain().find(m=>m.action==='frame_align_reset').payload;
+  assert.equal(req.target_t_us,100e6);
+  let r={...reset(p,req.target_t_us),request_id:req.request_id};
+  authority(p,1,r);assert.equal(reloads,1);
+  Date.now=()=>120000;
+  result(p,{...r,status:'failed',code:'PREPARE_TIMEOUT'});
+  assert.equal(fallbacks,1);assert(p.store.resetPending);
+  req=p.drain().find(m=>m.action==='frame_align_reset').payload;
+  assert.equal(req.target_t_us,100e6);assert.equal(req.timeline_version,1);
+  result(p,{...r,status:'failed',code:'PREPARE_TIMEOUT'});
+  assert.equal(p.drain().filter(m=>m.action==='frame_align_reset').length,0);assert(p.store.resetPending);
+  r={...reset(p,req.target_t_us),request_id:req.request_id,timeline_version:2,authority_epoch:3};
+  authority(p,2,r);assert.equal(reloads,2);
+  result(p,{...r,status:'failed',code:'PREPARE_TIMEOUT'});
+  assert.equal(p.drain().filter(m=>m.action==='frame_align_reset').length,0);assert.equal(fallbacks,1);
+ } finally {Date.now=realNow;p.close();}
+});
+test('manual delay and successful resync do not trigger automatic fallback',()=>{
+ for(const delta of [10,15,20]) {
+  const p=boot();let fallback=0;
+  try {
+   p.store.applyAnchorDelay(delta,()=>true,()=>fallback++);
+   const req=p.drain().find(m=>m.action==='frame_align_reset').payload;
+   const r={...reset(p,req.target_t_us),request_id:req.request_id};authority(p,1,r);
+   result(p,{...r,status:delta===10?'completed':'failed',code:'PREPARE_TIMEOUT'});
+   assert.equal(fallback,0);assert(!p.drain().some(m=>m.action==='frame_align_reset'));
+  } finally {p.close();}
+ }
+});
