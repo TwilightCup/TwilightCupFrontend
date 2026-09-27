@@ -247,18 +247,15 @@ function healthText(side: "A" | "B"): string {
   const h = alignEngine.health[side];
   // 关键诊断：倍速(>1=在追/快进)/落后秒数/可上屏队列/重同步次数
   const pb = alignEngine.playback;
-  // 信号中断检测：>4s 无新 SEI 帧到达 → 源/网络断了（区别于前端卡）
-  let stale = 0;
-  if (h.frontRtUs != null) {
-    const rtNow = Date.now() * 1000;
-    stale = (rtNow - h.frontRtUs) / 1e6;
-  }
+  // 接收静默只看单调到达年龄；SEI 时间差含传输延迟和设备钟偏差。
+  const stale = (h.arrivalAgeMs ?? 0) / 1000;
+  const seiAge = h.frontRtUs == null ? "—" : ((Date.now() * 1000 - h.frontRtUs) / 1e6).toFixed(1);
   const sync = alignEngine.sync;
   const errMs = sync.targetErrorUs[side];
   const timing = ` · ${sync.role}/${sync.state}/${sync.catchup} · ${sync.reason} · 重锚${sync.seekCount}次/最近计划跳${(sync.lastJumpUs / 1e6).toFixed(2)}s(${sync.lastSeekReason || "—"}) · T误差${errMs == null ? "—" : (errMs / 1000).toFixed(1)}ms · AB${sync.pairErrorUs == null ? "—" : (sync.pairErrorUs / 1000).toFixed(1)}ms`;
   const diag = timing + ` · ×${pb.speed.toFixed(2)} · 追${pb.behindS.toFixed(1)}s · 队列${h.queueLen} · 重${h.resyncs}${h.resyncGap ? `段${h.resyncGap}` : ""}${h.resyncErr ? `错${h.resyncErr}` : ""}`;
   // 解码流水线：原始环/解码游标/封装/解码累计输出（定位"队列0/没画面"）
-  const pipe = ` · raw${h.rawLen}/pos${h.decPos}/${h.enc || "-"}/出${h.decOutput}/qc${h.qc}/pn${h.pendCfg ? "1" : "0"}`;
+  const pipe = ` · raw${h.rawLen}/pos${h.decPos}/${h.enc || "-"}/出${h.decOutput}/qc${h.qc}/pn${h.pendCfg ? "1" : "0"} · 接收静默${h.arrivalAgeMs == null ? "—" : stale.toFixed(1)}s · SEI时间差${seiAge}s`;
   if (h.frames === 0 && !h.hasContent) {
     return h.segs > 0
       ? `已收到 ${h.segs} 段但无 SEI 时间戳——该流需用 SEI Timestamp 编码器推`
@@ -266,14 +263,14 @@ function healthText(side: "A" | "B"): string {
   }
   if (h.frames > 0 && !alignEngine.presented[side]) {
     // 攒缓冲阶段也带诊断：看「追」是否在缩（能上屏）、队列是否有帧、主循环是否活
-    const head = stale > 4 ? `⚠ 信号中断 ${stale.toFixed(0)}s` : "⏳ 攒缓冲中";
+    const head = stale > 4 ? `⚠ 接收静默 ${stale.toFixed(0)}s` : "⏳ 攒缓冲中";
     return `${head}（总 ${h.frames} 帧 · 活 ${h.liveFps} fps）${diag}${pipe}`;
   }
   // 实时 fps 用近 1s 速率（liveFps），累计总数用 帧；信号中断时近 1s 速率归 0，
   // 不回退历史中位数 fps（否则流已死仍显示"192 fps · 已就绪"误导导播）
   const fps = (stale > 4 ? 0 : h.liveFps || 0).toFixed(0);
   let s = `${h.codec.toUpperCase()} · ${fps} fps · 总${h.frames}帧 · NTP ${h.ntp}/${h.frames}`;
-  if (stale > 4) s = `⚠ 信号中断 ${stale.toFixed(0)}s` + s;
+  if (stale > 4) s = `⚠ 接收静默 ${stale.toFixed(0)}s · ` + s;
   if (h.droppedSeq) s += ` · 丢帧 ${h.droppedSeq}`;
   if (h.missing) s += ` · 缺SEI ${h.missing}`;
   if (h.segAuth) s += ` · ⚠鉴权拒 ${h.segAuth}`;

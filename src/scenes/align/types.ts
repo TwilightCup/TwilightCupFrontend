@@ -81,6 +81,8 @@ export interface StreamHealth {
   mode: "aligned" | "off";
   /** 最近到货 rt（µs） */
   frontRtUs: number | null;
+  /** Monotonic age since the last successfully parsed SEI sample, not source latency. */
+  arrivalAgeMs: number | null;
   /** 最近 WebCodecs 解码错误（明文；无则 null） */
   decodeError: string | null;
   /** 可上屏队列中的已解帧数（0 = 无帧可放 → 画面卡住） */
@@ -131,6 +133,7 @@ export function emptyHealth(): StreamHealth {
     hasContent: false,
     mode: "off",
     frontRtUs: null,
+    arrivalAgeMs: null,
     decodeError: null,
     queueLen: 0,
     resyncs: 0,

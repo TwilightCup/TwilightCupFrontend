@@ -212,6 +212,7 @@ export class FrameLockStream {
   private dtRing: number[] = [];
   /** 近 1s 内的到达时刻（算实时每秒帧率；累计 frames 总数与此分开） */
   private liveArr: number[] = [];
+  private lastArrivalMono: number | null = null;
 
   constructor(source: FrameSource, opts: FrameLockStreamOptions = {}) {
     this.opts = opts;
@@ -359,6 +360,7 @@ export class FrameLockStream {
     const rtUs = Number(info.realtime_us);
     this.st.frames++;
     const nowArr = performance.now();
+    this.lastArrivalMono = nowArr;
     this.liveArr.push(nowArr);
     while (this.liveArr.length && this.liveArr[0]! < nowArr - 1000) this.liveArr.shift();
     this.st.ntp += info.clock_ntp ? 1 : 0;
@@ -386,6 +388,10 @@ export class FrameLockStream {
     const infos = parseAnnexbFrames(es, this.codec);
     if (infos.length > 0) this.hasContent = true;
     for (const info of infos) {
+      const nowArr = performance.now();
+      this.lastArrivalMono = nowArr;
+      this.liveArr.push(nowArr);
+      while (this.liveArr.length && this.liveArr[0]! < nowArr - 1000) this.liveArr.shift();
       this.st.frames++;
       this.st.ntp += info.clock_ntp ? 1 : 0;
       this.st.key += info.keyframe ? 1 : 0;
@@ -395,6 +401,8 @@ export class FrameLockStream {
 
   /** 连通性/健康快照 */
   stats(): StreamHealth {
+    const now = performance.now();
+    while (this.liveArr.length && this.liveArr[0]! < now - 1000) this.liveArr.shift();
     const n = this.dtRing.length;
     // 用中位数而非均值：稳健，抗偶发半帧/双 SEI 造成的 dt 偏小
     const srt = [...this.dtRing].sort((a, b) => a - b);
@@ -412,6 +420,7 @@ export class FrameLockStream {
       hasContent: this.hasContent,
       mode: this.mode,
       frontRtUs: this.lastArrivedRtUs,
+      arrivalAgeMs: this.lastArrivalMono == null ? null : Math.max(0, now - this.lastArrivalMono),
       decodeError: this.decodeError,
       queueLen: this.queue.length,
       resyncs: this.resyncs,

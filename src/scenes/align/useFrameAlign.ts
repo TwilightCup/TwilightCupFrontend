@@ -52,6 +52,7 @@ export class AlignEngine {
   private latestMissingAt: number | null = null;
   readonly resetPresentedUs = ref<number | null>(null);
   beginTimeline(target: number): void {
+    this.cadenceTarget = null;
     // Retain pixels and their actual presentation floor, never play backwards.
     const shown = Object.values(this.sync.presentedRt).filter((x): x is number => x != null);
     this.resumeFloor = shown.length ? Math.max(...shown) : this.tUs.value;
@@ -85,6 +86,8 @@ export class AlignEngine {
   private catchupMode: CatchupMode = "normal";
   private pendingSeek: number | null = null;
   private waitingT: number | null = null;
+  /** Uncommitted publisher position retained only across ordinary frame intervals. */
+  private cadenceTarget: number | null = null;
   private stableMs = 0;
   private missingMs = 0;
   private takeoverSeek = false;
@@ -139,6 +142,7 @@ export class AlignEngine {
   setPublisher(selected: boolean): void {
     selected = selected && this.candidateEnabled;
     if (this.publisher !== selected) {
+      this.cadenceTarget = null;
       if (selected && this.manualTarget != null && this.resetPhase !== "preparing") this.resetPhase = "completed";
       this.pendingSeek = null; this.waitingT = null; this.stableMs = 0; this.catchupMode = "normal";
       if (selected && this.candidateProbe != null) {
@@ -154,6 +158,7 @@ export class AlignEngine {
     this.refreshAuthority(performance.now());
   }
   resetClockConnection(): void {
+    this.cadenceTarget = null;
     this.manualTarget = null; this.resetPhase = null; this.resumeFloor = null; this.latestSeek = null; this.latestMissingAt = null;
     this.resetPresentedUs.value = null;
     this.takeoverSeek = false;
@@ -271,6 +276,7 @@ export class AlignEngine {
       state: media && decoded && !holdingSignal ? "running" : "media_wait" };
   }
   setRequiredSides(sides: Side[]): void {
+    this.cadenceTarget = null;
     this.requiredSides = new Set(sides);
     this.enabled.value = sides.length > 0;
   }
@@ -338,6 +344,7 @@ export class AlignEngine {
     release();
   }
   resetSession(): void {
+    this.cadenceTarget = null;
     for (const stream of this.streams.values()) stream.stop();
     this.streams.clear(); this.refs.clear(); this.sourceUrls.clear();
     this.directorRenderer.clear();
@@ -366,6 +373,7 @@ export class AlignEngine {
   }
   /** Restart decoding while retaining the last pixels and their time floor. */
   private resetPresented(side: Side): void {
+    this.cadenceTarget = null;
     for (const canvas of this.canvases.get(side) ?? []) {
       this.directorRenderer.forget(canvas);
     }
@@ -433,6 +441,8 @@ export class AlignEngine {
 
   private tickLoop(now: number): void {
     this.refreshAuthority(now);
+    const cadenceTarget = this.sync.state === "playing" ? this.cadenceTarget : null;
+    this.cadenceTarget = null;
     const elapsed = Math.max(0, Math.min(now - this.last, 100));
     this.last = now;
     const requiredSides = this.requiredSides.size ? [...this.requiredSides] : [...this.streams.keys()];
@@ -475,7 +485,7 @@ export class AlignEngine {
       return;
     }
     if (earliest > required) { freeze("waiting", false, "buffer_short"); return; }
-    const plan = planCatchup({ current: this.tUs.value, authority: external.t,
+    const plan = planCatchup({ current: this.tUs.value == null ? null : cadenceTarget ?? this.tUs.value, authority: external.t,
       from: earliest, safeTo: required, elapsedMs: elapsed, rate: external.rate,
       supply: true, publisher: this.publisher, mode: this.catchupMode, recovering: (this.takeoverSeek || this.missingMs >= CATCHUP.stallSeekMs) && now - this.lastSeekAt >= SIGNAL.retryMs });
     if (this.pendingSeek != null && (this.pendingSeek < earliest || this.pendingSeek > required ||
@@ -505,7 +515,20 @@ export class AlignEngine {
         T < earliest || T > required || (this.tUs.value != null && T < this.tUs.value)) {
       freeze("frozen"); return;
     }
-    if (sides.some(s => T <= (this.sync.presentedRt[s] ?? -Infinity))) { freeze("frozen", false, "authority_behind_picture"); return; }
+    if (sides.some(s => T <= (this.sync.presentedRt[s] ?? -Infinity))) {
+      if (this.pendingSeek == null && this.waitingT == null && this.missingMs === 0 &&
+          this.sync.state === "playing" && sides.every(s => this.presented[s])) {
+        // Joint nearest-frame selection may lead T by a fraction of a frame.
+        // Keep accumulating the shared target until it passes that picture; do
+        // not discard elapsed time or advertise an authority freeze each tick.
+        // Committed T and lastPictureAt still describe the retained picture.
+        this.cadenceTarget = T;
+        this.sync.reason = "frame_interval";
+        this.playback.speed = plan.rate;
+        return;
+      }
+      freeze("frozen", false, "authority_behind_picture"); return;
+    }
     for (const stream of streams) stream!.advance(T);
     const frames = commonFrames(streams.map(s => s!.queue), T, CATCHUP.maxFrameErrorUs,
       sides.map(side => this.sync.presentedRt[side])) ?? [];
