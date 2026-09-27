@@ -348,9 +348,11 @@ export class AlignEngine {
       this.sync.presentedRt[side] = null;
     }
   }
-  restartStream(side: Side): void {
+  private refreshNonces = new Map<Side, number>();
+  restartStream(side: Side, nonce?: number): void {
     const url = this.sourceUrls.get(side);
-    if (!url) return;
+    if (!url || (nonce != null && this.refreshNonces.get(side) === nonce)) return;
+    if (nonce != null) this.refreshNonces.set(side, nonce);
     this.streams.get(side)?.stop();
     this.streams.delete(side);
     this.pendingSeek = null; this.waitingT = null; this.catchupMode = "normal"; // explicit operator recovery, not automatic timeline jump
@@ -360,7 +362,7 @@ export class AlignEngine {
   resetSession(): void {
     this.cadenceTarget = null;
     for (const stream of this.streams.values()) stream.stop();
-    this.streams.clear(); this.refs.clear(); this.sourceUrls.clear();
+    this.streams.clear(); this.refs.clear(); this.sourceUrls.clear(); this.refreshNonces.clear();
     this.directorRenderer.clear();
     this.lastPictureAt.A = this.lastPictureAt.B = -Infinity; this.pictureExpired.value = true;
     this.paintedCanvases.clear(); this.candidateProbe = null; this.sync.candidate = "off";

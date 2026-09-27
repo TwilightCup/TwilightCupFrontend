@@ -61,7 +61,7 @@ watch(() => props.url, () => {
   release = null;
   refresh();
 });
-watch(() => props.refreshNonce, () => alignEngine.restartStream(props.side));
+watch(() => props.refreshNonce, (nonce) => alignEngine.restartStream(props.side, nonce));
 let unreg: (() => void) | null = null;
 onBeforeUnmount(() => {
   unreg?.();

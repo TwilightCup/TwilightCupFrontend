@@ -75,3 +75,19 @@ test('director native output retains full source resolution and identity dedupli
  r.prepare('A',f,1,surfaces)();r.prepare('A',f,1,surfaces)();
  assert.equal(c.width,3840);assert.equal(c.height,2160);assert.equal(c.draws.length,1);
 });
+test('shared reload nonce restarts each side once across preload and canvas consumers',()=>{
+ const e=new AlignEngine(), restarted=[];
+ for(const side of ['A','B']) {
+  e.sourceUrls.set(side,`/${side}.m3u8`);
+  e.streams.set(side,{stop(){}});
+ }
+ e.startStream=(side)=>{restarted.push(side);e.streams.set(side,{stop(){}});return ()=>{};};
+ e.restartStream('A',1);e.restartStream('B',1);
+ e.restartStream('A',1);e.restartStream('B',1);
+ assert.deepEqual(restarted,['A','B']);
+ e.restartStream('A',2);e.restartStream('B',2);
+ assert.deepEqual(restarted,['A','B','A','B']);
+ e.resetSession();
+ e.sourceUrls.set('A','/A.m3u8');e.restartStream('A',2);
+ assert.equal(restarted.length,5);
+});

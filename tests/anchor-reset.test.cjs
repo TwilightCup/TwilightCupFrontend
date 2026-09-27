@@ -53,3 +53,34 @@ test('ownership loss disables editing and new owner does not replay historical r
  p.tick(1050);assert(!p.drain().some(m=>m.action==='frame_align_reset_ack'));
  }finally{p.close();}
 });
+test('resync reload runs once only after own reset acceptance, never on rejection',()=>{
+ const p=boot();let calls=0;
+ try {
+  assert(p.store.applyAnchorDelay(30,()=>{calls++;return true;}));
+  const request=p.drain().find(m=>m.action==='frame_align_reset').payload;
+  assert.equal(calls,0);
+  const r={...reset(p,request.target_t_us),request_id:request.request_id};
+  authority(p,1,r);assert.equal(calls,1);
+  authority(p,1,r);result(p,r);assert.equal(calls,1);
+  result(p,{...r,status:'completed'});
+  assert(p.store.applyAnchorDelay(30,()=>{calls++;return true;}));
+  const next=p.drain().find(m=>m.action==='frame_align_reset').payload;
+  result(p,{request_id:next.request_id,status:'rejected',code:'NO',timeline_version:1});
+  assert.equal(calls,1);
+ } finally {p.close();}
+});
+test('lost authority cancels pending resync; failed reload is not reported as plain success',()=>{
+ const p=boot();let calls=0;
+ try {
+  p.store.applyAnchorDelay(30,()=>{calls++;return false;});
+  let request=p.drain().find(m=>m.action==='frame_align_reset').payload;
+  let r={...reset(p,request.target_t_us),request_id:request.request_id};
+  authority(p,1,r);result(p,{...r,status:'completed'});
+  assert.equal(calls,1);assert.match(p.store.anchorAdjustment,/双路重拉未发送/);
+  p.store.applyAnchorDelay(30,()=>{calls++;return true;});
+  request=p.drain().find(m=>m.action==='frame_align_reset').payload;
+  r={...reset(p,request.target_t_us),request_id:request.request_id,timeline_version:2,authority_epoch:3};
+  authority(p,2,{...r,owner_id:'other'},'other',3);
+  assert.equal(calls,1);assert(!p.store.canAdjustAnchor);
+ } finally {p.close();}
+});

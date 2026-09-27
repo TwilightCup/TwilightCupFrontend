@@ -45,6 +45,7 @@ const { config: alignCfg, load: loadCfg, refresh: refreshCfg } = useDirectorConf
  *  SeiStream 卸载只减自身计数，流不会被停。 */
 const preloadRelease: Partial<Record<Side, () => void>> = {};
 const preloaded = reactive<Record<Side, string>>({ A: "", B: "" });
+const refreshSeen: Partial<Record<Side, number>> = {};
 // Stage keeps media warm for following, but never competes for console authority.
 
 function ensureAlignPreload(): void {
@@ -53,18 +54,22 @@ function ensureAlignPreload(): void {
   for (const side of ["A", "B"] as Side[]) {
     const url = side === "A" ? alignCfg.hlsA : alignCfg.hlsB;
     const on = side === "A" ? alignCfg.alignA : alignCfg.alignB;
+    const nonce = side === "A" ? alignCfg.refreshA : alignCfg.refreshB;
     if (on && url) {
       // 换源/首启：同源直接复用
       if (preloaded[side] !== url) {
         preloadRelease[side]?.();
         preloaded[side] = url;
         preloadRelease[side] = alignEngine.startStream(side, url);
+      } else if (refreshSeen[side] != null && refreshSeen[side] !== nonce) {
+        alignEngine.restartStream(side, nonce);
       }
     } else if (preloaded[side]) {
       preloadRelease[side]?.();
       delete preloadRelease[side];
       preloaded[side] = "";
     }
+    refreshSeen[side] = nonce;
   }
   alignEngine.start(); // 主循环（珍藏状态解/推进，无 canvas 也持续）
 }

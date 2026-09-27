@@ -307,12 +307,22 @@ function readyState(side: "A" | "B"): { cls: string; label: string } {
 const readyA = computed(() => readyState("A"));
 const readyB = computed(() => readyState("B"));
 
-/** 应急重拉流：计数自增 → 舞台该侧播放器重挂（重新取 manifest） */
-function refreshStream(side: "A" | "B"): void {
-  const key = side === "A" ? "refreshA" : "refreshB";
-  const next = cfgForm[key] + 1;
-  cfgForm[key] = next;
-  pushConfig({ [key]: next } as Partial<DirectorConfig>);
+/** 服务器接受新时间线后，同时清空两路旧缓冲并通知舞台。 */
+function resyncStreams(): void {
+  if (anchorDelta.value == null || readOnly.value || !director.matchId) return;
+  director.applyAnchorDelay(anchorDelta.value, () => {
+    const patch = {
+      refreshA: Math.max(cfgForm.refreshA, cfgConfig.refreshA) + 1,
+      refreshB: Math.max(cfgForm.refreshB, cfgConfig.refreshB) + 1,
+    };
+    if (!director.sendDirectorCommand("config_update", { config: patch })) return false;
+    Object.assign(cfgForm, patch);
+    saveCfg(director.matchId!, patch);
+    // Synchronous restart prevents an acknowledgement from old decoder buffers.
+    alignEngine.restartStream("A", patch.refreshA);
+    alignEngine.restartStream("B", patch.refreshB);
+    return true;
+  });
 }
 
 /** 计时显示延迟（秒）：把比赛详情场景的计时器 / 偏差条回放对齐有延迟的
@@ -738,27 +748,22 @@ onUnmounted(() => {
             </el-button>
           </div>
           <p class="hint">{{ $t("directorView.previewHint") }}</p>
-          <!-- 直播画面实时控制：显示开关 + 应急重拉流（独立管 A/B，即时广播到舞台，与下方预览列对齐） -->
+          <!-- 两路显示独立控制；重新同步统一操作。 -->
           <div class="cfg-ctl">
             <div class="ctl-side">
               <span class="lbl tc-a">A · {{ director.nameOf("A") }}</span>
               <el-switch v-model="showA" size="small" :disabled="readOnly" />
-              <el-button size="small" :disabled="!director.matchId || readOnly" @click="refreshStream('A')">
-                {{ $t("directorView.cfgRefresh") }}
-              </el-button>
             </div>
             <div class="ctl-side">
               <span class="lbl tc-b">B · {{ director.nameOf("B") }}</span>
               <el-switch v-model="showB" size="small" :disabled="readOnly" />
-              <el-button size="small" :disabled="!director.matchId || readOnly" @click="refreshStream('B')">
-                {{ $t("directorView.cfgRefresh") }}
-              </el-button>
             </div>
           </div>
           <div class="anchor-controls">
             <label for="anchor-delta">{{ $t("directorView.anchorDelay") }}</label>
             <el-input-number id="anchor-delta" v-model="anchorDelta" :min="0" :max="86400" :precision="1" :step="1" size="small" :disabled="!director.canAdjustAnchor || readOnly" />
             <el-button size="small" :disabled="!director.canAdjustAnchor || readOnly || anchorDelta == null" @click="applyAnchor">{{ $t("directorView.applyAnchor") }}</el-button>
+            <el-button size="small" type="primary" :disabled="!director.matchId || !director.canAdjustAnchor || readOnly || anchorDelta == null" @click="resyncStreams">{{ $t("directorView.cfgRefresh") }}</el-button>
             <span class="hint" role="status">{{ director.anchorAdjustment || (director.alignRole !== 'publisher' ? $t("directorView.anchorOwnerOnly") : '') }}</span>
           </div>
           <div v-if="showStreamDebug" id="stream-debug-info" class="align-health">
