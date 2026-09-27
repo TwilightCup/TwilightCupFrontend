@@ -359,35 +359,6 @@ const prevSegB = computed(() => secondRow("B").time);
 const mainA = computed(() => formatMs(sideA.value.mainMs));
 const mainB = computed(() => formatMs(sideB.value.mainMs));
 
-// ---- 计时显示延迟回放（useDelayedRef）：选手画面常有数秒延迟而计时近实时，
-//      把该席计时器整块（主计时 + 两行副计时）与偏差条各自回放 delay 秒对齐
-//      画面。delay 秒来自导播配置（控制台 0.5 步进调整，config_update 实时下发，
-//      见 useDirectorConfig）；0 = 实时直通，调大即刻回跳到 delay 秒前 ----
-const timerAV = useDelayedRef(
-  () => ({
-    main: mainA.value,
-    level: levelA.value,
-    seg: segA.value,
-    prevLevel: prevLevelA.value,
-    prevSeg: prevSegA.value,
-  }),
-  () => (alignedA.active.value ? 0 : config.delayA * 1000),
-);
-const timerBV = useDelayedRef(
-  () => ({
-    main: mainB.value,
-    level: levelB.value,
-    seg: segB.value,
-    prevLevel: prevLevelB.value,
-    prevSeg: prevSegB.value,
-  }),
-  () => (alignedB.active.value ? 0 : config.delayB * 1000),
-);
-const diffV = useDelayedRef(
-  () => diffMs.value,
-  () => (alignedA.active.value && alignedB.active.value ? 0 : config.delayDiff * 1000),
-);
-
 // ---- 左下角当前选图角标卡（pick_announced → currentRound.pick 常驻展示） ----
 // mock 演示选图：图池 mock 的 CT 选图（带词条与重试，角标各要素齐备）
 const MOCK_PICK =
@@ -438,6 +409,36 @@ function attemptLabelOf(index: number): string | null {
   if (total == null) return null;
   return `${Math.min(index + 1, total)}/${total}`;
 }
+
+// useDelayedRef 会立即读取副计时器；必须先初始化其依赖的 pickRetry。
+// ---- 计时显示延迟回放（useDelayedRef）：选手画面常有数秒延迟而计时近实时，
+//      把该席计时器整块（主计时 + 两行副计时）与偏差条各自回放 delay 秒对齐
+//      画面。delay 秒来自导播配置（控制台 0.5 步进调整，config_update 实时下发，
+//      见 useDirectorConfig）；0 = 实时直通，调大即刻回跳到 delay 秒前 ----
+const timerAV = useDelayedRef(
+  () => ({
+    main: mainA.value,
+    level: levelA.value,
+    seg: segA.value,
+    prevLevel: prevLevelA.value,
+    prevSeg: prevSegA.value,
+  }),
+  () => (alignedA.active.value ? 0 : config.delayA * 1000),
+);
+const timerBV = useDelayedRef(
+  () => ({
+    main: mainB.value,
+    level: levelB.value,
+    seg: segB.value,
+    prevLevel: prevLevelB.value,
+    prevSeg: prevSegB.value,
+  }),
+  () => (alignedB.active.value ? 0 : config.delayB * 1000),
+);
+const diffV = useDelayedRef(
+  () => diffMs.value,
+  () => (alignedA.active.value && alignedB.active.value ? 0 : config.delayDiff * 1000),
+);
 
 // ---- 右下角 PB 角标卡（speedrun.com 数据与 categoryinfo 场景同源共享） ----
 // 复用 useCategoryInfo：模块级快照跨组件共享——舞台在 categoryinfo 场景拉过
