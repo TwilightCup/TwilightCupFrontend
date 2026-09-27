@@ -149,3 +149,57 @@ test('manual delta 20 becomes the baseline; automatic target remains 25 across r
   }
  } finally {Date.now=realNow;p.close();}
 });
+test('refresh adopts authenticated timeline version before any anchor snapshot arrives',()=>{
+ const p=createPage({id:'fresh',kind:'console'});
+ try {
+  p.deliver({...auth(p.id),align_authority_src:null,align_role:'follower',authority_epoch:7,timeline_version:1});
+  for(let now=0;now<=1000;now+=25)p.tick(now);
+  const statuses=p.drain().filter(m=>m.action==='frame_align_status');
+  assert.equal(p.store.timelineVersion,1);assert(statuses.length);
+  assert(statuses.every(m=>m.payload.timeline_version===1));
+  assert(statuses.some(m=>m.payload.media_ready&&m.payload.decode_ready));
+  assert.equal(p.engine.tUs.value,null,'version metadata must not invent a playback T');
+  // Server can now promote the refreshed candidate with the correct floor.
+  p.deliver({type:'director_cmd',action:'align_authority',payload:{connection_id:p.id,src:p.id,role:'publisher',epoch:8,
+    timeline_version:1,lease_required:true,t_floor_us:85e6,reset:{...reset(p,85e6,'failed'),owner_id:'old',authority_epoch:6}}});
+  for(let now=1025;now<=1600;now+=25)p.tick(now);
+  assert.equal(p.store.alignRole,'publisher');
+  assert(p.drain().some(m=>m.action==='frame_align'&&m.payload.timeline_version===1));
+ } finally {p.close();}
+});
+test('same-version snapshot after auth initializes timeline once; stale packets never roll it back',()=>{
+ const p=createPage({id:'fresh',kind:'console'});
+ try {
+  p.deliver({...auth(p.id),align_authority_src:null,align_role:'follower',authority_epoch:7,timeline_version:2});
+  let begins=0;const begin=p.engine.beginTimeline.bind(p.engine);p.engine.beginTimeline=t=>{begins++;begin(t);};
+  const packet={type:'director_cmd',action:'state_sync',payload:{connection_id:p.id,align_authority_src:null,align_role:'follower',
+   align_lease_required:true,timeline_version:2,reset:{...reset(p,85e6,'failed'),owner_id:'old',timeline_version:2,authority_epoch:6},
+   frame_align:{t_us:85e6,epoch:7,timeline_version:2,src:null,stale:true}}};
+  p.deliver(packet);p.deliver(packet);
+  assert.equal(begins,1);assert.equal(p.store.timelineVersion,2);
+  p.deliver({type:'director_cmd',action:'align_authority',payload:{connection_id:p.id,src:null,role:'follower',epoch:6,timeline_version:1,t_floor_us:80e6}});
+  assert.equal(p.store.timelineVersion,2);assert.equal(begins,1);
+ } finally {p.close();}
+});
+test('version-only handshake followed by promotion without reset history keeps publishing',()=>{
+ const p=createPage({id:'fresh',kind:'console'});
+ try {
+  p.deliver({...auth(p.id),align_authority_src:null,align_role:'follower',authority_epoch:7,timeline_version:1});
+  for(let now=0;now<=1000;now+=25)p.tick(now);p.drain();
+  p.deliver({type:'director_cmd',action:'align_authority',payload:{connection_id:p.id,src:p.id,role:'publisher',epoch:8,
+    timeline_version:1,lease_required:true,t_floor_us:85e6}});
+  for(let now=1025;now<=1800;now+=25)p.tick(now);
+  const frames=p.drain().filter(m=>m.action==='frame_align');
+  assert(frames.length>=2);assert(frames.at(-1).payload.t_us>frames[0].payload.t_us);
+  assert(!p.store.resetPending);
+ } finally {p.close();}
+});
+test('stage adopts the version fence but never reports a candidate lease',()=>{
+ const p=createPage({id:'stage'});
+ try {
+  p.deliver({...auth(p.id),align_authority_src:null,align_role:'follower',authority_epoch:7,timeline_version:3});
+  for(let now=0;now<=1000;now+=25)p.tick(now);
+  assert.equal(p.store.timelineVersion,3);assert.equal(p.engine.tUs.value,null);
+  assert(!p.drain().some(m=>m.action==='frame_align_status'||m.action==='frame_align'));
+ } finally {p.close();}
+});

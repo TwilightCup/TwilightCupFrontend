@@ -250,6 +250,7 @@ export const useDirectorStore = defineStore("director", () => {
   const frameLease = new FrameLeaseClient();
   const alignRole = ref<"publisher" | "follower">("follower");
   const timelineVersion = ref(0);
+  let awaitingTimelineTarget = false;
   const anchorAdjustment = ref("");
   const resetPending = ref(false);
   let requestedReset: string | null = null;
@@ -281,15 +282,24 @@ export const useDirectorStore = defineStore("director", () => {
     requestedReset = id; resetPending.value = true; anchorAdjustment.value = "等待服务器接受";
     return true;
   }
-  function acceptTimeline(p: { timeline_version?: number; t_floor_us?: number | null; t_us?: number; reset?: unknown }): boolean {
+  function acceptTimeline(p: { timeline_version?: number; t_floor_us?: number | null; t_us?: number; reset?: unknown }, initial = false): boolean {
     const v = p.timeline_version ?? 0;
     if (!Number.isSafeInteger(v) || v < timelineVersion.value) return false;
-    if (v > timelineVersion.value) {
+    if (v > timelineVersion.value || awaitingTimelineTarget) {
       const r = p.reset as { target_t_us?: number } | null;
       const target = p.t_floor_us ?? p.t_us ?? r?.target_t_us;
-      if (target == null || !Number.isSafeInteger(target) || target <= 0) return false;
-      timelineVersion.value = v;
-      alignEngine.beginTimeline(target); ackSent = false; lastAlignPublish = -Infinity;
+      if (target == null && initial) {
+        // auth_ok carries the version fence without a playback target. Leases
+        // must immediately use that fence so this connection can be elected.
+        timelineVersion.value = v;
+        awaitingTimelineTarget = true;
+      } else {
+        if (target == null || !Number.isSafeInteger(target) || target <= 0) return false;
+        timelineVersion.value = v;
+        awaitingTimelineTarget = false;
+        alignEngine.beginTimeline(target); ackSent = false; lastAlignPublish = -Infinity;
+        if (!p.reset) alignEngine.finishTimeline("completed", target);
+      }
     }
     if (p.reset) applyResetResult(p.reset);
     return true;
@@ -347,7 +357,7 @@ export const useDirectorStore = defineStore("director", () => {
     alignHeartbeat = null;
     onResetAccepted = null; reloadFailed = false; delayFallback = null;
     autoCatchup = new AutoCatchup(autoCatchup.deltaSeconds);
-    requestedReset = null; resetRecord = null; resetPending.value = false; timelineVersion.value = 0; ackSent = false;
+    requestedReset = null; resetRecord = null; resetPending.value = false; timelineVersion.value = 0; awaitingTimelineTarget = false; ackSent = false;
     anchorAdjustment.value = "";
     awaitingPromotionAnchor = false;
     lastAlignPublish = -Infinity; alignEngine.setClockPulse(null);
@@ -358,7 +368,7 @@ export const useDirectorStore = defineStore("director", () => {
     const wasPublisher = authorityRole.publisher;
     if ((p.timeline_version ?? 0) < timelineVersion.value || !authorityRole.assign(p)) return;
     if (!authorityRole.publisher) { onResetAccepted = null; delayFallback = null; }
-    if (!acceptTimeline(p)) return;
+    if (!acceptTimeline(p, initial)) return;
     const priorReset = p.reset as { authority_epoch?: number; target_t_us?: number } | undefined;
     if (priorReset && priorReset.authority_epoch !== authorityRole.epoch && typeof priorReset.target_t_us === "number") {
       alignEngine.finishTimeline("completed", Math.max(priorReset.target_t_us, p.t_floor_us ?? 0));
@@ -487,7 +497,7 @@ export const useDirectorStore = defineStore("director", () => {
         if (msg.seat === "DIRECTOR" && msg.connection_id) {
           authorityRole.connect(msg.connection_id);
           applyAuthority({ connection_id: msg.connection_id, src: msg.align_authority_src,
-            timeline_version: timelineVersion.value, epoch: msg.authority_epoch, role: msg.align_role, lease_required: msg.align_lease_required }, true);
+            timeline_version: msg.timeline_version, epoch: msg.authority_epoch, role: msg.align_role, lease_required: msg.align_lease_required }, true);
           alignEngine.setClockPulse(publishFrameAlign);
           alignHeartbeat = setInterval(publishFrameAlign, 400);
         }

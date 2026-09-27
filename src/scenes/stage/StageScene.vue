@@ -12,13 +12,11 @@
  *  6. 顶部信息栏常驻单实例（match/mappool/categoryinfo 场景显示，v-show 切换不重挂）：
  *    跨场景切换零闪烁——场景各自内嵌的顶栏在 hosted 模式下让位（sharedTopBar）。
  */
-import { computed, onMounted, onUnmounted, provide, reactive, ref, shallowRef, watch } from "vue";
+import { computed, onMounted, onUnmounted, provide, ref, shallowRef, watch } from "vue";
 import { useDirectorStore } from "@/stores/director";
 import SynthwaveBg from "@/scenes/components/SynthwaveBg.vue";
 import TopBar from "@/scenes/components/TopBar.vue";
 import { useSceneParams } from "@/scenes/composables/useSceneParams";
-import { useDirectorConfig } from "@/scenes/composables/useDirectorConfig";
-import { alignEngine, type Side } from "@/scenes/align/useFrameAlign";
 import {
   SCENE_CONTEXT_KEY,
   type SceneContext,
@@ -38,57 +36,7 @@ import SoonScene from "@/scenes/soon/SoonScene.vue";
 
 const params = useSceneParams();
 const director = useDirectorStore();
-const { config: alignCfg, load: loadCfg, refresh: refreshCfg } = useDirectorConfig();
-
-/** 后台预载：舞台根把 A/B 对齐流常驻拉起+解码（不论当前在哪场景），
- *  切到比赛场景时 SeiStream 直接画已解帧 → 秒切不重缓冲。alignEngine 持常驻引用，
- *  SeiStream 卸载只减自身计数，流不会被停。 */
-const preloadRelease: Partial<Record<Side, () => void>> = {};
-const preloaded = reactive<Record<Side, string>>({ A: "", B: "" });
-const refreshSeen: Partial<Record<Side, number>> = {};
-// Stage keeps media warm for following, but never competes for console authority.
-
-function ensureAlignPreload(): void {
-  alignEngine.setRequiredSides((["A", "B"] as Side[]).filter(side =>
-    side === "A" ? alignCfg.alignA && !!alignCfg.hlsA : alignCfg.alignB && !!alignCfg.hlsB));
-  for (const side of ["A", "B"] as Side[]) {
-    const url = side === "A" ? alignCfg.hlsA : alignCfg.hlsB;
-    const on = side === "A" ? alignCfg.alignA : alignCfg.alignB;
-    const nonce = side === "A" ? alignCfg.refreshA : alignCfg.refreshB;
-    if (on && url) {
-      // 换源/首启：同源直接复用
-      if (preloaded[side] !== url) {
-        preloadRelease[side]?.();
-        preloaded[side] = url;
-        preloadRelease[side] = alignEngine.startStream(side, url);
-      } else if (refreshSeen[side] != null && refreshSeen[side] !== nonce) {
-        alignEngine.restartStream(side, nonce);
-      }
-    } else if (preloaded[side]) {
-      preloadRelease[side]?.();
-      delete preloadRelease[side];
-      preloaded[side] = "";
-    }
-    refreshSeen[side] = nonce;
-  }
-  alignEngine.start(); // 主循环（珍藏状态解/推进，无 canvas 也持续）
-}
-
-let loadedMatch = "";
-
-watch(
-  [() => director.matchId, () => director.remoteConfig],
-  ([mid]) => {
-    if (!mid) return;
-    if (loadedMatch !== mid) {
-      loadCfg(mid, params);
-      loadedMatch = mid;
-      preloaded.A = preloaded.B = "";
-    } else refreshCfg(mid);
-    ensureAlignPreload();
-  },
-  { immediate: true },
-);
+// 视频流由 MatchScene 的子组件持有；切离比赛画面即释放，不在舞台根预载。
 
 /** 断线角标文案：舞台在 OBS 里，导播看不到它的连接状态，断线须自显 */
 const connText = computed(() => {
@@ -114,7 +62,7 @@ provide<SceneContext>(SCENE_CONTEXT_KEY, {
   sharedTopBar: true,
 });
 
-const currentScene = ref<SceneKey>("match");
+const currentScene = ref<SceneKey>(isSceneKey(director.currentSceneCmd) ? director.currentSceneCmd : "match");
 /** 顶栏只在带选手/比赛信息的场景显示（同实例 v-show，切换不闪） */
 const showTopBar = computed(
   () =>
@@ -143,6 +91,7 @@ onMounted(() => {
     (scene) => {
       if (isSceneKey(scene)) currentScene.value = scene;
     },
+    { immediate: true },
   );
   // 同源兜底：控制台切场景写 localStorage → 同一 storage 分区触发 storage 事件。
   // WS 仍是跨进程主通道；此兜底只在同浏览器/同 OBS CEF 分区且 WS 未达时立即补齐。
@@ -152,7 +101,6 @@ onMounted(() => {
 onUnmounted(() => {
   unwatchCmd?.();
   unwatchStorage?.();
-  for (const side of ["A", "B"] as Side[]) preloadRelease[side]?.();
   director.disconnect();
 });
 
