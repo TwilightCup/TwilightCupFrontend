@@ -229,3 +229,22 @@ test('server snapshot omitting absent authority does not deadlock candidate prep
   } finally {p.close();}
  }
 });
+
+test('takeover treats expired previous-owner reset as a floor, not an unavailable exact target',()=>{
+ const p=createPage({id:'new-owner',kind:'console'});
+ try {
+  for(const stream of p.engine.streams.values()) stream.coverage=()=>({from:50e6,to:110e6});
+  p.deliver({...auth(p.id),align_authority_src:null,align_role:'follower',authority_epoch:7,timeline_version:1});
+  const old={...reset(p,10e6,'failed'),owner_id:'old',authority_epoch:6,code:'OWNER_LOST'};
+  p.deliver({type:'director_cmd',action:'state_sync',payload:{connection_id:p.id,align_role:'follower',
+   timeline_version:1,align_lease_required:true,reset:old,
+   frame_align:{t_us:10e6,epoch:7,seq:0,timeline_version:1,src:null,stale:true,frozen:true}}});
+  for(let now=0;now<=1000;now+=25)p.tick(now);p.drain();
+  authority(p,1,old,p.id,8);
+  for(let now=1025;now<=2200;now+=25)p.tick(now);
+  const out=p.drain();
+  assert(out.some(m=>m.action==='frame_align'),JSON.stringify(p.snapshot()));
+  assert(p.engine.tUs.value>=50e6);
+  assert(!out.some(m=>m.action==='frame_align_reset_ack'||m.payload?.state==='relinquish'));
+ } finally {p.close();}
+});

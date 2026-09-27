@@ -157,7 +157,15 @@ export class AlignEngine {
     selected = selected && this.candidateEnabled;
     if (this.publisher !== selected) {
       this.cadenceTarget = null;
-      if (selected && this.manualTarget != null && this.resetPhase !== "preparing") this.resetPhase = "completed";
+      if (selected && this.manualTarget != null && this.resetPhase !== "preparing") {
+        const from = Math.max(...[...this.requiredSides].map(side =>
+          this.streams.get(side)?.coverage()?.from ?? -Infinity));
+        // On takeover an expired historical reset is only a monotonic floor.
+        // Keep available targets and active reset acknowledgement constraints.
+        if (this.manualTarget < from - 3_000_000) {
+          this.manualTarget = null; this.resetPhase = null;
+        } else this.resetPhase = "completed";
+      }
       this.pendingSeek = null; this.waitingT = null; this.stableMs = 0; this.catchupMode = "normal";
       if (selected && this.candidateProbe != null) {
         // Private preparation may have moved the decoder beyond the public T.
