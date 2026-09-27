@@ -4,7 +4,7 @@
  *
  * 多关：当前分段 = 当前关实时单段；单关：当前分段 = 当前尝试实时分段时间
  * （重试清零）。选手端每秒上报一次真实计时器读数（回合累计 total_ms + 当前
- * 分段 segment_ms），两次上报之间本地按单调时钟外推使毫秒位连续走动；新样本到达
+ * 分段 segment_ms），两次上报之间本地按墙钟外推使毫秒位连续走动；新样本到达
  * 即以权威读数重新锚定（每秒矫正一次）。纯前端展示层状态，不回写 store。
  *
  * - 陈旧冻结：超过 STALE_MS 无新样本（插件关闭 / 断线 / 未升级）时冻结在
@@ -18,7 +18,6 @@
  * - 原地冻结（holdOf，弃权）：可能没有任何完成时间，回退离线累计会把已走
  *   的主计时回跳一大截——保持停表瞬间的读数，不外推不过冲不回跳。
  */
-import { stableEpochNow } from "@/utils/epochClock";
 import { onBeforeUnmount, onMounted, ref, type Ref } from "vue";
 import type { LiveTime } from "@/stores/director";
 
@@ -60,7 +59,7 @@ export function useLiveTimers(
           liveSeg.value = null;
           return;
         }
-        const held = Math.min(Math.max(s.receivedMono == null ? stableEpochNow() - s.receivedAt : now - s.receivedMono, 0), STALE_MS);
+        const held = Math.min(Math.max(now - s.receivedAt, 0), STALE_MS);
         let v = s.totalMs + held;
         if (shown != null && v < shown && shown - v <= SMOOTH_MS) v = shown;
         shown = v;
@@ -82,7 +81,7 @@ export function useLiveTimers(
 
   onMounted(() => {
     const tick = (): void => {
-      const now = performance.now();
+      const now = Date.now();
       sideClockA.tick(now);
       sideClockB.tick(now);
     };

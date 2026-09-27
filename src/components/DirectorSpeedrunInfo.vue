@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { formatEpoch } from "@/utils/displayTime";
 import { computed, watch } from "vue";
 import { useAuthStore } from "@/stores/auth";
 import { useDirectorStore } from "@/stores/director";
@@ -24,7 +23,7 @@ const messages: Record<CategoryInfoStatus, string> = {
   noMapping: "当前项目未匹配到 speedrun 榜单", error: "speedrun 信息拉取失败",
   rateLimit: "speedrun 请求被限流，请稍后使用顶部刷新按钮重试",
 };
-const updated = computed(() => refreshedAt.value ? formatEpoch(refreshedAt.value) : "");
+const updated = computed(() => refreshedAt.value ? new Date(refreshedAt.value).toLocaleString() : "");
 const players = computed(() => (["A", "B"] as const).map(side => ({
   side, name: side === "A" ? director.nameA : director.nameB,
   binding: side === "A" ? director.speedrunA : director.speedrunB,

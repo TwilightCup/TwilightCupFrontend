@@ -21,13 +21,10 @@ export interface Fmp4Sample {
   payload: Uint8Array;
   isKey: boolean;
   trackId?: number;
-  /** Container PTS ticks; converted only with mdhd timescale. */
-  pts?: number;
 }
 
 export interface Fmp4Result {
   videoTrackId?: number;
-  timescale?: number;
   codec: Codec | null;
   samples: Fmp4Sample[];
   /** description 来源（WebCodecs 需要）；缺则依赖带内参数集 */
@@ -64,9 +61,6 @@ export interface AlignedFrame {
 /** 单路连通性/健康指标（导播控制台观察连接问题用，维度对齐 SEIInjector 冒烟工具） */
 export interface StreamHealth {
   codec: Codec;
-  arrivalAgeMs?: number | null;
-  clockStatus?: string;
-  clockCorrectionUs?: number;
   /** 含 SEI 的样本数（已解析帧） */
   frames: number;
   /** 已成功取到的 HLS 段数（无论是否含 SEI——用于区分"拿到段但无 SEI"与"没拿到段"） */

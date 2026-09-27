@@ -35,7 +35,7 @@ export function useDelayedRef<T>(source: () => T, delayMs: () => number): Ref<T>
   const buffer: { t: number; v: T }[] = [];
 
   const timer = window.setInterval(() => {
-    const now = performance.now();
+    const now = Date.now();
     buffer.push({ t: now, v: direct.value });
     while (buffer.length && buffer[0].t < now - WINDOW_MS) buffer.shift();
     const target = now - sanitizeDelay(delayMs());

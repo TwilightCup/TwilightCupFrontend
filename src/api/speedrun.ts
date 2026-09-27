@@ -182,7 +182,7 @@ async function rawGet(path: string): Promise<unknown> {
 /** 带 TTL 缓存 + 在途去重的 GET（默认 auto 模式，走后端内存 TTL）。 */
 function cachedGet<T>(path: string, ttlMs: number, parse: (body: unknown) => T): Promise<T> {
   const hit = cache.get(path);
-  const now = performance.now();
+  const now = Date.now();
   if (hit && hit.expiresAt > now) return hit.promise as Promise<T>;
   // 失败结果不缓存：promise 落空时移除条目，下次重试
   const promise = rawGet(path)
@@ -235,7 +235,7 @@ function swrGet<T>(
   hooks?: SwrHooks<T>,
 ): Promise<T> {
   const entry = swrCache.get(path);
-  if (entry && entry.seq === speedrunRefreshSeq && entry.expiresAt > performance.now()) {
+  if (entry && entry.seq === speedrunRefreshSeq && entry.expiresAt > Date.now()) {
     return entry.promise as Promise<T>; // 冷却期：内存直用，零请求
   }
   const q = path.includes("?") ? "&" : "?";
@@ -261,7 +261,7 @@ function swrGet<T>(
         throw err; // 无缓存兜底才走错误分支
       });
     });
-  swrCache.set(path, { seq: speedrunRefreshSeq, expiresAt: performance.now() + ttlMs, promise });
+  swrCache.set(path, { seq: speedrunRefreshSeq, expiresAt: Date.now() + ttlMs, promise });
   promise.catch(() => swrCache.delete(path)); // 双双失败不缓存，下次重试
   return promise;
 }

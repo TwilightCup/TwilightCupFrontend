@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { displayTimeZone } from "@/utils/displayTime";
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { useMatchStore } from "@/stores/match";
@@ -76,7 +75,7 @@ const attemptInvalid = (a: { status: number }): boolean =>
     </div>
 
     <div v-if="utc" class="utc">
-      <span class="utc-label">{{ $t('playerStatusCard.utcSync', { zone: displayTimeZone }) }}</span>
+      <span class="utc-label">{{ $t('playerStatusCard.utcSync') }}</span>
       <span class="utc-time">{{ formatUtcTime(utc.utcMs) }}</span>
     </div>
 

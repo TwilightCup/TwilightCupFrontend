@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { formatEpoch, displayTimeZone, setDisplayTimeZone } from "@/utils/displayTime";
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
@@ -218,16 +217,14 @@ const previewAlignedB = computed(() => !!cfgConfig.alignB && !!cfgConfig.hlsB);
 const showStreamDebug = ref(true);
 const anchorDelta = ref<number | undefined>(30);
 const wallNow = ref(Date.now());
-const localDisplayZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-const clockBasis = computed(() => { void wallNow.value; return director.resetClockInfo(); });
-const monotonicNow = ref(performance.now());
 let wallTimer: ReturnType<typeof setInterval> | undefined;
 const displayedAnchor = computed(() => director.alignRole === "publisher"
   ? director.resetPending ? alignEngine.sync.authorityUs : alignEngine.tUs.value
   : alignEngine.sync.authorityUs);
 function clockText(us: number | null): string {
   if (us == null) return "—";
-  return formatEpoch(us / 1000, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3 });
+  const date = new Date(us / 1000);
+  return `${date.toLocaleString()} .${String(date.getMilliseconds()).padStart(3, "0")}`;
 }
 function applyAnchor(): void {
   if (anchorDelta.value != null) director.applyAnchorDelay(anchorDelta.value);
@@ -251,11 +248,15 @@ function healthText(side: "A" | "B"): string {
   // 关键诊断：倍速(>1=在追/快进)/落后秒数/可上屏队列/重同步次数
   const pb = alignEngine.playback;
   // 信号中断检测：>4s 无新 SEI 帧到达 → 源/网络断了（区别于前端卡）
-  const stale = (h.arrivalAgeMs ?? 0) / 1000;
+  let stale = 0;
+  if (h.frontRtUs != null) {
+    const rtNow = Date.now() * 1000;
+    stale = (rtNow - h.frontRtUs) / 1e6;
+  }
   const sync = alignEngine.sync;
   const errMs = sync.targetErrorUs[side];
   const timing = ` · ${sync.role}/${sync.state}/${sync.catchup} · ${sync.reason} · 重锚${sync.seekCount}次/最近计划跳${(sync.lastJumpUs / 1e6).toFixed(2)}s(${sync.lastSeekReason || "—"}) · T误差${errMs == null ? "—" : (errMs / 1000).toFixed(1)}ms · AB${sync.pairErrorUs == null ? "—" : (sync.pairErrorUs / 1000).toFixed(1)}ms`;
-  const diag = timing + ` · 时钟${h.clockStatus ?? "unknown"}/软偏移${((h.clockCorrectionUs ?? 0) / 1e6).toFixed(2)}s · 总误差未验证（预算≤5s）` + ` · ×${pb.speed.toFixed(2)} · 追${pb.behindS.toFixed(1)}s · 队列${h.queueLen} · 重${h.resyncs}${h.resyncGap ? `段${h.resyncGap}` : ""}${h.resyncErr ? `错${h.resyncErr}` : ""}`;
+  const diag = timing + ` · ×${pb.speed.toFixed(2)} · 追${pb.behindS.toFixed(1)}s · 队列${h.queueLen} · 重${h.resyncs}${h.resyncGap ? `段${h.resyncGap}` : ""}${h.resyncErr ? `错${h.resyncErr}` : ""}`;
   // 解码流水线：原始环/解码游标/封装/解码累计输出（定位"队列0/没画面"）
   const pipe = ` · raw${h.rawLen}/pos${h.decPos}/${h.enc || "-"}/出${h.decOutput}/qc${h.qc}/pn${h.pendCfg ? "1" : "0"}`;
   if (h.frames === 0 && !h.hasContent) {
@@ -436,7 +437,7 @@ const soonTargetSec = computed({
 const soonRemaining = computed(() => {
   const s = director.soonCmdState;
   if (s.startedAt === null) return s.targetMs;
-  const base = s.pausedAt ?? monotonicNow.value;
+  const base = s.pausedAt ?? Date.now();
   const elapsed = base - s.startedAt;
   return Math.max(0, s.targetMs - elapsed);
 });
@@ -469,7 +470,7 @@ function logout(): void {
 }
 
 onMounted(() => {
-  wallTimer = setInterval(() => { wallNow.value = Date.now(); monotonicNow.value = performance.now(); }, 100);
+  wallTimer = setInterval(() => { wallNow.value = Date.now(); }, 100);
   if (!auth.isLoggedIn) {
     router.replace("/login");
     return;
@@ -761,16 +762,10 @@ onUnmounted(() => {
             <label for="anchor-delta">{{ $t("directorView.anchorDelay") }}</label>
             <el-input-number id="anchor-delta" v-model="anchorDelta" :min="0" :max="86400" :precision="1" :step="1" size="small" :disabled="!director.canAdjustAnchor || readOnly" />
             <el-button size="small" :disabled="!director.canAdjustAnchor || readOnly || anchorDelta == null" @click="applyAnchor">{{ $t("directorView.applyAnchor") }}</el-button>
-            <span class="hint">{{ clockBasis.source === 'server-estimate' ? 'reset 使用服务端单向估计（含网络延迟）' : 'reset 回退本机时间（未校准）' }} · 总误差预算≤5秒，当前精度未验证</span>
             <span class="hint" role="status">{{ director.anchorAdjustment || (director.alignRole !== 'publisher' ? $t("directorView.anchorOwnerOnly") : '') }}</span>
           </div>
           <div v-if="showStreamDebug" id="stream-debug-info" class="align-health">
             <div class="h-row anchor-clock">
-              <select :value="displayTimeZone" aria-label="显示时区" @change="setDisplayTimeZone(($event.target as HTMLSelectElement).value)">
-                <option value="Asia/Shanghai">UTC+8 · Asia/Shanghai</option>
-                <option value="UTC">UTC</option>
-                <option v-if="localDisplayZone !== 'Asia/Shanghai' && localDisplayZone !== 'UTC'" :value="localDisplayZone">本地 · {{ localDisplayZone }}</option>
-              </select>
               <span>T：{{ clockText(displayedAnchor) }}</span>
               <span>{{ $t("directorView.wallTime") }}：{{ clockText(wallNow * 1000) }}</span>
               <span>Δ：{{ displayedAnchor == null ? '—' : ((wallNow * 1000 - displayedAnchor) / 1e6).toFixed(3) }} s</span>
@@ -1000,13 +995,13 @@ onUnmounted(() => {
               <span class="who tc-a">A · {{ director.nameOf("A") }}</span>
               <span>{{ progText("A") }}</span>
               <span class="dim">{{ $t("directorView.bestTimeLabel", { time: formatMs(bestMs("A")) }) }}</span>
-              <span class="dim utc">{{ $t("directorView.utcSyncLabel", { zone: displayTimeZone, time: director.utcA ? formatUtcTime(director.utcA.utcMs) : "—" }) }}</span>
+              <span class="dim utc">{{ $t("directorView.utcSyncLabel", { time: director.utcA ? formatUtcTime(director.utcA.utcMs) : "—" }) }}</span>
             </div>
             <div class="prog-row">
               <span class="who tc-b">B · {{ director.nameOf("B") }}</span>
               <span>{{ progText("B") }}</span>
               <span class="dim">{{ $t("directorView.bestTimeLabel", { time: formatMs(bestMs("B")) }) }}</span>
-              <span class="dim utc">{{ $t("directorView.utcSyncLabel", { zone: displayTimeZone, time: director.utcB ? formatUtcTime(director.utcB.utcMs) : "—" }) }}</span>
+              <span class="dim utc">{{ $t("directorView.utcSyncLabel", { time: director.utcB ? formatUtcTime(director.utcB.utcMs) : "—" }) }}</span>
             </div>
           </div>
         </div>

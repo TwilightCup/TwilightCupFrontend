@@ -104,18 +104,17 @@ const isMulti = computed(() => {
 // ---- 多关主计时实时走表：live_time 每秒上报（director store 按席暂存）→
 //      useLiveTimers 墙钟外推 + 新样本矫正；mock 模式合成「自挂载起从 mock
 //      累计值继续走」的样本（receivedAt 恒为当下，演示平滑走表不触发陈旧冻结） ----
-const mockLiveStart = performance.now();
+const mockLiveStart = Date.now();
 const mockLiveBaseA = MOCK_MATCH.levelsA.reduce((s, l) => s + l.time_ms, 0);
 const mockLiveBaseB = MOCK_MATCH.levelsB.reduce((s, l) => s + l.time_ms, 0);
 function mockLiveSample(side: "A" | "B"): LiveTime {
-  const now = performance.now();
+  const now = Date.now();
   return {
     levelIndex: side === "A" ? MOCK_MATCH.currentLevelA : MOCK_MATCH.currentLevelB,
     totalMs: (side === "A" ? mockLiveBaseA : mockLiveBaseB) + (now - mockLiveStart),
     // 演示分段：60 秒一循环，看起来像「当前关进行中」
     segmentMs: (now - mockLiveStart) % 60_000,
-    receivedAt: Date.now(),
-    receivedMono: now,
+    receivedAt: now,
   };
 }
 // ---- SEI 帧级对齐：每侧是否进入对齐渲染（config.alignX && 有流 && 能力 aligned）----

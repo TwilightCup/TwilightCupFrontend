@@ -1,5 +1,3 @@
-import { ServerClock, stableEpochNow } from "@/utils/epochClock";
-import { formatEpoch } from "@/utils/displayTime";
 /**
  * 导播端状态：控制台与 OBS 叠加层共用。
  *
@@ -83,7 +81,6 @@ export interface LiveTime {
   /** 现实/墙钟累计（毫秒）；提供方支持时存在 */
   realTimeMs?: number | null;
   receivedAt: number;
-  receivedMono?: number;
 }
 
 /** 某席最近一条 UTC 时间戳（receivedAt = 本地接收时刻） */
@@ -96,7 +93,7 @@ export interface UtcTimestamp {
 const MAX_LOG = 200;
 
 function clock(): string {
-  return formatEpoch(Date.now(), { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return new Date().toLocaleTimeString("zh-CN", { hour12: false });
 }
 
 function freshPlayer(): PlayerLive {
@@ -218,7 +215,7 @@ export const useDirectorStore = defineStore("director", () => {
   const historyRevision = ref(0);
   const liveBroadcast = computed(broadcastSnapshot);
   watch(liveBroadcast, value => {
-    history.add(stableEpochNow(), JSON.parse(JSON.stringify(value)) as ReturnType<typeof broadcastSnapshot>);
+    history.add(Date.now(), JSON.parse(JSON.stringify(value)) as ReturnType<typeof broadcastSnapshot>);
     historyRevision.value++;
   }, { deep: true, flush: "sync" });
   function presentationAt(wallMs: number | null) {
@@ -232,9 +229,6 @@ export const useDirectorStore = defineStore("director", () => {
     return presentationAt(wallMs);
   });
 
-  const serverClock = new ServerClock();
-  const clockRevision = ref(0);
-  function resetClockInfo() { void clockRevision.value; return serverClock.read(); }
   const authorityRole = new AuthorityRole();
   const frameLease = new FrameLeaseClient();
   const alignRole = ref<"publisher" | "follower">("follower");
@@ -247,8 +241,7 @@ export const useDirectorStore = defineStore("director", () => {
   const canAdjustAnchor = computed(() => connStatus.value === "open" && alignRole.value === "publisher" && !resetPending.value);
   function applyAnchorDelay(delta: number): boolean {
     if (!canAdjustAnchor.value || !Number.isFinite(delta) || delta < 0 || delta > 86400) return false;
-    const estimate = resetClockInfo();
-    const target = Math.round((estimate.epochMs - delta * 1000) * 1000);
+    const target = Math.round((Date.now() - delta * 1000) * 1000);
     if (!Number.isSafeInteger(target) || target <= 0) return false;
     const id = globalThis.crypto?.randomUUID?.() ?? `reset_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
     if (!socket.send(send.directorCommand("frame_align_reset", {
@@ -379,7 +372,6 @@ export const useDirectorStore = defineStore("director", () => {
 
   socket.onStatusChange = (s) => {
     connStatus.value = s;
-    if (s !== "open") { serverClock.clear(); clockRevision.value++; }
     if (s !== "open") stopPublishing();
   };
   socket.onMessage = (msg) => handle(msg);
@@ -524,7 +516,7 @@ export const useDirectorStore = defineStore("director", () => {
         subsegmentGap.value =
           // gap_ms >0 = 穿越方（hit_seat）落后 → 归一为偏差条口径「正 = B 落后」
           msg.hit_seat === "PLAYER_B" ? msg.gap_ms : -msg.gap_ms;
-        subsegmentGapAt.value = stableEpochNow();
+        subsegmentGapAt.value = Date.now();
         break;
       }
       case "live_time": {
@@ -538,8 +530,7 @@ export const useDirectorStore = defineStore("director", () => {
           totalMs: msg.total_ms,
           segmentMs: msg.segment_ms,
           realTimeMs: msg.real_time_ms ?? null,
-          receivedAt: stableEpochNow(),
-          receivedMono: performance.now(),
+          receivedAt: Date.now(),
         };
         if (msg.seat === "PLAYER_A") liveTimeA.value = sample;
         else if (msg.seat === "PLAYER_B") liveTimeB.value = sample;
@@ -562,7 +553,7 @@ export const useDirectorStore = defineStore("director", () => {
           scoreA: msg.score_a_ms ?? null,
           scoreB: msg.score_b_ms ?? null,
         };
-        lastResultAt.value = stableEpochNow();
+        lastResultAt.value = Date.now();
         break;
       case "cumulative_score":
         winsA.value = msg.wins_a;
@@ -627,14 +618,14 @@ export const useDirectorStore = defineStore("director", () => {
         } else if (msg.action === "soon_start") {
           const s = soonCmdState.value;
           if (s.pausedAt !== null) {
-            s.startedAt = (s.startedAt ?? 0) + (performance.now() - s.pausedAt);
+            s.startedAt = (s.startedAt ?? 0) + (Date.now() - s.pausedAt);
             s.pausedAt = null;
           } else {
-            s.startedAt = performance.now();
+            s.startedAt = Date.now();
           }
         } else if (msg.action === "soon_pause") {
           const s = soonCmdState.value;
-          if (s.startedAt !== null && s.pausedAt === null) s.pausedAt = performance.now();
+          if (s.startedAt !== null && s.pausedAt === null) s.pausedAt = Date.now();
         } else if (msg.action === "soon_reset") {
           soonCmdState.value = { targetMs: soonCmdState.value.targetMs, startedAt: null, pausedAt: null };
         } else if (msg.action === "config_update" && msg.payload?.config) {
@@ -713,7 +704,6 @@ export const useDirectorStore = defineStore("director", () => {
   /** Coming Soon 倒计时状态（同上，WS 广播同步） */
   interface SoonCmdState {
     targetMs: number;
-    /** Local monotonic instants, never sent as protocol timestamps. */
     startedAt: number | null;
     pausedAt: number | null;
   }
@@ -740,7 +730,6 @@ export const useDirectorStore = defineStore("director", () => {
     if (p.account_id != null && p.account_id !== accountId.value) return;
     if ((p.timeline_version ?? 0) !== timelineVersion.value || (p.epoch != null && p.epoch < authorityRole.epoch)) return;
     if (!acceptTimeline(p)) return;
-    if (p.server_now_ms != null && serverClock.observe(p.server_now_ms)) clockRevision.value++;
     if (alignEngine.setExternalTUs(p.t_us, { ...p, replay, src: p.src === undefined ? currentAlignSrc.value ?? undefined : p.src })) {
       if (alignEngine.canCompete && authorityRole.publisher && p.epoch === authorityRole.epoch && p.src === authorityRole.connectionId) {
         frameLease.observe({ t_floor_us: p.t_us }, authorityRole, performance.now());
@@ -765,8 +754,7 @@ export const useDirectorStore = defineStore("director", () => {
       | { target_ms?: number | null; started_at?: number | null; paused_at?: number | null; now_ms?: number }
       | undefined;
     if (soon && typeof soon.now_ms === "number") {
-      if (serverClock.observe(soon.now_ms)) clockRevision.value++;
-      const offset = performance.now() - soon.now_ms;
+      const offset = Date.now() - soon.now_ms;
       soonCmdState.value = {
         targetMs:
           typeof soon.target_ms === "number"
@@ -810,16 +798,16 @@ export const useDirectorStore = defineStore("director", () => {
       const s = soonCmdState.value;
       if (s.pausedAt !== null) {
         // 继续：补偿暂停时长
-        s.startedAt = (s.startedAt ?? 0) + (performance.now() - s.pausedAt);
+        s.startedAt = (s.startedAt ?? 0) + (Date.now() - s.pausedAt);
         s.pausedAt = null;
       } else {
-        s.startedAt = performance.now();
+        s.startedAt = Date.now();
         s.pausedAt = null;
       }
     } else if (action === "soon_pause") {
       const s = soonCmdState.value;
       if (s.startedAt !== null && s.pausedAt === null) {
-        s.pausedAt = performance.now();
+        s.pausedAt = Date.now();
       }
     } else if (action === "soon_reset") {
       soonCmdState.value = { targetMs: soonCmdState.value.targetMs, startedAt: null, pausedAt: null };
@@ -864,7 +852,6 @@ export const useDirectorStore = defineStore("director", () => {
   const stageUrl = computed(() => scenePageUrl("stage.html"));
 
   return {
-    resetClockInfo,
     // 接收时间展示历史（常驻 store，不随场景卸载）
     presentation, presentationAt, liveBroadcast, emptyBroadcast, currentAlignSrc,
     // 连接
