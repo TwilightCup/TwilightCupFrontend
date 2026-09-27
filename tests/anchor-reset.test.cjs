@@ -117,3 +117,15 @@ test('manual delay and successful resync do not trigger automatic fallback',()=>
   } finally {p.close();}
  }
 });
+test('publisher automatically targets wall minus 10s once latency reaches 15s with common coverage',()=>{
+ const p=boot(),realNow=Date.now;
+ try {
+  const t=p.engine.tUs.value;
+  Date.now=()=>t/1000+14999;p.heartbeat(1600);
+  assert(!p.drain().some(m=>m.action==='frame_align_reset'));
+  Date.now=()=>t/1000+15000;p.heartbeat(2000);
+  const req=p.drain().find(m=>m.action==='frame_align_reset');
+  assert(req);assert.equal(req.payload.target_t_us,Math.round(t+5e6));
+  p.heartbeat(2400);assert(!p.drain().some(m=>m.action==='frame_align_reset'));
+ } finally {Date.now=realNow;p.close();}
+});

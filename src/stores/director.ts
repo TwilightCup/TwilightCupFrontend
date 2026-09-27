@@ -1,3 +1,4 @@
+import { AutoCatchup } from "@/scenes/align/autoCatchup";
 /**
  * 导播端状态：控制台与 OBS 叠加层共用。
  *
@@ -241,6 +242,7 @@ export const useDirectorStore = defineStore("director", () => {
   let requestedReset: string | null = null;
   let onResetAccepted: (() => boolean) | null = null;
   let reloadFailed = false;
+  let autoCatchup = new AutoCatchup();
   let delayFallback: { reload: () => boolean; notify: () => void } | null = null;
   let resetRecord: { request_id: string; status: "preparing" | "completed" | "failed"; target_t_us: number; owner_id: string; authority_epoch: number } | null = null;
   let ackSent = false;
@@ -255,6 +257,7 @@ export const useDirectorStore = defineStore("director", () => {
       match_id: matchId.value, authority_epoch: authorityRole.epoch,
       timeline_version: timelineVersion.value, target_t_us: target,
     }))) { anchorAdjustment.value = "发送失败，请重试"; return false; }
+    if (delta >= 15) autoCatchup.hold();
     delayFallback = delta === 10 && onAccepted && onFallback ? { reload: onAccepted, notify: onFallback } : null;
     onResetAccepted = onAccepted ?? null; reloadFailed = false;
     requestedReset = id; resetPending.value = true; anchorAdjustment.value = "等待服务器接受";
@@ -325,6 +328,7 @@ export const useDirectorStore = defineStore("director", () => {
     if (alignHeartbeat) clearInterval(alignHeartbeat);
     alignHeartbeat = null;
     onResetAccepted = null; reloadFailed = false; delayFallback = null;
+    autoCatchup = new AutoCatchup();
     requestedReset = null; resetRecord = null; resetPending.value = false; timelineVersion.value = 0; ackSent = false;
     anchorAdjustment.value = "";
     awaitingPromotionAnchor = false;
@@ -390,6 +394,13 @@ export const useDirectorStore = defineStore("director", () => {
     if (now - lastAlignPublish < 400) return;
     lastAlignPublish = now;
     const playing = alignEngine.sync.state === "playing";
+    // Keep decoded buffers: automatic catchup only moves the shared timeline.
+    // Do not fight an explicit 20-second fallback or repeat while preparing.
+    const wallMs = Date.now();
+    const targetUs = Math.round((wallMs - 10_000) * 1000);
+    if (autoCatchup.check(t, wallMs, now, playing && canAdjustAnchor.value && !matchEnded.value && alignEngine.canAutoSeek(targetUs))) {
+      if (applyAnchorDelay(10)) return;
+    }
     socket.send(send.directorCommand("frame_align", {
       timeline_version: timelineVersion.value, t_us: Math.floor(t), epoch: authorityRole.epoch, seq: ++authorityRole.sequence,
       src: authorityRole.connectionId, source_id: authorityRole.connectionId,

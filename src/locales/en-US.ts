@@ -534,7 +534,7 @@ const messages: MessageSchema = {
   "directorView.wallTime": "Wall time",
   "directorView.hideStreamDebug": "Hide debug info",
   "directorView.showStreamDebug": "Show debug info",
-  "directorView.previewHint": "At match start, resync both streams to reset T using the target delay and reload A/B on preview and stage. Defaults to 10 seconds; preparation timeout retries once at 20 seconds. Only the anchor owner can do this.",
+  "directorView.previewHint": "At match start, resync both streams to reset T using the target delay and reload A/B on preview and stage. During playback, latency reaching 15 seconds catches up to wall time minus 10 seconds when both streams have the target data. Defaults to 10 seconds; preparation timeout retries once at 20 seconds. Only the anchor owner can do this.",
   "directorView.delayTitle": "Timer display delay",
   "directorView.delayDiff": "Diff bar",
   "directorView.soonLabel": "Countdown (sec)",

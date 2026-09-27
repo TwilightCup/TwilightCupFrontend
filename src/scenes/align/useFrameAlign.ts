@@ -396,6 +396,14 @@ export class AlignEngine {
     this.presented[side] = false;
     this.sync.targetErrorUs[side] = null;
   }
+  canAutoSeek(targetUs: number): boolean {
+    const sides = [...this.requiredSides];
+    return sides.length > 0 && sides.every(side => {
+      const stream = this.streams.get(side);
+      const coverage = stream?.coverage();
+      return !!coverage && targetUs >= coverage.from && targetUs <= coverage.to && !!stream?.canSeek(targetUs);
+    });
+  }
   frontierOf(side: Side): number | null {
     return this.streams.get(side)?.frontier() ?? null;
   }

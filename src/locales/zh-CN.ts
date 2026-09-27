@@ -538,7 +538,7 @@ const messages = {
   "directorView.wallTime": "现实时间",
   "directorView.hideStreamDebug": "隐藏调试信息",
   "directorView.showStreamDebug": "显示调试信息",
-  "directorView.previewHint": "比赛开始后可点击「重新同步双路」：按目标延迟更新 T，同时重拉预览与舞台 A/B；默认延迟 10 秒，准备超时自动改用 20 秒重试一次；仅主锚点可操作。",
+  "directorView.previewHint": "比赛开始后可点击「重新同步双路」：按目标延迟更新 T，同时重拉预览与舞台 A/B；播放延迟达到 15 秒且双路目标数据已就绪时，自动追到现实时间减 10 秒。默认延迟 10 秒，准备超时自动改用 20 秒重试一次；仅主锚点可操作。",
   "directorView.delayTitle": "计时显示延迟",
   "directorView.delayDiff": "偏差条",
   "directorView.soonLabel": "倒计时(秒)",
