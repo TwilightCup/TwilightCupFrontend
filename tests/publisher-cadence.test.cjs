@@ -89,3 +89,28 @@ test('frame interval retains committed T and picture age, but reset still waits 
   assert.equal(e.sync.state, 'frozen');
   assert.equal(e.sync.reason, 'authority_behind_or_paused');
 });
+
+for (const [a,b,phase] of [[30,30,6200],[30,60,7100],[60,60,12000]]) {
+ test(`completed reset preserves cadence at ${a}/${b}fps without seeking`,()=>{
+  const {e,tick}=playingEngine(a,b,phase);
+  e.finishTimeline('completed',65e6);
+  e.latestSeek=65e6;
+  for(let now=8;now<=6000;now+=8) {
+   tick(now);
+   assert.equal(e.sync.state,'playing',`${now}: ${e.sync.reason}`);
+  }
+  assert(Math.abs(e.tUs.value-71e6)<60000,`lost time: ${e.tUs.value}`);
+  assert.equal(e.sync.seekCount,0);
+ });
+}
+
+test('completed reset still expires the picture when one stream genuinely stops',()=>{
+ const {e,tick}=playingEngine(30,30,6200);
+ e.finishTimeline('completed',65e6);e.latestSeek=65e6;
+ for(let now=8;now<=1000;now+=8)tick(now);
+ const b=e.streams.get('B');b.advance=()=>{};
+ for(const s of e.streams.values())s.seek=()=>{};
+ for(let now=1008;now<=12000;now+=8)tick(now);
+ assert.equal(e.sync.state,'frozen');
+ assert.equal(e.pictureExpired.value,true);
+});

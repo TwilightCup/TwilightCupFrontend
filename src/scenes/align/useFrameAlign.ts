@@ -502,7 +502,7 @@ export class AlignEngine {
     const required = slow - (strictTarget ? 0 : CATCHUP.backUs);
     const earliest = Math.max(...coverage.map(c => c!.from));
     const localTarget = this.publisher && this.manualTarget != null
-      ? this.resetPhase === "completed" ? (this.tUs.value ?? this.manualTarget) + elapsed * 1000 : this.manualTarget
+      ? this.resetPhase === "completed" ? (cadenceTarget ?? this.tUs.value ?? this.manualTarget) + elapsed * 1000 : this.manualTarget
       : this.publisher ? publisherTarget(earliest, slow,
       Math.max(this.authorityFloor ?? 0, this.tUs.value ?? 0), this.tUs.value == null) : null;
     const external = this.publisher
@@ -630,7 +630,18 @@ export class AlignEngine {
     if (this.publisher && this.resetPhase === "preparing" && this.resetPresentedUs.value != null) return;
     const floor = Math.max(this.resumeFloor ?? 0, ...sides.map(s => this.sync.presentedRt[s] ?? 0));
     this.sync.targetUs = T;
+    const holdFrameInterval = (): boolean => {
+      // Completed local resets still run on the shared monotonic cadence.
+      // A nearest frame can repeat briefly at 30/60fps; retain elapsed time
+      // without refreshing picture age or treating that interval as a stall.
+      if (!this.publisher || this.resetPhase !== "completed" || this.sync.state !== "playing" ||
+          !sides.every(s => this.presented[s]) || this.resumeFloor != null ||
+          sides.some(s => Math.abs(T - (this.sync.presentedRt[s] ?? -Infinity)) > 100_000)) return false;
+      this.cadenceTarget = T; this.sync.reason = "frame_interval"; this.playback.speed = 1;
+      return true;
+    };
     if (T <= floor || (external.rate === 0 && !(this.publisher && this.resetPhase === "preparing"))) {
+      if (external.rate > 0 && holdFrameInterval()) return;
       freeze("frozen", false, "authority_behind_or_paused"); return;
     }
     // Readiness is bounded against the newest T, not an earlier pending seek.
@@ -641,8 +652,10 @@ export class AlignEngine {
     const seekT = Math.max(earliest, Math.min(T, latest));
     const floors = sides.map(s => Math.max(this.sync.presentedRt[s] ?? -Infinity,
       this.publisher && this.resetPhase === "preparing" ? this.manualTarget! : -Infinity));
+    for (const s of streams) s.advance(seekT);
     let frames = commonFrames(streams.map(s => s.queue), T, 3_000_000, floors);
     const fresh = frames?.every((f, i) => f.rtUs > (this.sync.presentedRt[sides[i]!] ?? -Infinity));
+    if (!fresh && frames && holdFrameInterval()) return;
     if (!fresh) this.latestMissingAt ??= now;
     if (!fresh && (this.latestSeek == null || (Math.abs(T - this.latestSeek) > 3_000_000 && Math.abs(T - (this.tUs.value ?? this.latestSeek)) > 3_000_000) || (now - this.latestMissingAt! >= 250 && now - this.lastSeekAt >= 1000))) {
       if (!streams.every(s => s.canSeek(seekT))) { freeze("waiting", false, "no_keyframe"); return; }
