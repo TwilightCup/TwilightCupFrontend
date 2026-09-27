@@ -215,7 +215,7 @@ const showB = computed({
 const previewAlignedA = computed(() => !!cfgConfig.alignA && !!cfgConfig.hlsA);
 const previewAlignedB = computed(() => !!cfgConfig.alignB && !!cfgConfig.hlsB);
 const showStreamDebug = ref(true);
-const anchorDelta = ref<number | undefined>(10);
+const anchorDelta = ref<number | undefined>(20);
 const wallNow = ref(Date.now());
 let wallTimer: ReturnType<typeof setInterval> | undefined;
 const displayedAnchor = computed(() => director.alignRole === "publisher"
@@ -227,7 +227,7 @@ function clockText(us: number | null): string {
   return `${date.toLocaleString()} .${String(date.getMilliseconds()).padStart(3, "0")}`;
 }
 function applyAnchor(): void {
-  if (anchorDelta.value != null) director.applyAnchorDelay(anchorDelta.value);
+  resyncStreams();
 }
 
 // 拉流失败只内联显示在 A/B 位置（指标条/画面占位），不弹窗打扰
@@ -322,7 +322,7 @@ function resyncStreams(): void {
     alignEngine.restartStream("A", patch.refreshA);
     alignEngine.restartStream("B", patch.refreshB);
     return true;
-  }, () => { /* Automatic fallback preserves the operator’s initial deltaT. */ });
+  });
 }
 
 /** 计时显示延迟（秒）：把比赛详情场景的计时器 / 偏差条回放对齐有延迟的
@@ -761,7 +761,7 @@ onUnmounted(() => {
           </div>
           <div class="anchor-controls">
             <label for="anchor-delta">{{ $t("directorView.anchorDelay") }}</label>
-            <el-input-number id="anchor-delta" v-model="anchorDelta" :min="0" :max="86400" :precision="1" :step="1" size="small" :disabled="!director.canAdjustAnchor || readOnly" />
+            <el-input-number id="anchor-delta" v-model="anchorDelta" :min="0" :max="86400" :precision="1" :step="1" size="small" :disabled="!director.canEditAnchor || readOnly" />
             <el-button size="small" :disabled="!director.canAdjustAnchor || readOnly || anchorDelta == null" @click="applyAnchor">{{ $t("directorView.applyAnchor") }}</el-button>
             <el-button size="small" type="primary" :disabled="!director.matchId || !director.canAdjustAnchor || readOnly || anchorDelta == null" @click="resyncStreams">{{ $t("directorView.cfgRefresh") }}</el-button>
             <span class="hint" role="status">{{ director.anchorAdjustment || (director.alignRole !== 'publisher' ? $t("directorView.anchorOwnerOnly") : '') }}</span>

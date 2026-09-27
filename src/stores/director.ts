@@ -257,17 +257,17 @@ export const useDirectorStore = defineStore("director", () => {
   let onResetAccepted: (() => boolean) | null = null;
   let reloadFailed = false;
   let autoCatchup = new AutoCatchup();
-  let delayFallback: { reload: () => boolean; notify: () => void } | null = null;
   let resetRecord: { request_id: string; status: "preparing" | "completed" | "failed"; target_t_us: number; owner_id: string; authority_epoch: number } | null = null;
   let ackSent = false;
-  const canAdjustAnchor = computed(() => connStatus.value === "open" && alignRole.value === "publisher" && !resetPending.value);
-  function applyAnchorDelay(delta: number, onAccepted?: () => boolean, onFallback?: () => void): boolean {
-    if (!requestAnchorDelay(delta, onAccepted, onFallback)) return false;
+  const canEditAnchor = computed(() => connStatus.value === "open" && alignRole.value === "publisher");
+  const canAdjustAnchor = computed(() => canEditAnchor.value && !resetPending.value);
+  function applyAnchorDelay(delta: number, onAccepted?: () => boolean): boolean {
+    if (!requestAnchorDelay(delta, onAccepted)) return false;
     // Only an explicit operator setting changes the initial deltaT.
     autoCatchup = new AutoCatchup(delta);
     return true;
   }
-  function requestAnchorDelay(delta: number, onAccepted?: () => boolean, onFallback?: () => void): boolean {
+  function requestAnchorDelay(delta: number, onAccepted?: () => boolean): boolean {
     if (!canAdjustAnchor.value || !Number.isFinite(delta) || delta < 0 || delta > 86400) return false;
     const target = Math.round((Date.now() - delta * 1000) * 1000);
     if (!Number.isSafeInteger(target) || target <= 0) return false;
@@ -277,7 +277,6 @@ export const useDirectorStore = defineStore("director", () => {
       match_id: matchId.value, authority_epoch: authorityRole.epoch,
       timeline_version: timelineVersion.value, target_t_us: target,
     }))) { anchorAdjustment.value = "发送失败，请重试"; return false; }
-    delayFallback = delta === 10 && onAccepted && onFallback ? { reload: onAccepted, notify: onFallback } : null;
     onResetAccepted = onAccepted ?? null; reloadFailed = false;
     requestedReset = id; resetPending.value = true; anchorAdjustment.value = "等待服务器接受";
     return true;
@@ -311,7 +310,7 @@ export const useDirectorStore = defineStore("director", () => {
         (p.match_id != null && p.match_id !== matchId.value)) return;
     if (p.status === "rejected") {
       if (p.request_id === requestedReset) {
-        onResetAccepted = null; delayFallback = null;
+        onResetAccepted = null;
         resetPending.value = false; anchorAdjustment.value = `调整被拒绝：${p.code}`;
       }
       return;
@@ -335,27 +334,15 @@ export const useDirectorStore = defineStore("director", () => {
     anchorAdjustment.value = p.status === "preparing" ? "准备目标画面中（最长 10 秒）"
       : p.status === "completed" ? "应用成功" : `调整失败：${p.code}`;
     if (reloadFailed) anchorAdjustment.value += "；双路重拉未发送，请重试";
-    // Only our explicit 10-second resync may fall back, once, after server timeout.
-    // A rejection, ownership loss or ordinary playback stall must not reset T.
-    if (p.request_id === requestedReset && p.status !== "preparing") {
-      const fallback = delayFallback;
-      delayFallback = null;
-      if (fallback && !reloadFailed && p.status === "failed" && p.code === "PREPARE_TIMEOUT" &&
-          p.owner_id === authorityRole.connectionId && authorityRole.publisher) {
-        if (requestAnchorDelay(20, fallback.reload)) {
-          fallback.notify();
-          anchorAdjustment.value = "10 秒延迟下画面未就绪，已改用 20 秒重试";
-        }
-      }
-    }
   }
+
   let awaitingPromotionAnchor = false;
   let lastAlignPublish = -Infinity;
   let alignHeartbeat: ReturnType<typeof setInterval> | null = null;
   function stopPublishing(): void {
     if (alignHeartbeat) clearInterval(alignHeartbeat);
     alignHeartbeat = null;
-    onResetAccepted = null; reloadFailed = false; delayFallback = null;
+    onResetAccepted = null; reloadFailed = false;
     autoCatchup = new AutoCatchup(autoCatchup.deltaSeconds);
     requestedReset = null; resetRecord = null; resetPending.value = false; timelineVersion.value = 0; awaitingTimelineTarget = false; ackSent = false;
     anchorAdjustment.value = "";
@@ -367,7 +354,7 @@ export const useDirectorStore = defineStore("director", () => {
   function applyAuthority(p: AuthorityAssignment, initial = false): void {
     const wasPublisher = authorityRole.publisher;
     if ((p.timeline_version ?? 0) < timelineVersion.value || !authorityRole.assign(p)) return;
-    if (!authorityRole.publisher) { onResetAccepted = null; delayFallback = null; }
+    if (!authorityRole.publisher) { onResetAccepted = null; }
     if (!acceptTimeline(p, initial)) return;
     const priorReset = p.reset as { authority_epoch?: number; target_t_us?: number } | undefined;
     if (priorReset && priorReset.authority_epoch !== authorityRole.epoch && typeof priorReset.target_t_us === "number") {
@@ -652,7 +639,7 @@ export const useDirectorStore = defineStore("director", () => {
         break;
       case "error":
         if (requestedReset && resetPending.value && resetRecord?.request_id !== requestedReset) {
-          onResetAccepted = null; delayFallback = null;
+          onResetAccepted = null;
           resetPending.value = false; anchorAdjustment.value = `调整失败：${msg.msg}`;
         }
         log("error", tr("log.errorLog", { code: msg.code, msg: msg.msg }));
@@ -1011,7 +998,7 @@ export const useDirectorStore = defineStore("director", () => {
     subsegmentGapAt,
     // 主控制台上报的帧对齐统一虚拟时间 T + A/B 就绪（跨文档一致性）
     frameAlign,
-    alignRole, timelineVersion, anchorAdjustment, resetPending, canAdjustAnchor, applyAnchorDelay,
+    alignRole, timelineVersion, anchorAdjustment, resetPending, canEditAnchor, canAdjustAnchor, applyAnchorDelay,
     // 双席 live_time 实时计时（主计时器实时走表数据源）
     liveTimeA,
     liveTimeB,

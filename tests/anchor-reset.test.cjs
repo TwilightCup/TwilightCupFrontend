@@ -84,36 +84,20 @@ test('lost authority cancels pending resync; failed reload is not reported as pl
   assert.equal(calls,1);assert(!p.store.canAdjustAnchor);
  } finally {p.close();}
 });
-test('10 second resync retries once at 20 seconds after preparation timeout',()=>{
- const p=boot();let reloads=0,fallbacks=0;const realNow=Date.now;Date.now=()=>110000;
- try {
-  assert(p.store.applyAnchorDelay(10,()=>{reloads++;return true;},()=>fallbacks++));
-  let req=p.drain().find(m=>m.action==='frame_align_reset').payload;
-  assert.equal(req.target_t_us,100e6);
-  let r={...reset(p,req.target_t_us),request_id:req.request_id};
-  authority(p,1,r);assert.equal(reloads,1);
-  Date.now=()=>120000;
-  result(p,{...r,status:'failed',code:'PREPARE_TIMEOUT'});
-  assert.equal(fallbacks,1);assert(p.store.resetPending);
-  req=p.drain().find(m=>m.action==='frame_align_reset').payload;
-  assert.equal(req.target_t_us,100e6);assert.equal(req.timeline_version,1);
-  result(p,{...r,status:'failed',code:'PREPARE_TIMEOUT'});
-  assert.equal(p.drain().filter(m=>m.action==='frame_align_reset').length,0);assert(p.store.resetPending);
-  r={...reset(p,req.target_t_us),request_id:req.request_id,timeline_version:2,authority_epoch:3};
-  authority(p,2,r);assert.equal(reloads,2);
-  result(p,{...r,status:'failed',code:'PREPARE_TIMEOUT'});
-  assert.equal(p.drain().filter(m=>m.action==='frame_align_reset').length,0);assert.equal(fallbacks,1);
- } finally {Date.now=realNow;p.close();}
-});
-test('manual delay and successful resync do not trigger automatic fallback',()=>{
- for(const delta of [10,15,20]) {
-  const p=boot();let fallback=0;
+test('resync preparation timeout never retries or changes the requested delay',()=>{
+ for(const delta of [10,20]) {
+  const p=boot();let reloads=0;
   try {
-   p.store.applyAnchorDelay(delta,()=>true,()=>fallback++);
+   assert(p.store.applyAnchorDelay(delta,()=>{reloads++;return true;}));
    const req=p.drain().find(m=>m.action==='frame_align_reset').payload;
-   const r={...reset(p,req.target_t_us),request_id:req.request_id};authority(p,1,r);
-   result(p,{...r,status:delta===10?'completed':'failed',code:'PREPARE_TIMEOUT'});
-   assert.equal(fallback,0);assert(!p.drain().some(m=>m.action==='frame_align_reset'));
+   const r={...reset(p,req.target_t_us),request_id:req.request_id};
+   authority(p,1,r);assert.equal(reloads,1);
+   for(let i=0;i<2;i++) {
+    result(p,{...r,status:'failed',code:'PREPARE_TIMEOUT'});
+    assert(!p.store.resetPending);
+    assert(!p.drain().some(m=>m.action==='frame_align_reset'));
+    assert.equal(reloads,1);
+   }
   } finally {p.close();}
  }
 });
@@ -121,9 +105,9 @@ test('publisher resets to initial delta plus 5s only above initial delta plus 15
  const p=boot(),realNow=Date.now;
  try {
   const t=p.engine.tUs.value;
-  Date.now=()=>t/1000+25000;p.heartbeat(1600);
+  Date.now=()=>t/1000+35000;p.heartbeat(1600);
   assert(!p.drain().some(m=>m.action==='frame_align_reset'));
-  Date.now=()=>t/1000+25001;p.heartbeat(2000);
+  Date.now=()=>t/1000+35001;p.heartbeat(2000);
   const req=p.drain().find(m=>m.action==='frame_align_reset');
   assert(req);assert.equal(req.payload.target_t_us,Math.round(t+10001000));
   p.heartbeat(2400);assert(!p.drain().some(m=>m.action==='frame_align_reset'));
@@ -138,7 +122,7 @@ test('manual delta 20 becomes the baseline; automatic target remains 25 across r
   authority(p,1,r);p.tick(1025);result(p,{...r,status:'completed'});p.tick(1050);p.drain();
   for(let version=2;version<=3;version++) {
    const t=p.engine.tUs.value,at=version*20000;
-   Date.now=()=>t/1000+25000;p.heartbeat(at);p.drain();
+   Date.now=()=>t/1000+35000;p.heartbeat(at);p.drain();
    Date.now=()=>t/1000+35000;p.heartbeat(at+400);
    assert(!p.drain().some(m=>m.action==='frame_align_reset'));
    Date.now=()=>t/1000+35001;p.heartbeat(at+800);
@@ -201,5 +185,22 @@ test('stage adopts the version fence but never reports a candidate lease',()=>{
   for(let now=0;now<=1000;now+=25)p.tick(now);
   assert.equal(p.store.timelineVersion,3);assert.equal(p.engine.tUs.value,null);
   assert(!p.drain().some(m=>m.action==='frame_align_status'||m.action==='frame_align'));
+ } finally {p.close();}
+});
+
+test('publisher can edit and resync without synchronized frames; pending reset only blocks duplicate apply',()=>{
+ const p=boot();let reloads=0;
+ try {
+  p.engine.tUs.value=null;
+  p.engine.sync.state='stale';
+  p.engine.presented.A=p.engine.presented.B=false;
+  assert(p.store.canEditAnchor);assert(p.store.canAdjustAnchor);
+  assert(p.store.applyAnchorDelay(20,()=>{reloads++;return true;}));
+  assert(p.store.canEditAnchor);assert(!p.store.canAdjustAnchor);
+  const req=p.drain().find(m=>m.action==='frame_align_reset').payload;
+  authority(p,1,{...reset(p,req.target_t_us),request_id:req.request_id});
+  assert.equal(reloads,1);
+  authority(p,1,undefined,'other',3);
+  assert(!p.store.canEditAnchor);assert(!p.store.canAdjustAnchor);
  } finally {p.close();}
 });
