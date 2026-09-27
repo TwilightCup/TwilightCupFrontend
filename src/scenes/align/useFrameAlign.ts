@@ -626,9 +626,14 @@ export class AlignEngine {
   }
   private presentLatest(now: number, elapsed: number, external: { t: number; rate: number; stale: boolean }, sides: Side[], earliest: number, latest: number,
     freeze: (state: "waiting" | "frozen" | "stale", keep?: boolean, reason?: string) => void): void {
-    const T = external.t;
     if (this.publisher && this.resetPhase === "preparing" && this.resetPresentedUs.value != null) return;
     const floor = Math.max(this.resumeFloor ?? 0, ...sides.map(s => this.sync.presentedRt[s] ?? 0));
+    const recovering = this.publisher && this.resetPhase === "completed" &&
+      this.resumeFloor == null && this.sync.state !== "playing";
+    // A temporary decoder miss must not trap the local target behind the last
+    // nearest-frame pair. Resume just beyond that pair, with the same 3s bounds;
+    // unpresented explicit resets retain their original target and floor gate.
+    const T = recovering ? Math.max(external.t, floor + 1) : external.t;
     this.sync.targetUs = T;
     const holdFrameInterval = (): boolean => {
       // Completed local resets still run on the shared monotonic cadence.
@@ -650,7 +655,7 @@ export class AlignEngine {
     }
     const streams = sides.map(s => this.streams.get(s)!);
     const seekT = Math.max(earliest, Math.min(T, latest));
-    const floors = sides.map(s => Math.max(this.sync.presentedRt[s] ?? -Infinity,
+    const floors = sides.map(s => Math.max((this.sync.presentedRt[s] ?? -Infinity) + (recovering ? 1 : 0),
       this.publisher && this.resetPhase === "preparing" ? this.manualTarget! : -Infinity));
     for (const s of streams) s.advance(seekT);
     let frames = commonFrames(streams.map(s => s.queue), T, 3_000_000, floors);

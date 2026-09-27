@@ -114,3 +114,22 @@ test('completed reset still expires the picture when one stream genuinely stops'
  assert.equal(e.sync.state,'frozen');
  assert.equal(e.pictureExpired.value,true);
 });
+
+for(const gap of [8,200,2000]) {
+ test(`completed reset resumes after ${gap}ms of missing decoder output`,()=>{
+  const {e,tick}=playingEngine(30,30,6200);
+  e.finishTimeline('completed',65e6);e.latestSeek=65e6;
+  for(const stream of e.streams.values())stream.seek=()=>{};
+  for(let now=8;now<=1000;now+=8)tick(now);
+  const before=e.tUs.value,b=e.streams.get('B'),advance=b.advance;
+  b.queue.clear();b.advance=()=>{};
+  for(let now=1008;now<=1000+gap;now+=8)tick(now);
+  b.advance=advance;
+  const seeks=e.sync.seekCount;
+  for(let now=1008+gap;now<=5000+gap;now+=8)tick(now);
+  assert.equal(e.sync.state,'playing',e.sync.reason);
+  assert(e.tUs.value>before+3.8e6,`clock stayed at ${e.tUs.value}`);
+  assert(e.sync.seekCount<=seeks+1,'recovery must not repeatedly rebuild the decoder');
+  assert.equal(e.pictureExpired.value,false);
+ });
+}
