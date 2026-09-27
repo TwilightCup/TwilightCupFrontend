@@ -1,3 +1,4 @@
+import { formatEpoch } from "./displayTime";
 /**
  * 展示层格式化与标签映射。
  */
@@ -223,16 +224,13 @@ export function shortTime(iso?: string | null): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString(currentLocaleTag(), { hour12: false });
+  return formatEpoch(d.getTime(), { hour: "2-digit", minute: "2-digit", second: "2-digit" }, currentLocaleTag());
 }
 
-/** Unix UTC 毫秒时间戳 → UTC HH:MM:SS；null/undefined → "N/A" */
+/** Unix UTC 毫秒时间戳 → 展示时区 HH:MM:SS；null/undefined → "N/A" */
 export function formatUtcTime(ms: number | null | undefined): string {
   if (ms === null || ms === undefined || Number.isNaN(ms)) return t("format.na");
-  return new Date(ms).toLocaleTimeString(currentLocaleTag(), {
-    hour12: false,
-    timeZone: "UTC",
-  });
+  return formatEpoch(ms, { hour: "2-digit", minute: "2-digit", second: "2-digit" }, currentLocaleTag());
 }
 
 /** 日期时间（YYYY-MM-DD HH:MM） */
@@ -240,10 +238,7 @@ export function dateTime(iso?: string | null): string {
   if (!iso) return t("common.dash");
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return t("common.dash");
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(
-    d.getHours(),
-  )}:${pad(d.getMinutes())}`;
+  return formatEpoch(d.getTime(), { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }, currentLocaleTag());
 }
 
 /** 账号类型标签 + 标签色 */

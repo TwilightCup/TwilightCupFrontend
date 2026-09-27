@@ -25,7 +25,8 @@ test('late authority heartbeat freezes without moving the follower decoder to a 
  assert(e.external.accept({t_us:71e6,epoch:1,seq:2,rate:1,src:'master'},1700));
  for(let now=1700;now<=2000;now+=25){e.tickLoop(now);e.leaseSample(now);}
  assert.equal(e.sync.state,'playing');
- assert.deepEqual([...e.streams.values()].map(s=>s.seeks.length),seeks.map(n=>n+1));
+ // A fresh nearby anchor resumes gradually using the existing decoder.
+ assert.deepEqual([...e.streams.values()].map(s=>s.seeks.length),seeks);
 });
 test('revocation followed by a no-owner frozen snapshot still permits candidate decoding',()=>{
  const e=follower();e.selectAuthority('master',1);

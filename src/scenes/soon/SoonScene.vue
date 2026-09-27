@@ -58,7 +58,7 @@ function calcRemaining(): number {
     return Math.max(0, s.targetMs - elapsed);
   }
   // 运行中
-  const elapsed = Date.now() - s.startedAt;
+  const elapsed = performance.now() - s.startedAt;
   return Math.max(0, s.targetMs - elapsed);
 }
 

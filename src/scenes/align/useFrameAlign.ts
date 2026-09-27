@@ -573,7 +573,8 @@ export class AlignEngine {
   }
   private presentLatest(now: number, elapsed: number, external: { t: number; rate: number; stale: boolean }, sides: Side[], earliest: number, latest: number,
     freeze: (state: "waiting" | "frozen" | "stale", keep?: boolean, reason?: string) => void): void {
-    const T = external.t;
+    let T = external.t;
+    const authorityT = T;
     if (this.publisher && this.resetPhase === "preparing" && this.resetPresentedUs.value != null) return;
     const floor = Math.max(this.resumeFloor ?? 0, ...sides.map(s => this.sync.presentedRt[s] ?? 0));
     this.sync.targetUs = T;
@@ -584,14 +585,31 @@ export class AlignEngine {
     if (T < earliest - 3_000_000 || T > latest + 3_000_000) {
       freeze("frozen", false, "target_unavailable"); return;
     }
+    // Only smooth an established follower inside the existing 3s target window.
+    // Startup, explicit timelines and unavailable latest authority retain strict behavior.
+    const softEligible = !this.publisher && (this.manualTarget == null || this.resetPhase === "completed") && this.tUs.value != null &&
+      sides.every(s => this.sync.presentedRt[s] != null) && T >= this.tUs.value &&
+      T - this.tUs.value <= CATCHUP.maxFrameErrorUs;
+    const plan = softEligible ? planCatchup({ current: this.tUs.value, authority: T, from: earliest,
+      safeTo: latest, elapsedMs: elapsed, rate: external.rate, supply: true, mode: this.catchupMode }) : null;
+    if (plan?.mode === "wait") { freeze("frozen", false, "smooth_wait"); return; }
+    const smooth = plan != null && plan.mode !== "seek";
+    if (smooth && plan.t != null) T = plan.t;
     const streams = sides.map(s => this.streams.get(s)!);
     const seekT = Math.max(earliest, Math.min(T, latest));
+    // Let a healthy decoder supply the gradual target before considering a seek.
+    if (smooth) for (const s of streams) s.advance(seekT);
     const floors = sides.map(s => Math.max(this.sync.presentedRt[s] ?? -Infinity,
       this.publisher && this.resetPhase === "preparing" ? this.manualTarget! : -Infinity));
     let frames = commonFrames(streams.map(s => s.queue), T, 3_000_000, floors);
     const fresh = frames?.every((f, i) => f.rtUs > (this.sync.presentedRt[sides[i]!] ?? -Infinity));
     if (!fresh) this.latestMissingAt ??= now;
-    if (!fresh && (this.latestSeek == null || (Math.abs(T - this.latestSeek) > 3_000_000 && Math.abs(T - (this.tUs.value ?? this.latestSeek)) > 3_000_000) || (now - this.latestMissingAt! >= 250 && now - this.lastSeekAt >= 1000))) {
+    const retryDue = now - (this.latestMissingAt ?? now) >= (smooth ? CATCHUP.stallSeekMs : 250) &&
+      now - this.lastSeekAt >= (smooth ? SIGNAL.retryMs : 1000);
+    const changedTarget = this.latestSeek != null && Math.abs(T - this.latestSeek) > CATCHUP.maxFrameErrorUs &&
+      Math.abs(T - (this.tUs.value ?? this.latestSeek)) > CATCHUP.maxFrameErrorUs;
+    const shouldSeek = smooth ? retryDue : this.latestSeek == null || changedTarget || retryDue;
+    if (!fresh && shouldSeek) {
       if (!streams.every(s => s.canSeek(seekT))) { freeze("waiting", false, "no_keyframe"); return; }
       for (const s of streams) s.seek(seekT);
       this.latestSeek = T; this.lastSeekAt = now; this.sync.seekCount++;
@@ -600,7 +618,16 @@ export class AlignEngine {
     for (const s of streams) s.advance(seekT);
     frames = commonFrames(streams.map(s => s.queue), T, 3_000_000, floors);
     if (!frames || frames.some((f, i) => f.rtUs <= (this.sync.presentedRt[sides[i]!] ?? -Infinity))) {
+      this.stableMs = 0;
       freeze("frozen", false, "missing_common_frame"); return;
+    }
+    if (smooth && frames.some(f => Math.abs(f.rtUs - authorityT) > CATCHUP.maxFrameErrorUs)) {
+      freeze("frozen", false, "target_unavailable"); return;
+    }
+    if (smooth && this.latestMissingAt != null) {
+      const gate = recoveryGate(this.stableMs, true, elapsed, now - this.latestMissingAt);
+      this.stableMs = gate.stableMs;
+      if (!gate.ready) { freeze("frozen", true, "recovery_hysteresis"); return; }
     }
     // Reset acknowledgement has a narrower server contract: actual common frame
     // in [requested T, requested T + 1s], never pretend an earlier frame is ready.
@@ -641,12 +668,14 @@ export class AlignEngine {
     this.tUs.value = this.publisher && this.resetPhase === "preparing" ? actual : T;
     this.lastPictureAt = now; this.pictureExpired.value = false; this.latestMissingAt = null;
     this.resumeFloor = null; this.sync.state = "playing"; this.sync.reason = "playing";
-    this.playback.speed = 1; this.sync.catchup = "normal";
+    this.playback.speed = smooth ? plan?.rate ?? 1 : 1;
+    this.catchupMode = smooth && plan?.mode === "soft" ? "soft" : "normal";
+    this.sync.catchup = this.catchupMode; this.stableMs = 0;
     this.sync.pairErrorUs = Math.max(...frames.map(f => f.rtUs)) - Math.min(...frames.map(f => f.rtUs));
     for (let i = 0; i < sides.length; i++) {
       const side = sides[i]!;
       this.sync.presentedRt[side] = frames[i]!.rtUs;
-      this.sync.targetErrorUs[side] = frames[i]!.rtUs - T;
+      this.sync.targetErrorUs[side] = frames[i]!.rtUs - authorityT;
       this.presented[side] = true;
     }
     if (this.publisher && this.resetPhase === "preparing") this.resetPresentedUs.value = actual;

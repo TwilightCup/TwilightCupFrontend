@@ -186,7 +186,7 @@ export class HlsHarvester {
           this.broken = true;
         }
         if (it.gap) { this.lastSequence = it.sequence; this.broken = true; continue; }
-        if (this.retry && Date.now() - this.retry.at < 1500) return;
+        if (this.retry && performance.now() - this.retry.at < 1500) return;
         try {
           const map = it.initUri ? this.key(it.initUri) : null;
           if (it.initUri && map !== this.initUri) {
@@ -216,7 +216,7 @@ export class HlsHarvester {
             this.retry = null;
             logSeg("seg-giveup", `segment ${it.sequence}: abandoned (${status ?? "network/parse"})`);
           } else {
-            this.retry = { sequence: it.sequence, tries, at: Date.now() };
+            this.retry = { sequence: it.sequence, tries, at: performance.now() };
             logSeg("seg-retry", `segment ${it.sequence}: retry ${tries}/3`);
             return; // never append a recovered older segment behind newer media
           }

@@ -9,6 +9,7 @@
  * 解码走 WebCodecs（H264/HEVC，经 isConfigSupported 探测）；能力不可用/解不了 → 报告
  * mode='off'，由外层 SeiStream 回退 MSE StreamFrame（对齐兜底）。
  */
+import { MediaEpochClock } from "./mediaEpochClock";
 import { extractFmp4Samples } from "./fmp4";
 import { extractTsVideo } from "./ts";
 import { parseSampleSei, parseAnnexbFrames, splitAvcc } from "./sei";
@@ -212,6 +213,9 @@ export class FrameLockStream {
   private dtRing: number[] = [];
   /** 近 1s 内的到达时刻（算实时每秒帧率；累计 frames 总数与此分开） */
   private liveArr: number[] = [];
+  private lastArrivalMono: number | null = null;
+  private mediaClock = new MediaEpochClock();
+  private timescale: number | undefined;
 
   constructor(source: FrameSource, opts: FrameLockStreamOptions = {}) {
     this.opts = opts;
@@ -272,6 +276,10 @@ export class FrameLockStream {
 
       if (seg.fmt === "fmp4") {
         const r = extractFmp4Samples(seg.payload);
+        if (r.timescale != null) {
+          if (this.timescale != null && this.timescale !== r.timescale) this.breakInput();
+          this.timescale = r.timescale;
+        }
         if (r.videoTrackId != null) this.videoTrackId = r.videoTrackId;
         if (r.codec) this.codec = r.codec;
         if (r.avcC) this.description = r.avcC;
@@ -282,12 +290,16 @@ export class FrameLockStream {
           if (this.videoTrackId != null && sample.trackId !== this.videoTrackId) continue;
           const info = this.onSample(sample);
           if (!info) { this.breakInput(); continue; }
-          const rtUs = Number(info.realtime_us);
+          const sourceRtUs = Number(info.realtime_us);
           // Sequence is encoder output order, not presentation order. Never sort raw by rt.
-          if (this.lastInputSeq === info.seq && this.lastInputRt === rtUs) continue;
+          if (this.lastInputSeq === info.seq && this.lastInputRt === sourceRtUs) continue;
           if (this.lastInputSeq != null && ((info.seq - this.lastInputSeq) >>> 0) !== 1) this.breakInput();
           this.lastInputSeq = info.seq;
-          this.lastInputRt = rtUs;
+          this.lastInputRt = sourceRtUs;
+          const mediaUs = this.timescale && sample.pts != null ? sample.pts / this.timescale * 1e6 : null;
+          const rtUs = this.mediaClock.map(sourceRtUs, mediaUs);
+          if (rtUs == null) { this.breakInput(); continue; }
+          this.lastArrivedRtUs = Math.max(this.lastArrivedRtUs ?? rtUs, rtUs);
           const isKey = sample.isKey || info.keyframe;
           if (this.ingestBroken && !isKey) continue;
           if (isKey && (this.ingestBroken || this.continuousFromUs == null)) {
@@ -360,6 +372,7 @@ export class FrameLockStream {
     this.st.frames++;
     const nowArr = performance.now();
     this.liveArr.push(nowArr);
+    this.lastArrivalMono = nowArr;
     while (this.liveArr.length && this.liveArr[0]! < nowArr - 1000) this.liveArr.shift();
     this.st.ntp += info.clock_ntp ? 1 : 0;
     this.st.key += info.keyframe || s.isKey ? 1 : 0;
@@ -377,7 +390,6 @@ export class FrameLockStream {
       }
     }
     this.st.lastRtUs = rtUs;
-    this.lastArrivedRtUs = Math.max(this.lastArrivedRtUs ?? rtUs, rtUs);
     return info;
   }
 
@@ -387,6 +399,7 @@ export class FrameLockStream {
     if (infos.length > 0) this.hasContent = true;
     for (const info of infos) {
       this.st.frames++;
+      this.lastArrivalMono = performance.now();
       this.st.ntp += info.clock_ntp ? 1 : 0;
       this.st.key += info.keyframe ? 1 : 0;
       this.lastArrivedRtUs = Number(info.realtime_us);
@@ -401,6 +414,9 @@ export class FrameLockStream {
     const median = n ? (n % 2 ? srt[(n - 1) >> 1]! : (srt[n / 2 - 1]! + srt[n / 2]!) / 2) : null;
     return {
       codec: this.codec,
+      arrivalAgeMs: this.lastArrivalMono == null ? null : Math.max(0, performance.now() - this.lastArrivalMono),
+      clockStatus: this.mediaClock.status,
+      clockCorrectionUs: this.mediaClock.correctionUs,
       frames: this.st.frames,
       segs: this.st.segs,
       missing: this.st.missing,
@@ -436,6 +452,7 @@ export class FrameLockStream {
   }
 
   private breakInput(): void {
+    this.mediaClock.reset();
     if (!this.ingestBroken) { this.ingestEpoch++; this.resyncGap++; }
     this.ingestBroken = true;
     this.continuousFromUs = null;

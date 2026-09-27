@@ -58,6 +58,7 @@ function locateConfigBox(data: Uint8Array, type: string): Uint8Array | null {
 export function extractFmp4Samples(buf: Uint8Array): Fmp4Result {
   let codec: Codec | null = null;
   let videoTrackId: number | undefined;
+  let timescale: number | undefined;
   let avcC: Uint8Array | null = null;
   let hvcC: Uint8Array | null = null;
   const boxes = parseBoxes(buf);
@@ -78,6 +79,8 @@ export function extractFmp4Samples(buf: Uint8Array): Fmp4Result {
       if (["avc1", "avc3", "hvc1", "hev1"].includes(e.codec)) {
         const tkhd = findBox(childBoxes(trak), "tkhd");
         if (tkhd) videoTrackId = u32be(tkhd.data, tkhd.data[0] === 1 ? 20 : 12);
+        const mdhd = findBox(childBoxes(mdia), "mdhd");
+        if (mdhd) timescale = u32be(mdhd.data, mdhd.data[0] === 1 ? 20 : 12);
         codec = e.codec.startsWith("avc") ? "h264" : "hevc";
         const entry = buf.subarray(stsd.start + 8 + e.entryStart, stsd.start + 8 + e.entryStart + e.entrySize);
         const avcc = locateConfigBox(entry, "avcC");
@@ -103,10 +106,10 @@ export function extractFmp4Samples(buf: Uint8Array): Fmp4Result {
       const tfFlags = u32be(tf, 0) & 0x00ffffff;
       let o = 8;
       let baseDataOffset = 0;
-      let defSize = 0, defFlags = 0;
+      let defSize = 0, defFlags = 0, defDuration = 0;
       if (tfFlags & 0x000001) { baseDataOffset = u64be(tf, o); o += 8; }
       if (tfFlags & 0x000002) o += 4; // sample-description-index
-      if (tfFlags & 0x000008) o += 4; // default-sample-duration
+      if (tfFlags & 0x000008) { defDuration = u32be(tf, o); o += 4; } // default-sample-duration
       if (tfFlags & 0x000010) { defSize = u32be(tf, o); o += 4; }
       if (tfFlags & 0x000020) { defFlags = u32be(tf, o); o += 4; }
       const base = tfFlags & 0x000001 ? baseDataOffset : moofStart;
@@ -120,21 +123,26 @@ export function extractFmp4Samples(buf: Uint8Array): Fmp4Result {
       if (trFlags & 0x000004) { firstSampleFlags = u32be(tr, q); q += 4; }
       let samplePos = base + dataOff;
       void moofEnd;
+      const tfdt = findBox(inner, "tfdt");
+      let dts = tfdt ? (tfdt.data[0] === 1 ? u64be(tfdt.data, 4) : u32be(tfdt.data, 4)) : undefined;
       for (let s = 0; s < sampleCount; s++) {
-        if (trFlags & 0x000100) q += 4;
+        let duration = defDuration;
+        if (trFlags & 0x000100) { duration = u32be(tr, q); q += 4; }
         let sz = defSize;
         if (trFlags & 0x000200) { sz = u32be(tr, q); q += 4; }
         let fl = defFlags;
         if (trFlags & 0x000400) { fl = u32be(tr, q); q += 4; }
-        if (trFlags & 0x000800) q += 4;
+        let composition = 0;
+        if (trFlags & 0x000800) { composition = u32be(tr, q); if (tr[0] === 1) composition |= 0; q += 4; }
         const effFlags = s === 0 && (trFlags & 0x000004) ? firstSampleFlags : fl;
         const isKey = !(effFlags & 0x00010000); // bit16 = sample_is_non_sync_sample
         if (sz > 0 && samplePos + sz <= buf.length) {
-          samples.push({ payload: new Uint8Array(buf.subarray(samplePos, samplePos + sz)), isKey, trackId: u32be(tf, 4) });
+          samples.push({ payload: new Uint8Array(buf.subarray(samplePos, samplePos + sz)), isKey, trackId: u32be(tf, 4), pts: dts == null ? undefined : dts + composition });
         }
         samplePos += sz;
+        dts = dts != null && duration > 0 ? dts + duration : undefined;
       }
     }
   }
-  return { codec, samples, avcC, hvcC, videoTrackId };
+  return { codec, samples, avcC, hvcC, videoTrackId, timescale };
 }

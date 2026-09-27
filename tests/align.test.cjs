@@ -34,10 +34,10 @@ test('init retries and failed media blocks later segments until recovered', asyn
     const h = harvester((_, kind, meta) => delivered.push([kind, meta]));
     await h.poll();
     assert.equal(delivered.length, 0);
-    h.retry.at = 0;
+    h.retry.at = -Infinity;
     await h.poll();
     assert(!urls.some(u => u.endsWith('b.mp4')));
-    h.retry.at = 0;
+    h.retry.at = -Infinity;
     await h.poll();
     assert.deepEqual(delivered.filter(d => d[1]).map(d => d[1].sequence), [10, 12]);
     assert.equal(initAttempts, 2);

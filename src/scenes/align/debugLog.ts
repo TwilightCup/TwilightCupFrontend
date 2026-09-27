@@ -20,8 +20,8 @@ const lastAt = new Map<string, number>();
 const suppressed = new Map<string, number>();
 
 function emit(key: string, ...parts: unknown[]): void {
-  const now = Date.now();
-  const last = lastAt.get(key) ?? 0;
+  const now = performance.now();
+  const last = lastAt.get(key) ?? -Infinity;
   if (now - last < 1000) {
     suppressed.set(key, (suppressed.get(key) ?? 0) + 1);
     return;

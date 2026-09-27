@@ -25,6 +25,8 @@ export interface FrameAlignAnchor {
   replay?: boolean;
   effective_at_ms?: number;
   server_now_ms?: number;
+  /** Server monotonic duration; never a cross-machine timestamp. */
+  anchor_age_ms?: number;
 }
 
 export class ExternalClock {
@@ -77,7 +79,8 @@ export class ExternalClock {
     if (!newerEpoch && this.scope &&
         (p.scene !== this.scope.scene || p.source_id !== this.scope.source_id)) return false;
     // Validate before mutating authority state.
-    const age = p.server_now_ms != null && p.effective_at_ms != null
+    const age = Number.isFinite(p.anchor_age_ms) && p.anchor_age_ms! >= 0
+      ? p.anchor_age_ms! : p.server_now_ms != null && p.effective_at_ms != null
       ? Math.max(0, Math.min(5000, p.server_now_ms - p.effective_at_ms)) : 0;
     if (!Number.isFinite(age)) return false;
     if (newerEpoch || changed) this.revision++;
@@ -87,7 +90,7 @@ export class ExternalClock {
     this.seq = p.seq ?? null;
     const rate = p.paused || p.frozen ? 0 : p.rate ?? (p.t_us === this.lastInput ? 0 : 1);
     this.anchor = { t: p.t_us, at: now - age, rate, received: now - age,
-      unusable: p.stale === true || (!!p.replay && (p.epoch == null || p.seq == null || p.server_now_ms == null || p.effective_at_ms == null)) };
+      unusable: p.stale === true || (!!p.replay && (p.epoch == null || p.seq == null || (p.anchor_age_ms == null && (p.server_now_ms == null || p.effective_at_ms == null)))) };
     this.lastInput = p.t_us;
     return true;
   }

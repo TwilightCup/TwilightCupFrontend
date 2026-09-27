@@ -1,3 +1,4 @@
+import { formatEpoch } from "@/utils/displayTime";
 /**
  * 选手端模拟器状态（仅开发期用）。
  *
@@ -44,7 +45,7 @@ const MAX_LOG = 200;
 const UTC_TIMESTAMP_INTERVAL_MS = 5000;
 
 function clock(): string {
-  return new Date().toLocaleTimeString("zh-CN", { hour12: false });
+  return formatEpoch(Date.now(), { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 export const usePlayerStore = defineStore("player", () => {
