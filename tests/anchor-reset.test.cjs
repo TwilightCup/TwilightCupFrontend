@@ -117,15 +117,35 @@ test('manual delay and successful resync do not trigger automatic fallback',()=>
   } finally {p.close();}
  }
 });
-test('publisher automatically targets wall minus 10s once latency reaches 15s with common coverage',()=>{
+test('publisher resets to initial delta plus 5s only above initial delta plus 15s',()=>{
  const p=boot(),realNow=Date.now;
  try {
   const t=p.engine.tUs.value;
-  Date.now=()=>t/1000+14999;p.heartbeat(1600);
+  Date.now=()=>t/1000+25000;p.heartbeat(1600);
   assert(!p.drain().some(m=>m.action==='frame_align_reset'));
-  Date.now=()=>t/1000+15000;p.heartbeat(2000);
+  Date.now=()=>t/1000+25001;p.heartbeat(2000);
   const req=p.drain().find(m=>m.action==='frame_align_reset');
-  assert(req);assert.equal(req.payload.target_t_us,Math.round(t+5e6));
+  assert(req);assert.equal(req.payload.target_t_us,Math.round(t+10001000));
   p.heartbeat(2400);assert(!p.drain().some(m=>m.action==='frame_align_reset'));
+ } finally {Date.now=realNow;p.close();}
+});
+test('manual delta 20 becomes the baseline; automatic target remains 25 across resets',()=>{
+ const p=boot(),realNow=Date.now;
+ try {
+  assert(p.adjust(20,105000));
+  let req=p.drain().find(m=>m.action==='frame_align_reset').payload;
+  let r={...reset(p,req.target_t_us),request_id:req.request_id};
+  authority(p,1,r);p.tick(1025);result(p,{...r,status:'completed'});p.tick(1050);p.drain();
+  for(let version=2;version<=3;version++) {
+   const t=p.engine.tUs.value,at=version*20000;
+   Date.now=()=>t/1000+25000;p.heartbeat(at);p.drain();
+   Date.now=()=>t/1000+35000;p.heartbeat(at+400);
+   assert(!p.drain().some(m=>m.action==='frame_align_reset'));
+   Date.now=()=>t/1000+35001;p.heartbeat(at+800);
+   req=p.drain().find(m=>m.action==='frame_align_reset').payload;
+   assert.equal(req.target_t_us,Math.round(t+10001000));
+   r={...reset(p,req.target_t_us),request_id:req.request_id,timeline_version:version,authority_epoch:version+1};
+   authority(p,version,r);p.tick(at+825);result(p,{...r,status:'completed'});p.tick(at+850);p.drain();
+  }
  } finally {Date.now=realNow;p.close();}
 });

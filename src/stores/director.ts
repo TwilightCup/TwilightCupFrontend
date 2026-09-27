@@ -248,6 +248,12 @@ export const useDirectorStore = defineStore("director", () => {
   let ackSent = false;
   const canAdjustAnchor = computed(() => connStatus.value === "open" && alignRole.value === "publisher" && !resetPending.value);
   function applyAnchorDelay(delta: number, onAccepted?: () => boolean, onFallback?: () => void): boolean {
+    if (!requestAnchorDelay(delta, onAccepted, onFallback)) return false;
+    // Only an explicit operator setting changes the initial deltaT.
+    autoCatchup = new AutoCatchup(delta);
+    return true;
+  }
+  function requestAnchorDelay(delta: number, onAccepted?: () => boolean, onFallback?: () => void): boolean {
     if (!canAdjustAnchor.value || !Number.isFinite(delta) || delta < 0 || delta > 86400) return false;
     const target = Math.round((Date.now() - delta * 1000) * 1000);
     if (!Number.isSafeInteger(target) || target <= 0) return false;
@@ -257,7 +263,6 @@ export const useDirectorStore = defineStore("director", () => {
       match_id: matchId.value, authority_epoch: authorityRole.epoch,
       timeline_version: timelineVersion.value, target_t_us: target,
     }))) { anchorAdjustment.value = "发送失败，请重试"; return false; }
-    if (delta >= 15) autoCatchup.hold();
     delayFallback = delta === 10 && onAccepted && onFallback ? { reload: onAccepted, notify: onFallback } : null;
     onResetAccepted = onAccepted ?? null; reloadFailed = false;
     requestedReset = id; resetPending.value = true; anchorAdjustment.value = "等待服务器接受";
@@ -314,7 +319,7 @@ export const useDirectorStore = defineStore("director", () => {
       delayFallback = null;
       if (fallback && !reloadFailed && p.status === "failed" && p.code === "PREPARE_TIMEOUT" &&
           p.owner_id === authorityRole.connectionId && authorityRole.publisher) {
-        if (applyAnchorDelay(20, fallback.reload)) {
+        if (requestAnchorDelay(20, fallback.reload)) {
           fallback.notify();
           anchorAdjustment.value = "10 秒延迟下画面未就绪，已改用 20 秒重试";
         }
@@ -328,7 +333,7 @@ export const useDirectorStore = defineStore("director", () => {
     if (alignHeartbeat) clearInterval(alignHeartbeat);
     alignHeartbeat = null;
     onResetAccepted = null; reloadFailed = false; delayFallback = null;
-    autoCatchup = new AutoCatchup();
+    autoCatchup = new AutoCatchup(autoCatchup.deltaSeconds);
     requestedReset = null; resetRecord = null; resetPending.value = false; timelineVersion.value = 0; ackSent = false;
     anchorAdjustment.value = "";
     awaitingPromotionAnchor = false;
@@ -395,11 +400,11 @@ export const useDirectorStore = defineStore("director", () => {
     lastAlignPublish = now;
     const playing = alignEngine.sync.state === "playing";
     // Keep decoded buffers: automatic catchup only moves the shared timeline.
-    // Do not fight an explicit 20-second fallback or repeat while preparing.
+    // Automatic resets preserve the initial deltaT; never compound the +5s margin.
     const wallMs = Date.now();
-    const targetUs = Math.round((wallMs - 10_000) * 1000);
+    const targetUs = Math.round((wallMs - autoCatchup.targetSeconds * 1000) * 1000);
     if (autoCatchup.check(t, wallMs, now, playing && canAdjustAnchor.value && !matchEnded.value && alignEngine.canAutoSeek(targetUs))) {
-      if (applyAnchorDelay(10)) return;
+      if (requestAnchorDelay(autoCatchup.targetSeconds)) return;
     }
     socket.send(send.directorCommand("frame_align", {
       timeline_version: timelineVersion.value, t_us: Math.floor(t), epoch: authorityRole.epoch, seq: ++authorityRole.sequence,

@@ -322,7 +322,7 @@ function resyncStreams(): void {
     alignEngine.restartStream("A", patch.refreshA);
     alignEngine.restartStream("B", patch.refreshB);
     return true;
-  }, () => { anchorDelta.value = 20; });
+  }, () => { /* Automatic fallback preserves the operator’s initial deltaT. */ });
 }
 
 /** 计时显示延迟（秒）：把比赛详情场景的计时器 / 偏差条回放对齐有延迟的
