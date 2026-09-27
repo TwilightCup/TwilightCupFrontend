@@ -783,7 +783,9 @@ export const useDirectorStore = defineStore("director", () => {
   function connect(token: string, matchId?: string, mode: "receiver" | "console" = "receiver"): void {
     alignEngine.setCandidateEnabled(mode === "console");
     tokenRef.value = token;
-    socket.connect(token, "DIRECTOR", matchId, false, mode === "console" ? "console" : "stage");
+    // Existing backend exclusive key is account + seat + match. Stage sockets
+    // reconnect as receivers after displacement; old consoles stay invalid.
+    socket.connect(token, "DIRECTOR", matchId, mode === "console", mode === "console" ? "console" : "stage");
   }
 
   function connectWithAuth(matchId?: string): void {

@@ -90,6 +90,13 @@ export class MatchSocket {
       }
       if (!msg || typeof msg.type !== "string") return;
       // 被同身份新连接顶掉（exclusive 接管）：终态，停止重连（消息仍照常分发）
+      if (msg.type === "displaced" && this.alignClient === "stage" && !this.exclusive) {
+        // Legacy exclusive scope also removes stage receivers. Rejoin after
+        // close without showing a terminal takeover mask or claiming ownership.
+        this.pending.length = 0;
+        this.setStatus("reconnecting");
+        return;
+      }
       if (msg.type === "displaced") {
         this.shouldReconnect = false;
         this.displaced = true;
@@ -113,7 +120,7 @@ export class MatchSocket {
       this.stopHeartbeat();
       this.ws = null;
       // displaced 消息未送达（竞态丢帧）时凭关闭码兜底判定「被顶掉」
-      if (ev.code === DISPLACED_CLOSE_CODE) {
+      if (ev.code === DISPLACED_CLOSE_CODE && !(this.alignClient === "stage" && !this.exclusive)) {
         this.shouldReconnect = false;
         this.displaced = true;
       }
