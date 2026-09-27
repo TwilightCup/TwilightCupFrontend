@@ -44,7 +44,7 @@ export class AlignEngine {
   get canCompete(): boolean { return this.candidateEnabled; }
   readonly authorityReady = ref(false);
   readonly pictureExpired = ref(false);
-  private lastPictureAt = -Infinity;
+  private lastPictureAt: Record<Side, number> = { A: -Infinity, B: -Infinity };
   private manualTarget: number | null = null;
   private resetPhase: "preparing" | "completed" | "failed" | null = null;
   private resumeFloor: number | null = null;
@@ -72,7 +72,21 @@ export class AlignEngine {
 
   refreshAuthority(now: number): void {
     this.authorityReady.value = this.publisher || this.external.hasFreshAuthority(now);
-    this.pictureExpired.value = now - this.lastPictureAt > 10_000;
+    this.refreshPictureExpiry(now);
+  }
+
+  private refreshPictureExpiry(now: number): void {
+    const sides = this.requiredSides.size ? [...this.requiredSides] : [...this.streams.keys()];
+    this.pictureExpired.value = !sides.length || sides.some(side => now - this.lastPictureAt[side] > 10_000);
+  }
+
+  private recordPictureProgress(now: number, sides: Side[], frames: { rtUs: number }[]): void {
+    for (let i = 0; i < sides.length; i++) {
+      const side = sides[i]!;
+      // A/B can advance on different ticks. Repeated frames never renew a side.
+      if (frames[i]!.rtUs > (this.sync.presentedRt[side] ?? -Infinity)) this.lastPictureAt[side] = now;
+    }
+    this.refreshPictureExpiry(now);
   }
 
   private streams = new Map<Side, FrameLockStream>();
@@ -348,7 +362,7 @@ export class AlignEngine {
     for (const stream of this.streams.values()) stream.stop();
     this.streams.clear(); this.refs.clear(); this.sourceUrls.clear();
     this.directorRenderer.clear();
-    this.lastPictureAt = -Infinity; this.pictureExpired.value = true;
+    this.lastPictureAt.A = this.lastPictureAt.B = -Infinity; this.pictureExpired.value = true;
     this.paintedCanvases.clear(); this.candidateProbe = null; this.sync.candidate = "off";
     this.manualTarget = null; this.resetPhase = null; this.resumeFloor = null; this.latestSeek = null; this.latestMissingAt = null;
     this.resetPresentedUs.value = null;
@@ -574,9 +588,7 @@ export class AlignEngine {
     }
     for (const commit of directorCommits) for (const canvas of commit()) this.paintedCanvases.add(canvas);
     const advanced = this.tUs.value == null || T > this.tUs.value;
-    if (frames.every((f, i) => f.rtUs > (this.sync.presentedRt[sides[i]!] ?? -Infinity))) {
-      this.lastPictureAt = now; this.pictureExpired.value = false;
-    }
+    this.recordPictureProgress(now, sides, frames);
     this.tUs.value = T; // committed presentation time; overlays must never use targetUs
     this.sync.state = "playing";
     this.sync.reason = "playing";
@@ -662,7 +674,7 @@ export class AlignEngine {
     }
     for (const commit of directorCommits) for (const canvas of commit()) this.paintedCanvases.add(canvas);
     this.tUs.value = this.publisher && this.resetPhase === "preparing" ? actual : T;
-    this.lastPictureAt = now; this.pictureExpired.value = false; this.latestMissingAt = null;
+    this.recordPictureProgress(now, sides, frames); this.latestMissingAt = null;
     this.resumeFloor = null; this.sync.state = "playing"; this.sync.reason = "playing";
     this.playback.speed = 1; this.sync.catchup = "normal";
     this.sync.pairErrorUs = Math.max(...frames.map(f => f.rtUs)) - Math.min(...frames.map(f => f.rtUs));

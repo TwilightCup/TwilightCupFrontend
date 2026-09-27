@@ -54,7 +54,7 @@ test('publisher never excludes a missing local side to advance the other',()=>{
 });
 test('past timeline retains last pixels and cannot replay backwards',()=>{
  const e=setup();e.setPublisher(false);const canvas={};e.paintedCanvases.add(canvas);
- e.sync.presentedRt.A=e.sync.presentedRt.B=70e6;e.lastPictureAt=0;
+ e.sync.presentedRt.A=e.sync.presentedRt.B=70e6;e.lastPictureAt.A=e.lastPictureAt.B=0;
  e.beginTimeline(60e6);e.external.accept({t_us:60e6,epoch:2,seq:1,rate:1},0);
  e.tickLoop(500);assert(e.hasCanvasImage(canvas));assert.equal(e.sync.state,'frozen');
  assert.equal(e.sync.presentedRt.A,70e6);assert(!e.pictureExpired.value);
@@ -62,7 +62,7 @@ test('past timeline retains last pixels and cannot replay backwards',()=>{
  assert.equal(e.sync.state,'playing');assert.equal(e.sync.presentedRt.A,71e6);
 });
 test('last frame expires only after ten seconds without actual frame advancement',()=>{
- const e=setup();e.setPublisher(false);const canvas={};e.paintedCanvases.add(canvas);e.lastPictureAt=100;
+ const e=setup();e.setPublisher(false);const canvas={};e.paintedCanvases.add(canvas);e.lastPictureAt.A=e.lastPictureAt.B=100;
  e.refreshAuthority(10100);assert(!e.pictureExpired.value);assert(e.hasCanvasImage(canvas));
  e.refreshAuthority(10101);assert(e.pictureExpired.value);assert(e.hasCanvasImage(canvas));
 });

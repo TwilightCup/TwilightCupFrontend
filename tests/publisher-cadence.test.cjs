@@ -47,13 +47,40 @@ for (const [a, b, phase] of [[30, 30, 6200], [30, 60, 7100], [60, 60, 12000]]) {
   });
 }
 
+test('alternating A/B frame updates remain visible for thirty seconds', () => {
+  const { e, tick } = playingEngine(30, 30, 16000);
+  const changes = { A: 0, B: 0 };
+  for (let now = 8; now <= 30000; now += 8) {
+    const before = { ...e.sync.presentedRt };
+    tick(now);
+    for (const side of ['A', 'B']) if (e.sync.presentedRt[side] > before[side]) changes[side]++;
+    assert.equal(e.pictureExpired.value, false, `unexpected waiting mask at ${now}ms`);
+  }
+  assert(changes.A >= 890 && changes.B >= 890);
+  assert(Math.abs(e.tUs.value - 95e6) < 50000);
+});
+
+test('repeating B while A advances cannot keep the shared picture alive', () => {
+  const { e, tick } = playingEngine(30, 30, 16000);
+  for (let now = 8; now <= 1000; now += 8) tick(now);
+  const b = e.streams.get('B'), oldB = e.sync.presentedRt.B;
+  b.queue.clear(); b.queue.add({ rtUs: oldB, isKey: false, handle: {} });
+  b.advance = () => {}; b.seek = () => {};
+  e.streams.get('A').seek = () => {};
+  const oldA = e.sync.presentedRt.A;
+  for (let now = 1008; now <= 11008; now += 8) tick(now);
+  assert(e.sync.presentedRt.A > oldA, 'A advances while B repeats');
+  assert.equal(e.sync.presentedRt.B, oldB);
+  assert.equal(e.pictureExpired.value, true);
+});
+
 test('frame interval retains committed T and picture age, but reset still waits for the old picture', () => {
   const { e, tick } = playingEngine(30, 30, 6200);
   e.sync.presentedRt.A = e.sync.presentedRt.B = 65e6 + 200000;
-  e.lastPictureAt = 0;
+  e.lastPictureAt.A = e.lastPictureAt.B = 0;
   tick(16); tick(32);
   assert.equal(e.tUs.value, 65e6);
-  assert.equal(e.lastPictureAt, 0);
+  assert.deepEqual(e.lastPictureAt, { A: 0, B: 0 });
   assert.equal(e.sync.state, 'playing');
   assert(e.sync.targetUs > 65e6 + 16000);
   e.beginTimeline(64e6);
