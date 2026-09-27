@@ -6,7 +6,7 @@ const load = createLoader();
 const { AlignEngine } = load('src/scenes/align/useFrameAlign.ts');
 const { FrameQueue } = load('src/scenes/align/frameQueue.ts');
 
-function createPage({ id, kind = 'stage', offset = 0 }) {
+function createPage({ id, kind = 'stage', offset = 0, api = {} }) {
   let now = 0, socket;
   const sent = [], timers = new Map();
   let timerId = 0;
@@ -24,6 +24,7 @@ function createPage({ id, kind = 'stage', offset = 0 }) {
   for (const side of ['A', 'B']) {
     const queue = new FrameQueue();
     engine.streams.set(side, { queue, cursor: null, seeks: 0, available: true,
+      stop() { queue.clear(); },
       coverage: () => ({ from: 0, to: 110e6 + now * 1000 }), canSeek: () => true,
       seek(t) { this.cursor = t; this.seeks++; queue.clear(); return true; },
       advance(t) {
@@ -46,7 +47,7 @@ function createPage({ id, kind = 'stage', offset = 0 }) {
   }
   const overrides = Object.fromEntries(Object.entries({
     'src/ws/socket.ts': { MatchSocket: Socket },
-    'src/api/client.ts': { api: { getMyMatch: async () => ({}), getMatchLog: async () => { throw new Error('no match log'); } } },
+    'src/api/client.ts': { api: { getMyMatch: async () => ({}), getMatchLog: async () => { throw new Error('no match log'); }, ...api } },
     'src/stores/auth.ts': { useAuthStore: () => ({ token: 'test-token' }) },
     'src/locales.ts': { t: key => key },
     'src/scenes/composables/useDirectorConfig.ts': { mergeStoredConfig() {} },

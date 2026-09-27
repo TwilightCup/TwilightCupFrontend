@@ -1,3 +1,5 @@
+import { mergeMessageHistory } from "@/utils/mergeMessageHistory";
+import { ScoreHistory } from "@/scenes/align/scoreHistory";
 import { AutoCatchup } from "@/scenes/align/autoCatchup";
 /**
  * 导播端状态：控制台与 OBS 叠加层共用。
@@ -58,6 +60,7 @@ export interface DirectorRound {
 }
 
 interface LogLine {
+  id: string;
   ts: string;
   kind: string;
   text: string;
@@ -137,6 +140,9 @@ export const useDirectorStore = defineStore("director", () => {
   const playerA = ref<PlayerLive>(freshPlayer());
   const playerB = ref<PlayerLive>(freshPlayer());
 
+  const scoreHistory = new ScoreHistory();
+  const scoreRevision = ref(0);
+  let metaGeneration = 0;
   const winsA = ref(0);
   const winsB = ref(0);
   const threshold = ref(0);
@@ -167,6 +173,8 @@ export const useDirectorStore = defineStore("director", () => {
   const metaReady = ref(false);
 
   const messages = ref<LogLine[]>([]);
+  let messageSeq = 0;
+  let chatGeneration = 0;
 
   /** 聊天行（时间正序追加；仅实时 WS 流，无历史回填——场景页接入即从当下开始） */
   const chatLines = ref<DirectorChatLine[]>([]);
@@ -226,11 +234,16 @@ export const useDirectorStore = defineStore("director", () => {
     void historyRevision.value;
     return wallMs == null ? null : history.at(wallMs);
   }
-  const presentation = computed(() => {
+  const presentationWallMs = computed(() => {
     const T = alignEngine.tUs.value;
     const frames = Object.values(alignEngine.sync.presentedRt).filter((x): x is number => x != null);
-    const wallMs = T == null ? null : Math.min(T, ...frames) / 1000;
-    return presentationAt(wallMs);
+    return T == null ? null : Math.min(T, ...frames) / 1000;
+  });
+  const presentation = computed(() => presentationAt(presentationWallMs.value));
+  const presentedScore = computed(() => {
+    void scoreRevision.value;
+    const wallMs = presentationWallMs.value;
+    return wallMs == null ? null : scoreHistory.at(wallMs);
   });
 
   const authorityRole = new AuthorityRole();
@@ -431,7 +444,7 @@ export const useDirectorStore = defineStore("director", () => {
   );
 
   function log(kind: string, text: string, ts?: string): void {
-    messages.value.unshift({ ts: ts ?? clock(), kind, text });
+    messages.value.unshift({ id: `live-${messageSeq++}`, ts: ts ?? clock(), kind, text });
     if (messages.value.length > MAX_LOG) messages.value.length = MAX_LOG;
   }
 
@@ -453,6 +466,8 @@ export const useDirectorStore = defineStore("director", () => {
       case "auth_ok":
         if (matchId.value !== msg.match_id || accountId.value !== msg.account_id) {
           history.clear();
+          scoreHistory.clear(); scoreRevision.value++;
+          messages.value = []; chatLines.value = [];
           historyRevision.value++;
           if (matchId.value) alignEngine.resetSession();
           phase.value = MatchPhase.IDLE; matchWinner.value = null; lastResultAt.value = null;
@@ -484,6 +499,7 @@ export const useDirectorStore = defineStore("director", () => {
         utcA.value = null;
         utcB.value = null;
         void loadMeta();
+        void loadChatHistory();
         break;
       case "auth_error":
         authError.value = msg.msg;
@@ -605,6 +621,8 @@ export const useDirectorStore = defineStore("director", () => {
         lastResultAt.value = Date.now();
         break;
       case "cumulative_score":
+        scoreHistory.add(Date.now(), { winsA: msg.wins_a, winsB: msg.wins_b });
+        scoreRevision.value++;
         winsA.value = msg.wins_a;
         winsB.value = msg.wins_b;
         threshold.value = msg.threshold;
@@ -698,13 +716,34 @@ export const useDirectorStore = defineStore("director", () => {
     }
   }
 
+  async function loadChatHistory(): Promise<void> {
+    const mid = matchId.value, token = tokenRef.value, generation = ++chatGeneration;
+    if (!mid || !token) return;
+    try {
+      const rows = await api.getChatLog(mid, token);
+      if (generation !== chatGeneration || mid !== matchId.value || token !== tokenRef.value) return;
+      const restored: LogLine[] = rows.filter(row => row.match_id === mid).map(row => ({
+        id: row.id, ts: row.ts, kind: row.is_system ? "system" : "chat",
+        text: row.is_system ? row.text : `${row.sender_name}：${row.text}`,
+      }));
+      messages.value = mergeMessageHistory(messages.value, restored, row => JSON.stringify([row.kind, row.text]))
+        .reverse().slice(0, MAX_LOG);
+    } catch {
+      // Keep live messages if history is temporarily unavailable; reconnect retries.
+    }
+  }
+
   async function loadMeta(): Promise<void> {
     if (!matchId.value || !tokenRef.value) return;
+    const mid = matchId.value, token = tokenRef.value, generation = ++metaGeneration;
+    const requestedAt = Date.now();
+    const current = () => generation === metaGeneration && matchId.value === mid && tokenRef.value === token;
     // 1) /me/matches/{id}：首回合前即可用（match_log 要首回合后才生成），
     //    尽早补比赛名/状态/赛事归属（Coming Soon 场景与舞台 URL 依赖），
     //    并提前回填 BO/胜点（顶栏比分指示器在首个判决前就有据可依）。
     try {
-      const m = await api.getMyMatch(matchId.value, tokenRef.value);
+      const m = await api.getMyMatch(mid, token);
+      if (!current()) return;
       matchName.value = m.name || matchName.value;
       matchStatus.value = m.status;
       tournamentId.value = m.tournament_id || tournamentId.value;
@@ -717,7 +756,8 @@ export const useDirectorStore = defineStore("director", () => {
     }
     // 2) match_log：BO/胜点/计分制等（首回合前 404 忽略）。
     try {
-      const doc = await api.getMatchLog(matchId.value, tokenRef.value);
+      const doc = await api.getMatchLog(mid, token);
+      if (!current()) return;
       const info = doc.initial_info;
       matchName.value = info.name ?? "";
       boFormat.value = info.bo_format ?? 0;
@@ -726,10 +766,18 @@ export const useDirectorStore = defineStore("director", () => {
         (info.scoring_method as "FASTEST" | "AVERAGE" | undefined) ?? "";
       countdownDelay.value = info.start_countdown_delay ?? null;
       tournamentId.value = doc.tournament_id ?? "";
+      // Existing log endpoints also work for authenticated stage viewers.
+      // All rounds must arrive before applying totals; partial results are unsafe.
+      const records = await Promise.all(doc.round_ids.map((_, index) => api.getRoundDetail(mid, index + 1, token)));
+      if (!current()) return;
+      if (records.some((r, index) => r.match_id !== mid || r.id !== doc.round_ids[index])) return;
+      const restored = scoreHistory.restore(records, Date.now(), requestedAt);
+      winsA.value = restored.winsA; winsB.value = restored.winsB;
+      scoreRevision.value++;
     } catch {
       // 首回合前 match_log 尚未生成（404），忽略
     }
-    metaReady.value = true;
+    if (current()) metaReady.value = true;
   }
 
   function connect(token: string, matchId?: string, mode: "receiver" | "console" = "receiver"): void {
@@ -924,6 +972,7 @@ export const useDirectorStore = defineStore("director", () => {
     currentRound,
     playerA,
     playerB,
+    presentedScore,
     winsA,
     winsB,
     threshold,

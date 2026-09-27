@@ -81,8 +81,8 @@ const eventName = computed(
 const matchTitle = computed(() => props.mock?.matchName ?? director.matchName);
 const nameA = computed(() => props.mock?.nameA ?? director.nameOf("A"));
 const nameB = computed(() => props.mock?.nameB ?? director.nameOf("B"));
-const winsA = computed(() => props.mock?.winsA ?? (alignEngine.enabled.value ? director.presentation?.winsA ?? 0 : director.winsA));
-const winsB = computed(() => props.mock?.winsB ?? (alignEngine.enabled.value ? director.presentation?.winsB ?? 0 : director.winsB));
+const winsA = computed(() => props.mock?.winsA ?? (alignEngine.enabled.value ? director.presentedScore?.winsA ?? 0 : director.winsA));
+const winsB = computed(() => props.mock?.winsB ?? (alignEngine.enabled.value ? director.presentedScore?.winsB ?? 0 : director.winsB));
 
 /** 指示器格数：WS threshold > REST win_threshold > 由 BO 推导；均未知则隐藏 */
 const pipCount = computed(() => {

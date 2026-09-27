@@ -1,3 +1,4 @@
+import { mergeMessageHistory } from "@/utils/mergeMessageHistory";
 /**
  * 比赛中央状态：WebSocket 连接、阶段/比分/选手实时状态、聊天、回合历史。
  *
@@ -530,18 +531,10 @@ export const useMatchStore = defineStore("match", () => {
   }
 
   function ingestChatLog(log: ChatMessage[]): void {
-    if (log.length === 0) return;
-    if (messages.value.length === 0) {
-      messages.value = log.map(toLine);
-      for (const m of log) knownIds.add(m.id);
-    } else {
-      for (const m of log) {
-        if (!knownIds.has(m.id)) {
-          knownIds.add(m.id);
-          messages.value.push(toLine(m));
-        }
-      }
-    }
+    messages.value = mergeMessageHistory(messages.value, log.map(toLine),
+      row => JSON.stringify([row.kind, row.senderName, row.text]));
+    knownIds.clear();
+    for (const row of messages.value) knownIds.add(row.id);
   }
 
   function toLine(m: ChatMessage): ChatLine {
@@ -552,6 +545,9 @@ export const useMatchStore = defineStore("match", () => {
       text: m.text,
       ts: m.ts,
       systemKind: m.is_system ? "info" : undefined,
+      seat: m.sender_id && m.sender_id === players.A.accountId ? "PLAYER_A"
+        : m.sender_id && m.sender_id === players.B.accountId ? "PLAYER_B"
+        : m.sender_role === 2 ? "REFEREE" : undefined,
     };
   }
 
@@ -591,16 +587,16 @@ export const useMatchStore = defineStore("match", () => {
     const sid = matchId.value;
     historyLoading.value = true;
     try {
-      // match_log + 全部回合明细 + 比分 + 图池元数据
-      await refreshRounds();
-      if (!isCurrentSession(epoch, sid)) return;
-      try {
-        const chat = await api.getChatLog(sid, auth.token);
-        if (!isCurrentSession(epoch, sid)) return;
-        ingestChatLog(chat);
-      } catch {
-        // 聊天日志拉取失败不阻断
-      }
+      // Chat must not wait for every round request (or a stalled round endpoint).
+      await Promise.all([
+        refreshRounds(),
+        (async () => {
+          try {
+            const chat = await api.getChatLog(sid, auth.token!);
+            if (isCurrentSession(epoch, sid)) ingestChatLog(chat.filter(row => row.match_id === sid));
+          } catch { /* Keep live messages; reconnect retries history. */ }
+        })(),
+      ]);
     } finally {
       if (isCurrentSession(epoch, sid)) historyLoading.value = false;
     }
