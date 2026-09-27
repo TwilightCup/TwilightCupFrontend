@@ -7,7 +7,7 @@ test('fresh stage restores score at delayed T and director message log without n
  let resolveChat;const chat=new Promise(resolve=>resolveChat=resolve);
  const p=createPage({id:'stage',api:{
   getMatchLog:async()=>({initial_info:{win_threshold:3},round_ids:['r1','r2']}),
-  getRoundDetail:async(_,n)=>({id:`r${n}`,match_id:'match',counted:true,verdict:n===1?1:2,ended_at:new Date(n*1000).toISOString()}),
+  getRoundDetail:async(_,n)=>({id:`r${n}`,round_no:n,match_id:'match',counted:true,verdict:n===1?1:2,ended_at:new Date(n*1000).toISOString()}),
   getChatLog:()=>chat,
  }});
  try {
@@ -29,7 +29,7 @@ test('delayed old-match history cannot overwrite a newly selected match',async()
  try {
   p.deliver(auth);await flush();p.deliver({...auth,match_id:'next'});await flush();
   oldChat([{id:'old',match_id:'match',is_system:true,text:'old',ts:new Date().toISOString()}]);
-  oldRounds({id:'r1',match_id:'match',counted:true,verdict:1,ended_at:new Date(1000).toISOString()});
+  oldRounds({id:'r1',round_no:1,match_id:'match',counted:true,verdict:1,ended_at:new Date(1000).toISOString()});
   await flush();assert.equal(p.store.winsA,0);assert.equal(p.store.messages.length,0);
  } finally {p.close();}
 });

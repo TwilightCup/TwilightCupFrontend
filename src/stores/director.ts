@@ -1,4 +1,5 @@
 import { mergeMessageHistory } from "@/utils/mergeMessageHistory";
+import { loadScoreRounds } from "@/scenes/align/loadScoreRounds";
 import { ScoreHistory } from "@/scenes/align/scoreHistory";
 import { AutoCatchup } from "@/scenes/align/autoCatchup";
 /**
@@ -243,7 +244,7 @@ export const useDirectorStore = defineStore("director", () => {
   const presentedScore = computed(() => {
     void scoreRevision.value;
     const wallMs = presentationWallMs.value;
-    return wallMs == null ? null : scoreHistory.at(wallMs);
+    return wallMs == null ? { winsA: winsA.value, winsB: winsB.value } : scoreHistory.at(wallMs);
   });
 
   const authorityRole = new AuthorityRole();
@@ -768,9 +769,8 @@ export const useDirectorStore = defineStore("director", () => {
       tournamentId.value = doc.tournament_id ?? "";
       // Existing log endpoints also work for authenticated stage viewers.
       // All rounds must arrive before applying totals; partial results are unsafe.
-      const records = await Promise.all(doc.round_ids.map((_, index) => api.getRoundDetail(mid, index + 1, token)));
+      const records = await loadScoreRounds(mid, doc.round_ids, number => api.getRoundDetail(mid, number, token));
       if (!current()) return;
-      if (records.some((r, index) => r.match_id !== mid || r.id !== doc.round_ids[index])) return;
       const restored = scoreHistory.restore(records, Date.now(), requestedAt);
       winsA.value = restored.winsA; winsB.value = restored.winsB;
       scoreRevision.value++;

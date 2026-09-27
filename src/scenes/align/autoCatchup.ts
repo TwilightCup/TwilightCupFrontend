@@ -3,7 +3,7 @@ export class AutoCatchup {
   private armed = true;
   private lastAttempt = -Infinity;
 
-  constructor(readonly deltaSeconds = 10) {}
+  constructor(readonly deltaSeconds = 15) {}
 
   get targetSeconds(): number { return this.deltaSeconds + 5; }
 
