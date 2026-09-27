@@ -105,9 +105,9 @@ test('publisher resets to initial delta plus 5s only above initial delta plus 15
  const p=boot(),realNow=Date.now;
  try {
   const t=p.engine.tUs.value;
-  Date.now=()=>t/1000+35000;p.heartbeat(1600);
+  Date.now=()=>t/1000+25000;p.heartbeat(1600);
   assert(!p.drain().some(m=>m.action==='frame_align_reset'));
-  Date.now=()=>t/1000+35001;p.heartbeat(2000);
+  Date.now=()=>t/1000+25001;p.heartbeat(2000);
   const req=p.drain().find(m=>m.action==='frame_align_reset');
   assert(req);assert.equal(req.payload.target_t_us,Math.round(t+10001000));
   p.heartbeat(2400);assert(!p.drain().some(m=>m.action==='frame_align_reset'));

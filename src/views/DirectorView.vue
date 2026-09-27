@@ -215,7 +215,7 @@ const showB = computed({
 const previewAlignedA = computed(() => !!cfgConfig.alignA && !!cfgConfig.hlsA);
 const previewAlignedB = computed(() => !!cfgConfig.alignB && !!cfgConfig.hlsB);
 const showStreamDebug = ref(true);
-const anchorDelta = ref<number | undefined>(20);
+const anchorDelta = ref<number | undefined>(10);
 const wallNow = ref(Date.now());
 let wallTimer: ReturnType<typeof setInterval> | undefined;
 const displayedAnchor = computed(() => director.alignRole === "publisher"
