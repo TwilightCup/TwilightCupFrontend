@@ -40,17 +40,24 @@ function avc1Codec(avcC: Uint8Array): string {
   const h = (b: number) => b.toString(16).padStart(2, "0");
   return `avc1.${h(avcC[1]!)}${h(avcC[2]!)}${h(avcC[3]!)}`;
 }
-/** hvcC → `hvc1.<profile>.<compat>.L<level>.B<constraints>`（尽力，失败回退空串） */
+/** hvcC → ISO/IEC 14496-15 Annex E codec string; retain the stream's actual profile/tier. */
 function hvc1Codec(hvcC: Uint8Array): string | null {
-  try {
-    const profile = hvcC[1]!; // general_profile_idc
-    const compat = (hvcC[2]! << 16) | (hvcC[3]! << 8) | hvcC[4]!;
-    const level = hvcC[12]!; // general_level_idc(high 8 bit)
-    const compatStr = compat ? `0x${compat.toString(16).padStart(6, "0").replace(/^0+/, "")}` : "";
-    return `hvc1.1.${profile}${compatStr ? `.${compatStr}` : ""}.L${level}`;
-  } catch {
-    return null;
+  if (hvcC.length < 23 || hvcC[0] !== 1) return null;
+  const profileByte = hvcC[1]!;
+  const space = ["", "A", "B", "C"][profileByte >>> 6]!;
+  const profile = profileByte & 0x1f;
+  const tier = profileByte & 0x20 ? "H" : "L";
+  // Compatibility flags occupy four bytes; the codec string reverses all 32 bits.
+  let compatibility = 0;
+  for (let bit = 0; bit < 32; bit++) {
+    const flag = (hvcC[2 + (bit >>> 3)]! >>> (7 - (bit & 7))) & 1;
+    compatibility = (compatibility | (flag << bit)) >>> 0;
   }
+  const hex = (n: number) => n.toString(16).toUpperCase();
+  const constraints = Array.from(hvcC.subarray(6, 12));
+  while (constraints.at(-1) === 0) constraints.pop();
+  const suffix = constraints.length ? `.${constraints.map(hex).join(".")}` : "";
+  return `hvc1.${space}${profile}.${hex(compatibility)}.${tier}${hvcC[12]}${suffix}`;
 }
 
 /** 判断样本封装：起始码 00 00 00 01 → Annex-B（喂解码时去掉 description）；否则 AVCC */
@@ -194,6 +201,8 @@ export class FrameLockStream {
   private codec: Codec = "h264";
   private description: Uint8Array | null = null;
   private ready = false;
+  private decodeRetryAt = 0;
+  private configurationFailures = 0;
   private lastErr: unknown = null;
   private opts: FrameLockStreamOptions;
   private rawSpanUs: number;
@@ -340,12 +349,18 @@ export class FrameLockStream {
     if (this.stopped || generation !== this.generation) return;
     this.pendingConfigure = false;
     if (ok) {
+      this.configurationFailures = 0;
+      this.decodeRetryAt = 0;
       this.mode = "aligned";
       this.ready = true;
     } else {
+      // Candidate probing/seek must not repeatedly recreate a rejected decoder.
+      // Retry with bounded backoff so browser/config changes can still recover.
+      this.configurationFailures = Math.min(4, this.configurationFailures + 1);
+      this.decodeRetryAt = performance.now() + Math.min(30_000, 5000 * 2 ** (this.configurationFailures - 1));
       this.mode = "off";
       this.ready = false;
-      this.needKey = false; // rejected configuration is terminal until explicit recovery
+      this.needKey = false; // resume through seek after the retry deadline
     }
     this.opts.onModeChange?.(this.mode);
   }
@@ -453,7 +468,7 @@ export class FrameLockStream {
 
   private trimRaw(frontUs: number): void {
     // Only evict already-consumed GOPs, never the GOP required to decode the target.
-    const protectedKey = this.targetUs == null ? 0 : Math.max(0, this.findStartKeyframe(this.targetUs));
+    const protectedKey = this.targetUs == null || this.decPos === 0 ? 0 : Math.max(0, this.findStartKeyframe(this.targetUs));
     const limit = Math.min(this.decPos, protectedKey);
     const maxBytes = this.opts.maxRawBytes ?? 512 * 1024 * 1024;
     const maxSamples = this.opts.maxRawSamples ?? 72_000;
@@ -473,6 +488,7 @@ export class FrameLockStream {
   }
 
   canSeek(targetUs: number): boolean {
+    if (performance.now() < this.decodeRetryAt) return false;
     const coverage = this.coverage();
     const key = this.findStartKeyframe(targetUs);
     return !this.stopped && !!coverage && targetUs >= coverage.from && targetUs <= coverage.to &&
@@ -521,7 +537,7 @@ export class FrameLockStream {
   }
 
   private pump(targetUs: number): void {
-    if (this.stopped || this.pendingConfigure) return;
+    if (this.stopped || this.pendingConfigure || performance.now() < this.decodeRetryAt) return;
     if (!this.encapsulation) {
       const start = this.findStartKeyframe(targetUs);
       if (start < 0) return;
