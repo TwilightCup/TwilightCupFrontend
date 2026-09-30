@@ -629,6 +629,12 @@ const messages = {
 
   // ── 图池管理（MappoolsView） ─────────────────────────────────────────
   "admin.mappools.title": "图池管理",
+  "admin.mappools.previewBtn": "预览",
+  "admin.mappools.previewTitle": "图池预览",
+  "admin.mappools.previewHint": "只读展示已保存的图池内容；标签以保存值为准，已有比赛的图池快照可能不同。",
+  "admin.mappools.backToList": "返回图池列表",
+  "admin.mappools.persistedTags": "已保存标签",
+  "admin.mappools.previewLoadError": "无法加载图池，可能已被删除或无访问权限，请尝试刷新。",
   "admin.mappools.count": "共 {n} 个图池",
   "admin.mappools.empty": "暂无图池，点击右上角「新建图池」创建",
   "admin.mappools.createBtn": "新建图池",

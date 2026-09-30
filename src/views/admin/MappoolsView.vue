@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { ElMessageBox } from "element-plus";
+import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { useAdminStore } from "@/stores/admin";
 import type { MappoolLibItem } from "@/api/types";
@@ -11,6 +12,7 @@ import CustomTagsDialog from "@/components/admin/CustomTagsDialog.vue";
 
 const { t } = useI18n();
 const admin = useAdminStore();
+const router = useRouter();
 
 const dialogOpen = ref(false);
 const customTagsOpen = ref(false);
@@ -102,8 +104,9 @@ onMounted(() => {
       <el-table-column :label="$t('common.createdAt')" width="170">
         <template #default="{ row }">{{ dateTime(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column :label="$t('common.actions')" width="140" fixed="right">
+      <el-table-column :label="$t('common.actions')" width="200" fixed="right">
         <template #default="{ row }">
+          <el-button link type="primary" @click="router.push({ name: 'admin-mappool-preview', params: { id: row.id } })">{{ $t('admin.mappools.previewBtn') }}</el-button>
           <el-button link type="primary" @click="openEdit(row)">{{ $t('common.edit') }}</el-button>
           <el-button link type="danger" @click="onRemove(row)">{{ $t('common.delete') }}</el-button>
         </template>

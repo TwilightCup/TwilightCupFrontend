@@ -625,6 +625,12 @@ const messages: MessageSchema = {
 
   // ── mappools ─────────────────────────────────────────────────────────
   "admin.mappools.title": "Mappools",
+  "admin.mappools.previewBtn": "Preview",
+  "admin.mappools.previewTitle": "Mappool preview",
+  "admin.mappools.previewHint": "Read-only preview of the saved mappool. Tags are shown as saved; existing match snapshots may differ.",
+  "admin.mappools.backToList": "Back to mappools",
+  "admin.mappools.persistedTags": "Saved tags",
+  "admin.mappools.previewLoadError": "Unable to load the mappool. It may have been deleted or you may not have access. Try refreshing.",
   "admin.mappools.count": "{n} mappools",
   "admin.mappools.empty": "No mappools yet — click \"New mappool\" in the top right to create one",
   "admin.mappools.createBtn": "New mappool",

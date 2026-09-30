@@ -10,7 +10,9 @@ const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
 
-const activeMenu = computed(() => route.path);
+const activeMenu = computed(() =>
+  route.name === "admin-mappool-preview" ? "/admin/mappools" : route.path,
+);
 
 function logout(): void {
   auth.logout();

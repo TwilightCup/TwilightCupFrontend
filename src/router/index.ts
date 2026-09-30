@@ -64,6 +64,11 @@ const router = createRouter({
           component: () => import("@/views/admin/MappoolsView.vue"),
         },
         {
+          path: "mappools/:id/preview",
+          name: "admin-mappool-preview",
+          component: () => import("@/views/admin/MappoolPreviewView.vue"),
+        },
+        {
           path: "levels",
           name: "admin-levels",
           component: () => import("@/views/admin/LevelsView.vue"),
