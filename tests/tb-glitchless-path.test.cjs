@@ -8,33 +8,51 @@ const vue = require('vue');
 const { createPinia, disposePinia } = require('pinia');
 const createLoader = require('./load-ts.cjs');
 
-// Compile and mount the actual editor, including its checkbox v-model handler.
-function mountEditor(load, pick, categoryName) {
-  const filename = 'src/components/admin/MappoolPickEditor.vue';
-  const { descriptor } = parse(fs.readFileSync(filename, 'utf8'), { filename });
-  const script = compileScript(descriptor, { id: 'tb-test', inlineTemplate: true });
-  const code = ts.transpileModule(script.content, {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-  }).outputText;
-  const mod = { exports: {} };
-  new Function('require', 'module', 'exports', code)((id) => {
-    if (id.endsWith('.vue')) return { default: { render: () => null } };
-    if (id === 'vue-i18n') return { useI18n: () => ({ t: key => key }) };
-    return id.startsWith('@/') ? load(`src/${id.slice(2)}.ts`) : require(id);
-  }, mod, mod.exports);
-  const node = () => ({ children: [], style: {} });
+// Compile the real SFCs; replace only unrelated mapping UI and Element Plus controls.
+function mountComponent(load, filename, props) {
+  function compileComponent(file) {
+    const { descriptor } = parse(fs.readFileSync(file, 'utf8'), { filename: file });
+    const script = compileScript(descriptor, { id: 'tb-test', inlineTemplate: true });
+    const code = ts.transpileModule(script.content, {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    }).outputText;
+    const mod = { exports: {} };
+    new Function('require', 'module', 'exports', code)((id) => {
+      if (id.endsWith('.vue')) {
+        if (id.includes('SpeedrunMappingEditor')) return { default: { render: () => null } };
+        return compileComponent(id.startsWith('@/')
+          ? path.resolve('src', id.slice(2)) : path.resolve(path.dirname(file), id));
+      }
+      if (id === 'vue-i18n') return { useI18n: () => ({ t: key => key }) };
+      return id.startsWith('@/') ? load(`src/${id.slice(2)}.ts`) : require(id);
+    }, mod, mod.exports);
+    return mod.exports;
+  }
+  const node = (text = '') => ({ children: [], style: {}, props: {}, text });
   const renderer = vue.createRenderer({
     createElement: node, createText: node, createComment: node,
-    insert(child, parent) { parent.children.push(child); },
-    remove() {}, setText() {}, setElementText() {}, patchProp() {},
-    parentNode: () => null, nextSibling: () => null,
+    insert(child, parent, anchor) {
+      if (child.parent) child.parent.children = child.parent.children.filter(n => n !== child);
+      child.parent = parent;
+      const index = anchor ? parent.children.indexOf(anchor) : -1;
+      if (index < 0) parent.children.push(child);
+      else parent.children.splice(index, 0, child);
+    },
+    remove(child) { child.parent.children = child.parent.children.filter(n => n !== child); },
+    setText(child, text) { child.text = text; },
+    setElementText(child, text) { child.text = text; },
+    patchProp(child, key, previous, value) { child.props[key] = value; },
+    parentNode: child => child.parent,
+    nextSibling: child => child.parent?.children[child.parent.children.indexOf(child) + 1] ?? null,
   });
   let checkbox;
-  const app = renderer.createApp(mod.exports.default, { pick, index: 0, categoryName });
+  const component = compileComponent(filename).default;
+  const app = renderer.createApp({ render: () => vue.h(component, props) });
   app.config.globalProperties.$t = key => key;
-  const passthrough = { inheritAttrs: false, setup: (_, { slots }) => () => slots.default?.() };
-  for (const name of ['el-button', 'el-icon', 'el-form-item', 'el-select', 'el-tag', 'el-button-group']) app.component(name, passthrough);
+  const passthrough = { inheritAttrs: false, setup: (_, { slots, attrs }) => () => vue.h('div', attrs, slots.default?.()) };
+  for (const name of ['el-button', 'el-icon', 'el-form-item', 'el-select', 'el-tag', 'el-button-group', 'el-form']) app.component(name, passthrough);
   for (const name of ['el-input', 'el-option', 'el-input-number']) app.component(name, { render: () => null });
+  app.component('el-dialog', { inheritAttrs: false, emits: ['update:modelValue'], setup: (_, { slots }) => () => [slots.default?.(), slots.footer?.()] });
   app.component('el-checkbox', {
     props: ['modelValue'], emits: ['update:modelValue'],
     setup(props, { emit }) {
@@ -42,8 +60,20 @@ function mountEditor(load, pick, categoryName) {
       return () => null;
     },
   });
-  app.mount(node());
-  return { checkbox, unmount: () => app.unmount() };
+  const root = node();
+  app.mount(root);
+  const text = n => [n.text, ...n.children.map(text)].join(' ');
+  function find(predicate, n = root) {
+    if (predicate(n)) return n;
+    for (const child of n.children) { const found = find(predicate, child); if (found) return found; }
+  }
+  return { get checkbox() { return checkbox; }, text: () => text(root), nodeText: text, find, unmount: () => app.unmount() };
+}
+
+function mountEditor(load, pick, categoryName) {
+  return mountComponent(load, 'src/components/admin/MappoolPickEditor.vue', {
+    pick, index: 0, categoryName, savedTag: pick.tag ?? null,
+  });
 }
 
 for (const category of ['ML', 'IL', 'CP', 'TB']) {
@@ -124,3 +154,114 @@ for (const category of ['ML', 'IL', 'CP', 'TB']) {
     }
   });
 }
+
+function editorLoader() {
+  return createLoader({
+    [path.resolve('src/locales.ts')]: { t: key => key },
+    [path.resolve('src/stores/admin.ts')]: { useAdminStore: () => ({
+      loadLevels() {}, loadCustomTags() {}, customTags: [], levels: [],
+      levelById: new Map(), levelByName: new Map(),
+    }) },
+  });
+}
+
+for (const initialName of ['Any% Glitchless', 'Any%']) {
+  test(`TB auto-check visibly requires saving: loaded name ${initialName}`, async () => {
+    const pick = vue.reactive({
+      code: 'TB', name: initialName, type: 1, category: 'TB', tag: null,
+      collection: { raw: { name: initialName, levels: ['Intro'] } },
+    });
+    const editor = mountEditor(editorLoader(), pick, 'TB');
+    try {
+      if (initialName === 'Any%') {
+        assert(!editor.text().includes('pickEditor.glitchlessAutoUnsaved'));
+        pick.name = 'Any% Glitchless';
+        await vue.nextTick();
+      }
+      assert.equal(pick.tag, 'Glitchless');
+      assert.equal(editor.checkbox.props.modelValue, true);
+      assert(editor.text().includes('pickEditor.glitchlessAutoUnsaved'),
+        'auto-checked tag must visibly say it is not saved');
+      editor.checkbox.toggle(false);
+      await vue.nextTick();
+      assert.equal(pick.tag, null);
+      assert(!editor.text().includes('pickEditor.glitchlessAutoUnsaved'));
+    } finally { editor.unmount(); }
+  });
+}
+
+test('persisted TB Glitchless does not show an unsaved auto-check warning', () => {
+  const pick = vue.reactive({
+    code: 'TB', name: 'Any% Glitchless', type: 1, category: 'TB', tag: 'Glitchless',
+    collection: { raw: { name: 'Any% Glitchless', levels: ['Intro'] } },
+  });
+  const editor = mountEditor(editorLoader(), pick, 'TB');
+  try {
+    assert.equal(editor.checkbox.props.modelValue, true);
+    assert(!editor.text().includes('pickEditor.glitchlessAutoUnsaved'));
+  } finally { editor.unmount(); }
+});
+
+
+test('legacy TB warning survives category switches; save and reopen clears it', async () => {
+  let stored = {
+    id: 'alpha', name: 'Alpha Test', mappool: { categories: [
+      { name: 'TB', picks: [{ code: 'TB', name: 'Any% Glitchless', type: 1, category: 'TB', tag: null,
+        collection: { raw: { name: 'Any% Glitchless', levels: ['Intro'] } } }] },
+      { name: 'ML', picks: [{ code: 'ML1', name: 'Any%', type: 1, category: 'ML', tag: null,
+        collection: { raw: { name: 'Any%', levels: ['Intro'] } } }] },
+    ] },
+  };
+  const admin = {
+    loadLevels() {}, loadCustomTags() {}, customTags: [], levels: [],
+    levelById: new Map(), levelByName: new Map(),
+    allowSave: false,
+    async updateMappool(id, body) {
+      if (!this.allowSave) return null;
+      stored = JSON.parse(JSON.stringify({ id, ...body }));
+      return stored;
+    },
+  };
+  const load = createLoader({
+    [path.resolve('src/locales.ts')]: { t: key => key },
+    [path.resolve('src/stores/admin.ts')]: { useAdminStore: () => admin },
+  });
+  const props = vue.reactive({ modelValue: false, mappool: stored,
+    'onUpdate:modelValue': value => { props.modelValue = value; } });
+  const dialog = mountComponent(load, 'src/components/admin/MappoolFormDialog.vue', props);
+  try {
+    props.modelValue = true;
+    await vue.nextTick();
+    assert.equal(stored.mappool.categories[0].picks[0].tag, null, 'opening edits only a draft');
+    assert(dialog.text().includes('pickEditor.glitchlessAutoUnsaved'));
+    assert(dialog.text().includes('mappoolForm.unsavedHint'));
+    // The category abbreviation is in a nested span.
+    const categoryButton = name => dialog.find(n => n.props.class === 'category-item'
+      && n.children.some(c => c.children?.some(t => t.text === name) || c.text === name));
+    categoryButton('ML').props.onClick();
+    await vue.nextTick();
+    assert(dialog.text().includes('mappoolForm.unsavedHint'));
+    categoryButton('TB').props.onClick();
+    await vue.nextTick();
+    assert(dialog.text().includes('pickEditor.glitchlessAutoUnsaved'));
+    const save = dialog.find(n => n.props.type === 'primary'
+      && dialog.nodeText(n).includes('mappoolForm.saveEditBtn'));
+    await save.props.onClick();
+    await vue.nextTick();
+    assert.equal(props.modelValue, true, 'failed save leaves dialog open');
+    assert(dialog.text().includes('pickEditor.glitchlessAutoUnsaved'));
+    assert(dialog.text().includes('mappoolForm.unsavedHint'));
+    assert.equal(stored.mappool.categories[0].picks[0].tag, null);
+    admin.allowSave = true;
+    await save.props.onClick();
+    await vue.nextTick();
+    assert.equal(stored.mappool.categories[0].picks[0].tag, 'Glitchless');
+    assert.equal(props.modelValue, false);
+    props.mappool = stored;
+    props.modelValue = true;
+    await vue.nextTick();
+    assert.equal(dialog.checkbox.props.modelValue, true);
+    assert(!dialog.text().includes('pickEditor.glitchlessAutoUnsaved'));
+    assert(!dialog.text().includes('mappoolForm.unsavedHint'));
+  } finally { dialog.unmount(); }
+});

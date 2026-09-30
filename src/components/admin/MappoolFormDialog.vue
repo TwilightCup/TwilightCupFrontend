@@ -31,6 +31,11 @@ const form = reactive<{ name: string; mappool: Mappool }>({
   mappool: emptyMappool(),
 });
 
+const savedForm = ref("");
+const hasUnsavedChanges = computed(() =>
+  savedForm.value !== "" && JSON.stringify(form) !== savedForm.value,
+);
+
 watch(
   () => props.modelValue,
   (open) => {
@@ -46,6 +51,7 @@ watch(
       form.name = "";
       form.mappool = emptyMappool();
     }
+    savedForm.value = JSON.stringify(form);
   },
 );
 
@@ -111,6 +117,9 @@ async function onSubmit(): Promise<void> {
     </el-form>
 
     <template #footer>
+      <p v-if="hasUnsavedChanges" class="unsaved-hint" role="status">
+        {{ $t("mappoolForm.unsavedHint") }}
+      </p>
       <el-button @click="close">{{ $t('common.cancel') }}</el-button>
       <el-button type="primary" :loading="submitting" @click="onSubmit">
         {{ editingId ? $t('mappoolForm.saveEditBtn') : $t('mappoolForm.createBtn') }}
@@ -120,6 +129,10 @@ async function onSubmit(): Promise<void> {
 </template>
 
 <style scoped>
+.unsaved-hint {
+  margin: 0 0 8px;
+  color: var(--el-color-warning);
+}
 .mappool-wrap {
   width: 100%;
 }

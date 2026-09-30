@@ -8,6 +8,7 @@ import { CategoryKind, PickType, type Level, type Pick } from "@/api/types";
 import {
   GLITCHLESS_TAG,
   inherentPickTags,
+  pickTagTokens,
   setGlitchlessTag,
   supportsGlitchless,
   categoryKindOf,
@@ -30,7 +31,7 @@ import SpeedrunMappingEditor from "@/components/admin/SpeedrunMappingEditor.vue"
  * - 合集 name 统一取选图「名称」(pick.name)；关卡合集写入 pick.collection.raw = { name, levels }（选手端按此消费）。
  * - logo 仅作只读展示；选图面板不再提供上传/移除入口（展示图不在编辑器中修改）。
  */
-const props = defineProps<{ pick: Pick; index: number; categoryName: string }>();
+const props = defineProps<{ pick: Pick; index: number; categoryName: string; savedTag: string | null }>();
 const emit = defineEmits<{ (e: "remove"): void }>();
 
 const { t } = useI18n();
@@ -74,6 +75,13 @@ const glitchless = computed<boolean>({
     if (showGlitchless.value) setGlitchlessTag(props.pick, v);
   },
 });
+/** 与打开图池时的持久化标签比较，避免自动勾选被误认为已保存。 */
+const unsavedGlitchless = computed(() =>
+  glitchless.value !== pickTagTokens({ ...props.pick, tag: props.savedTag }).includes(GLITCHLESS_TAG),
+);
+const autoGlitchlessUnsaved = computed(() =>
+  unsavedGlitchless.value && glitchless.value && /glitchless/i.test(props.pick.name ?? ""),
+);
 // 名称输入含 "Glitchless"（大小写不敏感）时自动勾选；仅自动勾选、不自动取消
 // （用户可手动取消，之后名称再变化会重新触发检测）。
 watch(
@@ -370,7 +378,10 @@ async function onRemove(): Promise<void> {
            名称含 Glitchless 文本时自动勾选；裁判选图时随选图自动提交 -->
       <el-form-item v-if="showGlitchless" :label="$t('pickEditor.labelGlitchless')">
         <el-checkbox v-model="glitchless">{{ $t("pickEditor.glitchlessOption") }}</el-checkbox>
-        <span class="glitchless-hint">{{ $t("pickEditor.glitchlessHint") }}</span>
+        <span v-if="unsavedGlitchless" class="glitchless-unsaved" role="status">
+          {{ $t(autoGlitchlessUnsaved ? "pickEditor.glitchlessAutoUnsaved" : "pickEditor.glitchlessUnsaved") }}
+        </span>
+        <span v-else class="glitchless-hint">{{ $t("pickEditor.glitchlessHint") }}</span>
       </el-form-item>
 
       <!-- logo 展示图：仅只读展示，不可在选图面板中修改 -->
@@ -612,6 +623,11 @@ async function onRemove(): Promise<void> {
 }
 .single-hint {
   padding: 2px 0 4px;
+}
+.glitchless-unsaved {
+  margin-left: 10px;
+  color: var(--el-color-warning);
+  font-size: 12px;
 }
 .glitchless-hint {
   margin-left: 10px;

@@ -28,6 +28,13 @@ void admin.loadCustomTags();
  */
 const props = defineProps<{ mappool: Mappool }>();
 
+// 独立保留载入时的标签；切换类别导致子编辑器重建时，仍能识别未保存的自动勾选。
+let savedPickTags = new WeakMap<Pick, string | null>();
+function savedTagOf(pick: Pick): string | null {
+  if (!savedPickTags.has(pick)) savedPickTags.set(pick, pick.tag ?? null);
+  return savedPickTags.get(pick) ?? null;
+}
+
 /** 为每个选图对象分配稳定的就地 key，避免不同类别/不同图池间复用同一编辑器实例。 */
 let pickIdSeed = 0;
 const pickIdMap = new WeakMap<object, number>();
@@ -84,6 +91,8 @@ function toggleAllCtTags(value: string | number | boolean): void {
 watch(
   () => props.mappool,
   () => {
+    savedPickTags = new WeakMap();
+    props.mappool.categories.forEach((c) => c.picks.forEach(savedTagOf));
     selectedIndex.value = props.mappool.categories.length > 0 ? 0 : -1;
     newCategoryKind.value = "";
   },
@@ -318,6 +327,7 @@ const canAddCategory = computed(() => props.mappool.categories.length < CATEGORY
               v-for="(pick, pi) in selectedCategory.picks"
               :key="pickKey(pick)"
               :pick="pick"
+              :saved-tag="savedTagOf(pick)"
               :index="pi"
               :category-name="selectedCategory.name"
               @remove="removePick(selectedIndex, pi)"
