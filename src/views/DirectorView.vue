@@ -211,8 +211,8 @@ const showB = computed({
   },
 });
 
-// 控制台监控预览像素一致性（§1.2）：对齐开且能力就绪 → SeiStream（复用权威 T 与帧）；
-// 否则 MSE StreamFrame 兜底
+// 控制台监控预览：对齐开且有 HLS 地址 → SeiStream（使用本页引擎）；
+// 否则使用 MSE StreamFrame
 const previewAlignedA = computed(() => !!cfgConfig.alignA && !!cfgConfig.hlsA);
 const previewAlignedB = computed(() => !!cfgConfig.alignB && !!cfgConfig.hlsB);
 const showStreamDebug = ref(true);
@@ -312,19 +312,20 @@ const readyB = computed(() => readyState("B"));
 /** 服务器接受新时间线后，同时清空两路旧缓冲并通知舞台。 */
 function resyncStreams(): void {
   if (anchorDelta.value == null || readOnly.value || !director.matchId) return;
-  director.applyAnchorDelay(anchorDelta.value, () => {
-    const patch = {
-      refreshA: Math.max(cfgForm.refreshA, cfgConfig.refreshA) + 1,
-      refreshB: Math.max(cfgForm.refreshB, cfgConfig.refreshB) + 1,
-    };
-    if (!director.sendDirectorCommand("config_update", { config: patch })) return false;
-    Object.assign(cfgForm, patch);
-    saveCfg(director.matchId!, patch);
-    // Synchronous restart prevents an acknowledgement from old decoder buffers.
-    alignEngine.restartStream("A", patch.refreshA);
-    alignEngine.restartStream("B", patch.refreshB);
-    return true;
-  });
+  director.applyAnchorDelay(anchorDelta.value, reloadStreams);
+}
+function reloadStreams(): boolean {
+  const patch = {
+    refreshA: Math.max(cfgForm.refreshA, cfgConfig.refreshA) + 1,
+    refreshB: Math.max(cfgForm.refreshB, cfgConfig.refreshB) + 1,
+  };
+  if (!director.sendDirectorCommand("config_update", { config: patch })) return false;
+  Object.assign(cfgForm, patch);
+  saveCfg(director.matchId!, patch);
+  // Synchronous restart prevents an acknowledgement from old decoder buffers.
+  alignEngine.restartStream("A", patch.refreshA);
+  alignEngine.restartStream("B", patch.refreshB);
+  return true;
 }
 
 /** 计时显示延迟（秒）：把比赛详情场景的计时器 / 偏差条回放对齐有延迟的
@@ -487,8 +488,9 @@ onMounted(() => {
     });
     if (playbackRecovery.check(performance.now(),
       [alignEngine.sync.presentedRt.A, alignEngine.sync.presentedRt.B],
-      receiving && director.canAdjustAnchor && !readOnly.value && !!director.matchId && anchorDelta.value != null)) {
-      resyncStreams();
+      receiving && director.canAdjustAnchor && !readOnly.value && !!director.matchId,
+      alignEngine.localRecoveryPending(performance.now()))) {
+      director.recoverPlayback(reloadStreams);
     }
   }, 100);
   if (!auth.isLoggedIn) {

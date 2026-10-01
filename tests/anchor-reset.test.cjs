@@ -10,6 +10,54 @@ function authority(p, version=0, reset, src=p.id, epoch=version+1) {
 function result(p,r){p.deliver({type:'director_cmd',action:'frame_align_reset_result',payload:r});}
 function boot(){const p=createPage({id:'console',kind:'console'});p.deliver(auth(p.id));authority(p);for(let n=0;n<=1000;n+=25)p.tick(n);p.drain();return p;}
 function reset(p,target,status='preparing') {return {request_id:'request1',status,code:'PREPARING',timeline_version:1,authority_epoch:2,owner_id:p.id,target_t_us:target,account_id:'account',match_id:'match'};}
+test('automatic recovery uses the default delay and reloads only after acceptance',()=>{
+ const page=boot(),stage=createPage({id:'recovery-stage'}),realNow=Date.now;
+ let reloads=0;
+ try {
+  Date.now=()=>100000;
+  assert(!stage.store.recoverPlayback());
+  assert(page.store.recoverPlayback(()=>{reloads++;return true;}));
+  assert(!page.store.recoverPlayback());
+  const request=page.drain().find(message=>message.action==='frame_align_reset').payload;
+  assert.equal(request.target_t_us,85e6);assert.equal(reloads,0);
+  const accepted={...reset(page,request.target_t_us),request_id:request.request_id};
+  authority(page,1,accepted);assert.equal(reloads,1);
+  authority(page,1,accepted);result(page,accepted);assert.equal(reloads,1);
+ } finally {Date.now=realNow;page.close();stage.close();}
+});
+test('rejected or unsent manual delay cannot replace the recovery baseline',()=>{
+ const page=boot(),realNow=Date.now;
+ try {
+  Date.now=()=>100000;
+  assert(page.store.applyAnchorDelay(40));
+  const request=page.drain().find(message=>message.action==='frame_align_reset').payload;
+  result(page,{request_id:request.request_id,status:'rejected',code:'NO',timeline_version:0});
+  const send=page.socket.send;
+  page.socket.send=()=>false;
+  assert(!page.store.applyAnchorDelay(50));
+  page.socket.send=send;
+  assert(page.store.recoverPlayback());
+  assert.equal(page.drain().find(message=>message.action==='frame_align_reset').payload.target_t_us,85e6);
+ } finally {Date.now=realNow;page.close();}
+});
+test('accepted manual delay survives recovery without adopting the catchup margin',()=>{
+ const page=boot(),realNow=Date.now;
+ try {
+  Date.now=()=>105000;
+  assert(page.store.applyAnchorDelay(20));
+  let request=page.drain().find(message=>message.action==='frame_align_reset').payload;
+  let accepted={...reset(page,request.target_t_us),request_id:request.request_id};
+  authority(page,1,accepted);result(page,{...accepted,status:'completed'});
+  for(const version of [2,3]) {
+   Date.now=()=>110000;
+   assert(page.store.recoverPlayback());
+   request=page.drain().find(message=>message.action==='frame_align_reset').payload;
+   assert.equal(request.target_t_us,90e6);
+   accepted={...reset(page,request.target_t_us),request_id:request.request_id,timeline_version:version,authority_epoch:version+1};
+   authority(page,version,accepted);result(page,{...accepted,status:'completed'});
+  }
+ } finally {Date.now=realNow;page.close();}
+});
 test('only publisher may apply once; target uses click wall time and delta',()=>{
  const p=boot(),s=createPage({id:'stage'});
  try{assert(p.store.canAdjustAnchor);assert(!s.adjust(30,110000));assert(!p.adjust(NaN,110000));
@@ -100,6 +148,30 @@ test('resync preparation timeout never retries or changes the requested delay',(
    }
   } finally {p.close();}
  }
+});
+test('automatic recovery defers to a local seek while manual adjustment remains available',()=>{
+ const page=boot();
+ try {
+  page.engine.beginLocalRecovery(performance.now());
+  assert(!page.store.recoverPlayback());
+  assert(!page.drain().some(message=>message.action==='frame_align_reset'));
+  assert(page.store.applyAnchorDelay(20));
+  assert(page.drain().some(message=>message.action==='frame_align_reset'));
+ } finally {page.close();}
+});
+test('latency catchup waits for local recovery grace and remains armed afterward',()=>{
+ const page=boot(),realNow=Date.now;
+ try {
+  const time=page.engine.tUs.value;
+  Date.now=()=>time/1000+35001;
+  page.engine.beginLocalRecovery(1600);
+  for(const now of [1600,6000]) {
+   page.heartbeat(now);
+   assert(!page.drain().some(message=>message.action==='frame_align_reset'));
+  }
+  page.heartbeat(7000);
+  assert(page.drain().some(message=>message.action==='frame_align_reset'));
+ } finally {Date.now=realNow;page.close();}
 });
 test('publisher resets to initial delta plus 5s only above initial delta plus 15s',()=>{
  const p=boot(),realNow=Date.now;

@@ -85,22 +85,8 @@ export async function fetchBytes(url: string, signal?: AbortSignal): Promise<Uin
   return new Uint8Array(await r.arrayBuffer());
 }
 
-/**
- * 把"拿到了 m3u8 却没解析出分片"的原因分类，用于 UI 精准提示（不再笼统"等待内容"）。
- * 有分片 → null（正常）。
- */
-export function categorizeEmptyPlaylist(text: string, items: HlsSegmentItem[]): string | null {
-  const t = text.trimStart();
-  if (!t.startsWith("#EXTM3U")) return "m3u8 无 #EXTM3U——不是 HLS 播放列表（200 但内容异常）";
-  if (/#EXT-X-STREAM-INF/i.test(text)) return "m3u8 是 master 播放列表（含变体），需先选一条 media 列表";
-  if (items.length === 0) return "m3u8 无分片——该路径当前没有推流/列表空闲";
-  return null;
-}
-
 export interface HarvesterOptions {
   pollIntervalMs: number;
-  /** Reserved for compatibility. Complete segments are the only delivery path. */
-  followParts: boolean;
   onError?: (err: unknown) => void;
 }
 

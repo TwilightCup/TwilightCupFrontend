@@ -52,12 +52,6 @@ export interface HlsPlaylist {
   variantUri?: string | null;
 }
 
-/** 一条已解码、按 realtime_us 升序待排程的帧 */
-export interface AlignedFrame {
-  rtUs: number; // signed 秒内绝对（epoch 微秒，Number 可表 <2^53）
-  isKey: boolean;
-}
-
 /** 单路连通性/健康指标（导播控制台观察连接问题用，维度对齐 SEIInjector 冒烟工具） */
 export interface StreamHealth {
   codec: Codec;

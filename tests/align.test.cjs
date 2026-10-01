@@ -4,7 +4,7 @@ const load = require('./load-ts.cjs')();
 const { HlsHarvester } = load('src/scenes/align/hlsPoller.ts');
 const playlist = '#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:10\n#EXT-X-MAP:URI="init.mp4"\n#EXT-X-PART:DURATION=0.2,URI="part.mp4"\n#EXTINF:2,\na.mp4\n#EXT-X-GAP\n#EXTINF:2,\ngap.mp4\n#EXTINF:2,\nb.mp4\n';
 const ok = (text = playlist) => ({ ok: true, text: async () => text, arrayBuffer: async () => new ArrayBuffer(1) });
-function harvester(deliver) { return new HlsHarvester('https://fixture.invalid/index.m3u8', deliver, { pollIntervalMs: 800, followParts: true }); }
+function harvester(deliver) { return new HlsHarvester('https://fixture.invalid/index.m3u8', deliver, { pollIntervalMs: 800 }); }
 
 test('serial complete segments: overlapping polls, parts, GAP and duplicates', async () => {
   const urls = [], delivered = [];
@@ -201,7 +201,6 @@ test('nearest never returns a distant frame', () => {
 });
 
 const { PresentationHistory } = load('src/scenes/align/presentationHistory.ts');
-const { TimerHistory } = load('src/scenes/align/timerHistory.ts');
 test('event snapshots preserve old gap/score/round and never reveal first future sample', () => {
   const h = new PresentationHistory();
   h.add(100000, { gap: 10, score: 0, round: 'one' });
@@ -210,9 +209,6 @@ test('event snapshots preserve old gap/score/round and never reveal first future
   assert.deepEqual(h.at(105000), { gap: 10, score: 0, round: 'one' });
   assert.equal(h.at(110000).round, 'two');
   h.clear(); assert.equal(h.at(110000), null);
-  const timer = new TimerHistory(); timer.add({ receivedAt: 100000, totalMs: 2000, segmentMs: 1000, running: false });
-  assert.equal(timer.valueAt(70000), null);
-  assert.equal(timer.valueAt(160000).totalMs, 2000);
 });
 
 test('historical decoder configuration does not overwrite current ingest configuration', async () => {

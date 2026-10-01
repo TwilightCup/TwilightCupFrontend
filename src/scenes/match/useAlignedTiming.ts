@@ -1,7 +1,7 @@
 /**
  * 单侧计时器叠加层锚定虚拟时间 T（§1.3）——替代 useDelayedRef 的整段均匀 delay：
- * 连续计时显示"T 那一时刻"的读数（经 TimerHistory 在 30s+ 落后窗内插值/外推），随 T 的
- * 1x / 2x 追回自然同步到画面。enabled=false（对齐关/无流）时不驱动，由上层回退原
+ * 连续计时从展示历史读取样本，按已提交 T 与本侧实际帧时间投影。
+ * enabled=false（对齐关/无流）时不驱动，由上层回退原
  * useLiveTimers + 手动画行。
  */
 import { onBeforeUnmount, onMounted, ref, type Ref } from "vue";
@@ -14,8 +14,6 @@ export interface AlignedTimingCtx {
   enabled: () => boolean;
   /** 叠在 T 上的手动微调偏移（ms，正 = 向更久前看） */
   offsetMs: () => number;
-  /** 本侧最近一条 live_time（director.liveTimeOf(side)；无则为 null） */
-  liveOf: () => LiveTime | null;
   /** Read the persistent store snapshot at exactly this playback time. */
   sampleAt: (wallMs: number) => { sample: LiveTime | null; running: boolean } | null;
 }

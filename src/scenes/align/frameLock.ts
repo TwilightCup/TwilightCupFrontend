@@ -1,13 +1,13 @@
 /**
  * 单路帧锁管线：HLS 增量拉取 → fMP4 demux → SEI 解析 → WebCodecs 解码 → 已解帧队列。
  *
- * 内存模型（重要）：**10 分钟"缓冲"在 HLS 原始下载层**（raw 采样环，字节级、磁盘/网络侧，
- * 可容忍 10 分钟）；WebCodecs 解码帧只在 T 周围的小窗口保留（GPU 显存装不下 10 分钟 1080p）。
+ * 内存模型（重要）：编码样本在内存 raw 采样环保存，受时间跨度、字节数和样本数预算约束；
+ * WebCodecs 解码帧只在 T 周围的小窗口保留（GPU 显存装不下 10 分钟 1080p）。
  * 因此解码持续推进（把已到货样本解码），FrameQueue.advance(T) 把落后/超前 T 的帧淘汰，
  * 显存占用 = O(T 窗口)，与 10 分钟缓冲解耦。
  *
  * 解码走 WebCodecs（H264/HEVC，经 isConfigSupported 探测）；能力不可用/解不了 → 报告
- * mode='off'，由外层 SeiStream 回退 MSE StreamFrame（对齐兜底）。
+ * mode='off'，由外层 SeiStream 展示等待或解码错误。
  */
 import { extractFmp4Samples } from "./fmp4";
 import { extractTsVideo } from "./ts";
@@ -24,8 +24,6 @@ export interface Decoder {
   configure(codecStr: string, description: Uint8Array | null): Promise<boolean>;
   /** 顺序喂一个样本；解码回调 onFrame(rtUs, isKey, videoFrame) */
   decodeSample(rtUs: number, isKey: boolean, payload: Uint8Array): boolean;
-  flush(): Promise<void>;
-  reset(): void;
   close(): void;
 }
 
@@ -94,7 +92,7 @@ function extractInbandAvcC(payload: Uint8Array): Uint8Array | null {
 
 /**
  * WebCodecs 解码器实现（真实浏览器）。构造后 config 返回是否可用；不可用则后续 decode
- * 不会真正解码，isDecoding 保持 false——外层据此回退 MSE。
+ * 不会真正解码，isDecoding 保持 false。
  */
 class WebCodecsDecoder implements Decoder {
   private dec: globalThis.VideoDecoder | null = null;
@@ -157,8 +155,6 @@ class WebCodecsDecoder implements Decoder {
       return false;
     }
   }
-  async flush(): Promise<void> { await this.dec?.flush(); }
-  reset(): void { this.close(); }
   close(): void {
     this.generation++;
     try { this.dec?.close(); } catch { /* already closed */ }
@@ -178,7 +174,7 @@ export interface FrameLockStreamOptions {
   maxRawSamples?: number;
 }
 
-/** 单路帧锁流。模式：aligned | off（能力不可用/无有效解码 → off，外层回退 MSE） */
+/** 单路帧锁流。模式：aligned | off（能力不可用/无有效解码 → off）。 */
 export class FrameLockStream {
   private source: FrameSource;
   private decoder: WebCodecsDecoder;
@@ -203,7 +199,6 @@ export class FrameLockStream {
   private ready = false;
   private decodeRetryAt = 0;
   private configurationFailures = 0;
-  private lastErr: unknown = null;
   private opts: FrameLockStreamOptions;
   private rawSpanUs: number;
   mode: "aligned" | "off" = "off";
@@ -256,7 +251,7 @@ export class FrameLockStream {
       try { f?.close(); } catch { /* noop */ }
     }, CATCHUP.maxFrameErrorUs, CATCHUP.maxFrameErrorUs);
     this.source.setOnSegment((seg) => { if (!this.stopped) this.onSegment(seg); });
-    this.source.setOnError((e) => { if (this.stopped) return; this.lastErr = e; this.opts.onError?.(e); });
+    this.source.setOnError((e) => { if (this.stopped) return; this.opts.onError?.(e); });
   }
 
   start(): void {
@@ -331,7 +326,6 @@ export class FrameLockStream {
       this.st.segs++;
       this.ingestAnnexb(seg.payload);
     } catch (e) {
-      this.lastErr = e;
       this.opts.onError?.(e);
     }
   }
@@ -602,23 +596,6 @@ export class FrameLockStream {
   coverage(): { from: number; to: number } | null {
     return this.continuousFromUs == null || this.continuousToUs == null ? null
       : { from: this.continuousFromUs, to: this.continuousToUs };
-  }
-
-  /** 本路最前已到货 rt（µs）；无内容 null */
-  frontier(): number | null {
-    return this.lastArrivedRtUs;
-  }
-
-  /** 取最接近 T 的已解帧句柄 */
-  nearest(targetUs: number): unknown | null {
-    return this.queue.nearest(targetUs, 40_000)?.handle ?? null;
-  }
-
-  get readyState(): boolean {
-    return this.ready;
-  }
-  get error(): unknown {
-    return this.lastErr;
   }
 }
 

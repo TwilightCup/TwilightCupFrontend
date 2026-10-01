@@ -70,7 +70,6 @@ export class HlsFrameSource implements FrameSource {
       },
       {
         pollIntervalMs: opts.pollIntervalMs ?? 800,
-        followParts: false,
         // 拉流失败（跨域/拒连/404）必须透传，让 UI 显示而不静默 → 避免永远"等待内容"
         onError: (e) => this.onErr(e),
       },

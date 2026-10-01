@@ -2,27 +2,27 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const load = require('./load-ts.cjs')();
-const { planCatchup, CATCHUP } = load('src/scenes/align/rateControl.ts');
+const { planCatchup } = load('src/scenes/align/rateControl.ts');
 const { ExternalClock } = load('src/scenes/align/externalClock.ts');
 const { AlignEngine } = load('src/scenes/align/useFrameAlign.ts');
 const { FrameLockStream } = load('src/scenes/align/frameLock.ts');
-const input = { current: 60e6, authority: 61e6, from: 0, safeTo: 70e6, elapsedMs: 16, rate: 1, supply: true, recovering: false };
+const input = { current: 60e6, authority: 65e6, from: 0, safeTo: 70e6, elapsedMs: 16, recovering: false };
 test('soft catchup is bounded, hysteretic and returns to normal', () => {
-  let current = 60e6, authority = 61e6, mode = 'normal';
+  let current = 60e6, authority = 65e6, mode = 'normal';
   for (let i = 0; i < 2500; i++) {
     authority += 16000;
     const p = planCatchup({ ...input, current, authority, safeTo: authority + 1e6, mode });
     assert(p.rate >= 1 && p.rate <= 1.08); current = p.t; mode = p.mode;
   }
   assert.equal(mode, 'normal');
-  assert.equal(planCatchup({ ...input, authority: 60.3e6, mode: 'normal' }).rate, 1);
-  assert(planCatchup({ ...input, authority: 60.3e6, mode: 'soft' }).rate > 1);
-  assert.equal(planCatchup({ ...input, authority: 60.05e6, mode: 'soft' }).rate, 1);
+  assert.equal(planCatchup({ ...input, authority: 64.3e6, mode: 'normal' }).rate, 1);
+  assert(planCatchup({ ...input, authority: 64.3e6, mode: 'soft' }).rate > 1);
+  assert.equal(planCatchup({ ...input, authority: 64.05e6, mode: 'soft' }).rate, 1);
 });
-test('hard recovery selects a common safe point, missing supply never accelerates', () => {
-  const p = planCatchup({ ...input, authority: 90e6, mode: 'normal' });
-  assert.equal(p.mode, 'seek'); assert.equal(p.t, 70e6);
-  assert.equal(planCatchup({ ...input, mode: 'soft', supply: false }).rate, 0);
+test('publisher recovery retains reserve and waits outside available coverage', () => {
+  const p = planCatchup({ ...input, authority: 90e6, mode: 'normal', recovering: true });
+  assert.equal(p.mode, 'seek'); assert.equal(p.t, 66e6);
+  assert.equal(planCatchup({ ...input, authority: 59e6 }).mode, 'wait');
   assert.equal(planCatchup({ ...input, from: 80e6 }).mode, 'wait');
   assert.equal(planCatchup({ ...input, authority: 65e6, from: 62e6 }).mode, 'seek');
 });

@@ -14,7 +14,7 @@ test('publisher does not chase every 2-second segment step to the buffer edge',(
   for(let now=16;now<120000;now+=16){
     const slow=100e6+Math.floor(now/2000)*2e6;
     const authority=publisherTarget(0,slow,current,false);
-    const p=planCatchup({current,authority,from:0,safeTo:slow-30e6,elapsedMs:16,rate:1,supply:true,mode,publisher:true});
+    const p=planCatchup({current,authority,from:0,safeTo:slow-30e6,elapsedMs:16,mode});
     if(p.t===current)stalls++; maxRate=Math.max(maxRate,p.rate);current=p.t;mode=p.mode;
   }
   assert.equal(stalls,0);assert.equal(maxRate,1);
@@ -34,9 +34,9 @@ test('canvas retains last common image while readiness and committed T freeze',(
   assert.equal(e.presented.A,false);assert(e.sync.presentedRt.A != null);
 });
 test('publisher hard recovery retains segment reserve without reversing T',()=>{
-  const p=planCatchup({current:50e6,authority:70e6,from:0,safeTo:75e6,elapsedMs:16,rate:1,supply:true,publisher:true,recovering:true});
+  const p=planCatchup({current:50e6,authority:70e6,from:0,safeTo:75e6,elapsedMs:16,recovering:true});
   assert.equal(p.mode,'seek');assert.equal(p.t,66e6);
-  const gap=planCatchup({current:69e6,authority:70e6,from:69.5e6,safeTo:75e6,elapsedMs:16,rate:1,supply:true,publisher:true});
+  const gap=planCatchup({current:69e6,authority:70e6,from:69.5e6,safeTo:75e6,elapsedMs:16});
   assert.equal(gap.t,69.5e6);
 });
 test('decode budget cannot be held by frames already too old to present',()=>{
