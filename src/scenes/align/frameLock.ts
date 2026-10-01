@@ -182,6 +182,7 @@ export class FrameLockStream {
   private raw: RawSample[] = []; // decode order
   private rawBytes = 0;
   private frameBytes = 1920 * 1080 * 4;
+  private snapshotCanvas: OffscreenCanvas | HTMLCanvasElement | null = null;
   private videoTrackId: number | undefined;
   private targetUs: number | null = null;
   private stopped = false;
@@ -234,7 +235,18 @@ export class FrameLockStream {
           return;
         }
         if (this.targetUs != null && rtUs < this.targetUs - 150_000) { frame.close(); return; }
-        this.queue.add({ rtUs, isKey, handle: frame });
+        // Retained decoder outputs can exhaust the hardware surface pool even
+        // below our byte budget. Snapshot pixels into independent storage; a
+        // VideoFrame clone would still reference the decoder's original surface.
+        try {
+          const snapshot = this.snapshotFrame(frame);
+          this.queue.add({ rtUs, isKey, handle: snapshot });
+        } catch (error) {
+          this.decodeError = error instanceof Error ? error.message : String(error);
+          this.opts.onError?.(error);
+        } finally {
+          frame.close();
+        }
       },
       (e) => {
         const m = e instanceof Error ? e.message : String(e);
@@ -257,12 +269,26 @@ export class FrameLockStream {
   start(): void {
     this.source.start();
   }
+  private snapshotFrame(frame: globalThis.VideoFrame): globalThis.VideoFrame {
+    const width = frame.displayWidth, height = frame.displayHeight;
+    if (!width || !height) throw new Error("Invalid decoded frame dimensions");
+    const canvas = this.snapshotCanvas ??= typeof OffscreenCanvas !== "undefined"
+      ? new OffscreenCanvas(width, height) : document.createElement("canvas");
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
+    const context = canvas.getContext("2d") as
+      OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null;
+    if (!context) throw new Error("Decoded frame snapshot canvas unavailable");
+    context.drawImage(frame, 0, 0, width, height);
+    return new VideoFrame(canvas, { timestamp: frame.timestamp });
+  }
   stop(): void {
     this.stopped = true;
     this.generation++;
     this.source.stop();
     this.decoder.close();
     this.queue.clear();
+    this.snapshotCanvas = null;
     this.raw = [];
     this.rawBytes = 0;
   }
