@@ -29,6 +29,8 @@ export interface SceneParams {
   /** 选手 A/B SEI 对齐开关（"1"=开，随链接下发给舞台/控制台，跨浏览器本地不互通） */
   alignA?: boolean;
   alignB?: boolean;
+  /** 两路独立直播，不等待对齐。 */
+  decoupled?: boolean;
   /** 编辑态（=1 唤出导播配置面板） */
   editMode: boolean;
   /** 偏差条满偏对应的计时差（毫秒），默认 60000 */
@@ -55,6 +57,7 @@ export function useSceneParams(): SceneParams {
     background: get("background"),
     alignA: p.has("align_a") ? p.get("align_a") === "1" || p.get("align_a") === "true" : undefined,
     alignB: p.has("align_b") ? p.get("align_b") === "1" || p.get("align_b") === "true" : undefined,
+    decoupled: p.has("decoupled") ? p.get("decoupled") === "1" || p.get("decoupled") === "true" : undefined,
     editMode: p.get("edit") === "1",
     gapMs: parseGap(get("gap")),
   };

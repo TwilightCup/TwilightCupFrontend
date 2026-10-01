@@ -32,6 +32,8 @@ export interface DirectorConfig {
   /** 该侧启用 SEI 帧级对齐（SeiStream + 计时锚定虚拟时间 T）；关 = 回落 MSE + 手动 delay* */
   alignA: boolean;
   alignB: boolean;
+  /** 脱钩模式：两路独立直播，不等待共同时间或回放计时。 */
+  decoupled: boolean;
   /** 对齐时叠在虚拟时间 T 上的手动微调偏移（秒，正=向更久前看）；非对齐时作整段回放延迟 */
   delayA: number;
   delayB: number;
@@ -60,6 +62,7 @@ const EMPTY: DirectorConfig = {
   refreshB: 0,
   alignA: true,
   alignB: true,
+  decoupled: false,
   delayA: 0,
   delayB: 0,
   delayDiff: 0,
@@ -181,6 +184,7 @@ export function useDirectorConfig() {
       refreshB: stored.refreshB,
       alignA: url.alignA ?? stored.alignA,
       alignB: url.alignB ?? stored.alignB,
+      decoupled: url.decoupled ?? stored.decoupled,
       delayA: stored.delayA,
       delayB: stored.delayB,
       delayDiff: stored.delayDiff,

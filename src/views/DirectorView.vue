@@ -142,6 +142,7 @@ const cfgForm = reactive<DirectorConfig>({
   refreshB: 0,
   alignA: true,
   alignB: true,
+  decoupled: false,
   delayA: 0,
   delayB: 0,
   delayDiff: 0,
@@ -213,8 +214,8 @@ const showB = computed({
 
 // 控制台监控预览：对齐开且有 HLS 地址 → SeiStream（使用本页引擎）；
 // 否则使用 MSE StreamFrame
-const previewAlignedA = computed(() => !!cfgConfig.alignA && !!cfgConfig.hlsA);
-const previewAlignedB = computed(() => !!cfgConfig.alignB && !!cfgConfig.hlsB);
+const previewAlignedA = computed(() => !cfgConfig.decoupled && !!cfgConfig.alignA && !!cfgConfig.hlsA);
+const previewAlignedB = computed(() => !cfgConfig.decoupled && !!cfgConfig.alignB && !!cfgConfig.hlsB);
 const showStreamDebug = ref(true);
 const anchorDelta = ref<number | undefined>(15);
 const wallNow = ref(Date.now());
@@ -234,13 +235,14 @@ function applyAnchor(): void {
 
 // 拉流失败只内联显示在 A/B 位置（指标条/画面占位），不弹窗打扰
 
-watch(() => [cfgConfig.alignA, cfgConfig.hlsA, cfgConfig.alignB, cfgConfig.hlsB], () => {
+watch(() => [cfgConfig.decoupled, cfgConfig.alignA, cfgConfig.hlsA, cfgConfig.alignB, cfgConfig.hlsB], () => {
   alignEngine.setRequiredSides((["A", "B"] as const).filter(side =>
-    side === "A" ? cfgConfig.alignA && !!cfgConfig.hlsA : cfgConfig.alignB && !!cfgConfig.hlsB));
+    !cfgConfig.decoupled && (side === "A" ? cfgConfig.alignA && !!cfgConfig.hlsA : cfgConfig.alignB && !!cfgConfig.hlsB)));
 }, { immediate: true });
 
 // 连通性指标条（维度对齐 SEIInjector 冒烟工具，刷新由 alignEngine.health ~2.5Hz）
 function healthText(side: "A" | "B"): string {
+  if (cfgConfig.decoupled) return "脱钩模式 · 独立直播，不等待对齐";
   const err = alignEngine.streamError[side];
   const on = side === "A" ? cfgConfig.alignA : cfgConfig.alignB;
   const url = side === "A" ? cfgConfig.hlsA : cfgConfig.hlsB;
@@ -284,6 +286,7 @@ function healthText(side: "A" | "B"): string {
   return s;
 }
 function healthCls(side: "A" | "B"): "h-ok" | "h-err" | "" {
+  if (cfgConfig.decoupled) return "";
   if (alignEngine.streamError[side]) return "h-err";
   const on = side === "A" ? cfgConfig.alignA : cfgConfig.alignB;
   const url = side === "A" ? cfgConfig.hlsA : cfgConfig.hlsB;
@@ -293,6 +296,7 @@ function healthCls(side: "A" | "B"): "h-ok" | "h-err" | "" {
 
 /** A/B 信息行显示本控制台的同步、解码和呈现状态。舞台不参与主 T 选举。 */
 function readyState(side: "A" | "B"): { cls: string; label: string } {
+  if (cfgConfig.decoupled) return { cls: "off", label: "独立播放" };
   const on = side === "A" ? cfgConfig.alignA : cfgConfig.alignB;
   const url = side === "A" ? cfgConfig.hlsA : cfgConfig.hlsB;
   if (!on || !url) return { cls: "off", label: "未启用" };
@@ -309,9 +313,11 @@ function readyState(side: "A" | "B"): { cls: string; label: string } {
 const readyA = computed(() => readyState("A"));
 const readyB = computed(() => readyState("B"));
 
-/** 服务器接受新时间线后，同时清空两路旧缓冲并通知舞台。 */
+/** 对齐模式重锚后刷新；脱钩模式直接重拉两路流。 */
 function resyncStreams(): void {
-  if (anchorDelta.value == null || readOnly.value || !director.matchId) return;
+  if (readOnly.value || !director.matchId) return;
+  if (cfgConfig.decoupled) { reloadStreams(); return; }
+  if (anchorDelta.value == null) return;
   director.applyAnchorDelay(anchorDelta.value, reloadStreams);
 }
 function reloadStreams(): boolean {
@@ -341,6 +347,13 @@ function toggleAlign(key: "alignA" | "alignB"): void {
   pushConfig({ [key]: cfgForm[key] } as Partial<DirectorConfig>);
 }
 
+/** 保留每侧对齐/延迟配置，退出脱钩时恢复。 */
+function toggleDecoupled(): void {
+  if (!director.matchId || readOnly.value) return;
+  cfgForm.decoupled = !cfgConfig.decoupled;
+  pushConfig({ decoupled: cfgForm.decoupled });
+}
+
 // 其他控制台（同账号另一浏览器）保存的配置广播过来：并入本地面板与舞台链接
 watch(
   () => director.remoteConfig,
@@ -361,6 +374,7 @@ const CFG_URL_KEYS: Partial<Record<keyof DirectorConfig, string>> = {
   embedB: "embed_b",
   alignA: "align_a",
   alignB: "align_b",
+  decoupled: "decoupled",
   themeA: "theme_a",
   themeB: "theme_b",
   background: "background",
@@ -385,7 +399,7 @@ function withCfgParams(base: string): string {
   if (!base) return "";
   const entries = Object.entries(CFG_URL_KEYS) as [keyof DirectorConfig, string][];
   const qs = entries
-    .filter(([k]) => cfgConfig[k])
+    .filter(([k]) => cfgConfig[k] !== "")
     .map(([k, p]) => `${p}=${encodeURIComponent(String(cfgConfig[k]))}`)
     .join("&");
   return qs ? `${base}&${qs}` : base;
@@ -775,19 +789,27 @@ onUnmounted(() => {
             </div>
           </div>
           <div class="anchor-controls">
+            <el-button
+              size="small"
+              :type="cfgConfig.decoupled ? 'warning' : 'default'"
+              :aria-pressed="cfgConfig.decoupled"
+              :disabled="!director.matchId || readOnly"
+              @click="toggleDecoupled"
+            >{{ cfgConfig.decoupled ? "退出脱钩模式" : "切换到脱钩模式" }}</el-button>
+            <span v-if="cfgConfig.decoupled" class="hint" role="status">两路有画面即播出，无需对齐</span>
             <label for="anchor-delta">{{ $t("directorView.anchorDelay") }}</label>
-            <el-input-number id="anchor-delta" v-model="anchorDelta" :min="0" :max="86400" :precision="1" :step="1" size="small" :disabled="!director.canEditAnchor || readOnly" />
-            <el-button size="small" :disabled="!director.canAdjustAnchor || readOnly || anchorDelta == null" @click="applyAnchor">{{ $t("directorView.applyAnchor") }}</el-button>
-            <el-button size="small" type="primary" :disabled="!director.matchId || !director.canAdjustAnchor || readOnly || anchorDelta == null" @click="resyncStreams">{{ $t("directorView.cfgRefresh") }}</el-button>
-            <span class="hint" role="status">{{ director.anchorAdjustment || (director.alignRole !== 'publisher' ? $t("directorView.anchorOwnerOnly") : '') }}</span>
+            <el-input-number id="anchor-delta" v-model="anchorDelta" :min="0" :max="86400" :precision="1" :step="1" size="small" :disabled="cfgConfig.decoupled || !director.canEditAnchor || readOnly" />
+            <el-button size="small" :disabled="cfgConfig.decoupled || !director.canAdjustAnchor || readOnly || anchorDelta == null" @click="applyAnchor">{{ $t("directorView.applyAnchor") }}</el-button>
+            <el-button size="small" type="primary" :disabled="!director.matchId || readOnly || (!cfgConfig.decoupled && (!director.canAdjustAnchor || anchorDelta == null))" @click="resyncStreams">{{ $t("directorView.cfgRefresh") }}</el-button>
+            <span v-if="!cfgConfig.decoupled" class="hint" role="status">{{ director.anchorAdjustment || (director.alignRole !== 'publisher' ? $t("directorView.anchorOwnerOnly") : '') }}</span>
           </div>
           <div v-if="showStreamDebug" id="stream-debug-info" class="align-health">
-            <div class="h-row anchor-clock">
+            <div v-if="!cfgConfig.decoupled" class="h-row anchor-clock">
               <span>T：{{ clockText(displayedAnchor) }}</span>
               <span>{{ $t("directorView.wallTime") }}：{{ clockText(wallNow * 1000) }}</span>
               <span>Δ：{{ displayedAnchor == null ? '—' : ((wallNow * 1000 - displayedAnchor) / 1e6).toFixed(3) }} s</span>
             </div>
-            <div v-if="!alignEngine.loopAlive.value || alignEngine.loopErr.value" class="h-row loop">
+            <div v-if="!cfgConfig.decoupled && (!alignEngine.loopAlive.value || alignEngine.loopErr.value)" class="h-row loop">
               <span class="h-ready err">
                 {{ alignEngine.loopAlive.value ? "循环异常" : "主循环卡死" }}：{{ alignEngine.loopErr.value || "无报错（看门狗）" }}
               </span>
@@ -950,14 +972,14 @@ onUnmounted(() => {
               <el-switch
                 v-model="cfgForm.alignA"
                 size="small"
-                :disabled="!director.matchId || readOnly"
+                :disabled="cfgConfig.decoupled || !director.matchId || readOnly"
                 @change="toggleAlign('alignA')"
               />
               <span class="lbl tc-b">对齐 B</span>
               <el-switch
                 v-model="cfgForm.alignB"
                 size="small"
-                :disabled="!director.matchId || readOnly"
+                :disabled="cfgConfig.decoupled || !director.matchId || readOnly"
                 @change="toggleAlign('alignB')"
               />
             </div>
@@ -972,7 +994,7 @@ onUnmounted(() => {
                 :step-strict="true"
                 size="small"
                 class="delay-num"
-                :disabled="!director.matchId || readOnly"
+                :disabled="cfgConfig.decoupled || !director.matchId || readOnly"
                 @change="pushDelay('delayA')"
               />
               <span class="lbl tc-b">B</span>
@@ -985,7 +1007,7 @@ onUnmounted(() => {
                 :step-strict="true"
                 size="small"
                 class="delay-num"
-                :disabled="!director.matchId || readOnly"
+                :disabled="cfgConfig.decoupled || !director.matchId || readOnly"
                 @change="pushDelay('delayB')"
               />
               <!-- 偏差条标签横跨前三列（左缘与 A 对齐），输入框与 B 调整框同列 -->
@@ -999,7 +1021,7 @@ onUnmounted(() => {
                 :step-strict="true"
                 size="small"
                 class="delay-num"
-                :disabled="!director.matchId || readOnly"
+                :disabled="cfgConfig.decoupled || !director.matchId || readOnly"
                 @change="pushDelay('delayDiff')"
               />
             </div>
