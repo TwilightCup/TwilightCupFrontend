@@ -19,7 +19,7 @@ test('automatic recovery uses the default delay and reloads only after acceptanc
   assert(page.store.recoverPlayback(()=>{reloads++;return true;}));
   assert(!page.store.recoverPlayback());
   const request=page.drain().find(message=>message.action==='frame_align_reset').payload;
-  assert.equal(request.target_t_us,85e6);assert.equal(reloads,0);
+  assert.equal(request.target_t_us,96e6);assert.equal(reloads,0);
   const accepted={...reset(page,request.target_t_us),request_id:request.request_id};
   authority(page,1,accepted);assert.equal(reloads,1);
   authority(page,1,accepted);result(page,accepted);assert.equal(reloads,1);
@@ -37,7 +37,7 @@ test('rejected or unsent manual delay cannot replace the recovery baseline',()=>
   assert(!page.store.applyAnchorDelay(50));
   page.socket.send=send;
   assert(page.store.recoverPlayback());
-  assert.equal(page.drain().find(message=>message.action==='frame_align_reset').payload.target_t_us,85e6);
+  assert.equal(page.drain().find(message=>message.action==='frame_align_reset').payload.target_t_us,96e6);
  } finally {Date.now=realNow;page.close();}
 });
 test('accepted manual delay survives recovery without adopting the catchup margin',()=>{
@@ -52,28 +52,28 @@ test('accepted manual delay survives recovery without adopting the catchup margi
    Date.now=()=>110000;
    assert(page.store.recoverPlayback());
    request=page.drain().find(message=>message.action==='frame_align_reset').payload;
-   assert.equal(request.target_t_us,90e6);
+   assert.equal(request.target_t_us,91e6);
    accepted={...reset(page,request.target_t_us),request_id:request.request_id,timeline_version:version,authority_epoch:version+1};
    authority(page,version,accepted);result(page,{...accepted,status:'completed'});
   }
  } finally {Date.now=realNow;page.close();}
 });
-test('only publisher may apply once; target uses click wall time and delta',()=>{
+test('only publisher may apply once; target uses common frontier and delta',()=>{
  const p=boot(),s=createPage({id:'stage'});
  try{assert(p.store.canAdjustAnchor);assert(!s.adjust(30,110000));assert(!p.adjust(NaN,110000));
   assert(p.adjust(30,110000));assert(!p.adjust(30,110000));
   const out=p.drain();assert.equal(out.length,1);assert.equal(out[0].action,'frame_align_reset');
-  assert.equal(out[0].payload.target_t_us,80e6);assert.equal(out[0].payload.timeline_version,0);
+  assert.equal(out[0].payload.target_t_us,81e6);assert.equal(out[0].payload.timeline_version,0);
   result(p,{request_id:out[0].payload.request_id,status:'rejected',code:'INVALID_REQUEST',timeline_version:0});
   assert(p.store.canAdjustAnchor);
  }finally{p.close();s.close();}
 });
 test('new timeline prepares actual frames, sends versioned status before ack, waits for completion',()=>{
  const p=boot();try{
- const r=reset(p,85e6);authority(p,1,r);p.tick(1025);
+ const r=reset(p,100e6);authority(p,1,r);p.tick(1025);
  const sent=p.drain();const ack=sent.findIndex(m=>m.action==='frame_align_reset_ack');
  assert(ack>0,JSON.stringify(sent));assert(sent.slice(0,ack).some(m=>m.action==='frame_align_status'&&m.payload.timeline_version===1&&m.payload.decode_ready));
- assert.equal(sent[ack].payload.presented_t_us,85e6);assert(!sent.some(m=>m.action==='frame_align'));
+ assert.equal(sent[ack].payload.presented_t_us,100e6);assert(!sent.some(m=>m.action==='frame_align'));
  assert(p.store.resetPending);const seeks=p.snapshot().seeks;
  authority(p,1,r);result(p,r);p.tick(1050);assert.deepEqual(p.snapshot().seeks,seeks);assert.equal(p.drain().length,0);
  result(p,{...r,status:'completed',code:'OK'});p.tick(1075);
@@ -96,7 +96,7 @@ test('backward reset keeps pixels and real frame floor; no false ack or deadline
 });
 test('ownership loss disables editing and new owner does not replay historical reset',()=>{
  const p=boot();try{
- const r=reset(p,85e6);authority(p,1,r);p.tick(1025);p.drain();
+ const r=reset(p,100e6);authority(p,1,r);p.tick(1025);p.drain();
  authority(p,1,{...r,status:'failed'},'other',3);assert(!p.store.canAdjustAnchor);
  p.tick(1050);assert(!p.drain().some(m=>m.action==='frame_align_reset_ack'));
  }finally{p.close();}
@@ -163,7 +163,7 @@ test('latency catchup waits for local recovery grace and remains armed afterward
  const page=boot(),realNow=Date.now;
  try {
   const time=page.engine.tUs.value;
-  Date.now=()=>time/1000+35001;
+  for(const stream of page.engine.streams.values()) stream.coverage=()=>({from:0,to:time+35001000});
   page.engine.beginLocalRecovery(1600);
   for(const now of [1600,6000]) {
    page.heartbeat(now);
@@ -177,9 +177,9 @@ test('publisher resets to initial delta plus 5s only above initial delta plus 15
  const p=boot(),realNow=Date.now;
  try {
   const t=p.engine.tUs.value;
-  Date.now=()=>t/1000+30000;p.heartbeat(1600);
+  for(const stream of p.engine.streams.values()) stream.coverage=()=>({from:0,to:t+30000000});p.heartbeat(1600);
   assert(!p.drain().some(m=>m.action==='frame_align_reset'));
-  Date.now=()=>t/1000+30001;p.heartbeat(2000);
+  for(const stream of p.engine.streams.values()) stream.coverage=()=>({from:0,to:t+30001000});p.heartbeat(2000);
   const req=p.drain().find(m=>m.action==='frame_align_reset');
   assert(req);assert.equal(req.payload.target_t_us,Math.round(t+10001000));
   p.heartbeat(2400);assert(!p.drain().some(m=>m.action==='frame_align_reset'));
@@ -194,10 +194,10 @@ test('manual delta 20 becomes the baseline; automatic target remains 25 across r
   authority(p,1,r);p.tick(1025);result(p,{...r,status:'completed'});p.tick(1050);p.drain();
   for(let version=2;version<=3;version++) {
    const t=p.engine.tUs.value,at=version*20000;
-   Date.now=()=>t/1000+35000;p.heartbeat(at);p.drain();
-   Date.now=()=>t/1000+35000;p.heartbeat(at+400);
+   for(const stream of p.engine.streams.values()) stream.coverage=()=>({from:0,to:t+35000000});p.heartbeat(at);p.drain();
+   for(const stream of p.engine.streams.values()) stream.coverage=()=>({from:0,to:t+35000000});p.heartbeat(at+400);
    assert(!p.drain().some(m=>m.action==='frame_align_reset'));
-   Date.now=()=>t/1000+35001;p.heartbeat(at+800);
+   for(const stream of p.engine.streams.values()) stream.coverage=()=>({from:0,to:t+35001000});p.heartbeat(at+800);
    req=p.drain().find(m=>m.action==='frame_align_reset').payload;
    assert.equal(req.target_t_us,Math.round(t+10001000));
    r={...reset(p,req.target_t_us),request_id:req.request_id,timeline_version:version,authority_epoch:version+1};
@@ -295,8 +295,12 @@ test('server snapshot omitting absent authority does not deadlock candidate prep
     assert(sent.some(m=>m.action==='frame_align_status'&&m.payload.media_ready&&m.payload.decode_ready));
     authority(p,1,undefined,p.id,8);
     for(let now=1025;now<=1800;now+=25)p.tick(now);
-    assert(p.store.canAdjustAnchor);
-    assert(p.drain().some(m=>m.action==='frame_align'));
+    assert(p.store.canEditAnchor);
+    const published=p.drain();
+    assert(published.some(m=>m.action==='frame_align'));
+    // The historical 80s floor is now >30s behind the media frontier.
+    assert(published.some(m=>m.action==='frame_align_reset'));
+    assert(p.store.resetPending);
    }
   } finally {p.close();}
  }

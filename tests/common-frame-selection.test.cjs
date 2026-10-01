@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const load=require('./load-ts.cjs')();
 const {AlignEngine}=load('src/scenes/align/useFrameAlign.ts');
 const {FrameQueue}=load('src/scenes/align/frameQueue.ts');
-function engine(){const e=new AlignEngine();e.setPublisher(true);e.setRequiredSides(['A','B']);e.tUs.value=65e6;
+function engine(){const e=new AlignEngine();e.setDelaySeconds(35);e.setPublisher(true);e.setRequiredSides(['A','B']);e.tUs.value=65e6;
  for(const side of ['A','B'])e.streams.set(side,{queue:new FrameQueue(),coverage:()=>({from:0,to:100e6}),canSeek:()=>true,seek(){},advance(){}});return e;}
 function add(q,t){q.add({rtUs:t,isKey:false,handle:{}});}
 test('three-second presentation tolerance permits the closest target pair',()=>{

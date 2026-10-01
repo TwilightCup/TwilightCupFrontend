@@ -5,7 +5,7 @@ const { AlignEngine } = load('src/scenes/align/useFrameAlign.ts');
 const { FrameQueue } = load('src/scenes/align/frameQueue.ts');
 
 function playingEngine(fpsA, fpsB, phase) {
-  const e = new AlignEngine();
+  const e = new AlignEngine(); e.setDelaySeconds(35);
   e.setPublisher(true); e.setRequiredSides(['A', 'B']);
   e.tUs.value = 65e6; e.sync.state = 'playing';
   let now = 0;

@@ -45,6 +45,23 @@ export class AlignEngine {
   readonly pictureExpired = ref(false);
   private lastPictureAt: Record<Side, number> = { A: -Infinity, B: -Infinity };
   private localRecovery: { at: number; frames: Record<Side, number | null> } | null = null;
+  private delaySeconds = 15;
+  setDelaySeconds(seconds: number): void {
+    if (Number.isFinite(seconds) && seconds >= 0 && seconds <= 86400) this.delaySeconds = seconds;
+  }
+  /** No wall-clock fallback: every locally required stream must have continuous coverage. */
+  slowestFrontierUs(): number | null {
+    const sides = [...this.requiredSides];
+    if (!sides.length) return null;
+    const covers = sides.map(side => this.streams.get(side)?.coverage());
+    if (covers.some(c => !c || !Number.isFinite(c.to))) return null;
+    return Math.min(...covers.map(c => c!.to));
+  }
+  delayTargetUs(seconds: number): number | null {
+    const slow = this.slowestFrontierUs();
+    return slow == null || !Number.isFinite(seconds) || seconds < 0 || seconds > 86400
+      ? null : Math.round(slow - seconds * 1_000_000);
+  }
   private manualTarget: number | null = null;
   private resetPhase: "preparing" | "completed" | "failed" | null = null;
   private resumeFloor: number | null = null;
@@ -276,15 +293,15 @@ export class AlignEngine {
     if (preparing) {
       active = required.filter(s => {
         const c = this.streams.get(s)?.coverage();
-        return c != null && c.to - c.from >= CATCHUP.backUs + 5_000_000;
+        return c != null && c.to - c.from >= this.delaySeconds * 1_000_000;
       });
       const streams = active.map(s => this.streams.get(s)!);
       const covers = streams.map(s => s.coverage()!);
       const from = Math.max(...covers.map(c => c.from), this.authorityFloor ?? 0);
-      const to = Math.min(...covers.map(c => c.to)) - CATCHUP.backUs;
+      const to = Math.min(...covers.map(c => c.to)) - this.delaySeconds * 1_000_000;
       const probe = this.candidateProbe;
-      let target = probe?.target ?? to - 5_000_000;
-      if (target < from || target > to || probe?.sides !== active.join()) target = Math.max(from, to - 5_000_000);
+      let target = probe?.target ?? to;
+      if (target < from || target > to || probe?.sides !== active.join()) target = Math.max(from, to);
       media = streams.length > 0 && target >= from && target <= to && streams.every(s => s.canSeek(target));
       if (media) {
         if (!probe || probe.target !== target || probe.sides !== active.join() || (now - probe.at >= CATCHUP.retryMs && !commonFrames(streams.map(s => s.queue), target, CATCHUP.maxFrameErrorUs))) {
@@ -299,7 +316,7 @@ export class AlignEngine {
       const target = this.tUs.value;
       media = active.every(side => {
         const c = this.streams.get(side)?.coverage();
-        return c != null && target >= c.from && target <= c.to - (this.manualTarget == null ? CATCHUP.backUs : 0);
+        return c != null && target >= c.from && target <= c.to;
       });
       decoded = media && commonFrames(active.map(s => this.streams.get(s)!.queue), target,
         CATCHUP.maxFrameErrorUs) != null;
@@ -503,12 +520,12 @@ export class AlignEngine {
     const frontiers = coverage.map(c => c!.to);
     const slow = Math.min(...frontiers);
     const strictTarget = !this.publisher || this.manualTarget != null;
-    const required = slow - (strictTarget ? 0 : CATCHUP.backUs);
+    const required = slow;
     const earliest = Math.max(...coverage.map(c => c!.from));
     const localTarget = this.publisher && this.manualTarget != null
       ? this.resetPhase === "completed" ? (cadenceTarget ?? this.tUs.value ?? this.manualTarget) + elapsed * 1000 : this.manualTarget
       : this.publisher ? publisherTarget(earliest, slow,
-      Math.max(this.authorityFloor ?? 0, this.tUs.value ?? 0), this.tUs.value == null) : null;
+      Math.max(this.authorityFloor ?? 0, this.tUs.value ?? 0), this.delaySeconds, this.tUs.value == null) : null;
     const external = this.publisher
       ? localTarget == null ? null : { t: localTarget, rate: 1, stale: false }
       : this.external.read(now);
@@ -523,6 +540,7 @@ export class AlignEngine {
     if (earliest > required) { freeze("waiting", false, "buffer_short"); return; }
     const plan = planCatchup({ current: this.tUs.value == null ? null : cadenceTarget ?? this.tUs.value, authority: external.t,
       from: earliest, safeTo: required, elapsedMs: elapsed,
+      reserveUs: Math.min(CATCHUP.publisherReserveUs, this.delaySeconds * 1_000_000),
       mode: this.catchupMode, recovering: (this.takeoverSeek || this.missingMs >= CATCHUP.stallSeekMs) && now - this.lastSeekAt >= CATCHUP.retryMs });
     if (this.pendingSeek != null && (this.pendingSeek < earliest || this.pendingSeek > required ||
         (this.missingMs >= CATCHUP.stallSeekMs && now - this.lastSeekAt >= CATCHUP.retryMs))) {

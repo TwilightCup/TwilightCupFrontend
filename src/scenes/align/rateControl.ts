@@ -2,7 +2,6 @@
  * All positions/errors are SEI epoch microseconds; elapsedMs is local monotonic time.
  */
 export const CATCHUP = {
-  backUs: 30_000_000,
   softEnterUs: 500_000,
   softExitUs: 100_000,
   maxRate: 1.08,
@@ -23,6 +22,7 @@ export interface CatchupInput {
   elapsedMs: number;
   recovering?: boolean;
   mode?: CatchupMode;
+  reserveUs?: number;
 }
 export interface CatchupPlan { mode: CatchupMode; t: number | null; rate: number }
 export function planCatchup(i: CatchupInput): CatchupPlan {
@@ -30,7 +30,7 @@ export function planCatchup(i: CatchupInput): CatchupPlan {
   const wait: CatchupPlan = { mode: "wait", t: i.current, rate: 0 };
   if (!Number.isFinite(target) || target < i.from ||
       (i.current != null && target < i.current)) return wait;
-  const reserve = CATCHUP.publisherReserveUs;
+  const reserve = i.reserveUs ?? CATCHUP.publisherReserveUs;
   if (i.current == null || i.current < i.from || i.recovering) {
     // Recovery must also leave cadence headroom; seeking to the ceiling would
     // immediately recreate the stop/start cycle on the next segment boundary.
@@ -52,12 +52,14 @@ export function recoveryGate(stableMs: number, available: boolean, elapsedMs: nu
   return { stableMs: next, ready: available && (missingMs < CATCHUP.transientMissMs || next >= CATCHUP.recoveryMs) };
 }
 
-/** 30s safety plus segment cadence at startup; 1.2s covers 1.08x extrapolation and frame error. */
-export function publisherTarget(from: number, slowTo: number, floor: number | null, startup = true): number | null {
-  const safeTo = slowTo - CATCHUP.backUs - 1_200_000;
-  // A replacement with no local presentation must honor the old publisher's
-  // floor even when that leaves less than the preferred cold-start reserve.
-  // Waiting for another 3.8s of media can exceed the 3s takeover deadline.
-  const target = Math.max(slowTo - CATCHUP.backUs - (startup ? 5_000_000 : 1_200_000), floor ?? -Infinity);
-  return target >= from && target <= safeTo ? target : null;
+/** Configured extra delay behind the slowest continuous media frontier.
+ * A takeover retains its monotonic floor when the requested delay is not attainable yet.
+ */
+export function publisherTarget(from: number, slowTo: number, floor: number | null, deltaSeconds = 15, startup = true): number | null {
+  if (!Number.isFinite(deltaSeconds) || deltaSeconds < 0 || deltaSeconds > 86400) return null;
+  // Segment delivery is stepped. The running ceiling includes cadence headroom
+  // inside the configured delay; planCatchup leaves that headroom unconsumed.
+  const headroom = startup ? 0 : Math.min(CATCHUP.publisherReserveUs, deltaSeconds * 1_000_000);
+  const target = Math.max(slowTo - deltaSeconds * 1_000_000 + headroom, floor ?? -Infinity);
+  return Number.isFinite(target) && target >= from && target <= slowTo ? target : null;
 }

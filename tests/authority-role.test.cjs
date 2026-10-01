@@ -15,10 +15,10 @@ test('only backend-selected connection can publish; old role messages cannot pro
 });
 test('publisher bootstraps without external T; followers cannot; safety floor survives takeover', () => {
   const { publisherTarget } = load('src/scenes/align/rateControl.ts');
-  assert.equal(publisherTarget(0,100e6,null),65e6);
-  assert.equal(publisherTarget(80e6,100e6,null),null);
-  assert.equal(publisherTarget(0,100e6,75e6),null);
-  assert.equal(publisherTarget(0,110e6,75e6),75e6);
+  assert.equal(publisherTarget(0,100e6,null),85e6);
+  assert.equal(publisherTarget(90e6,100e6,null),null);
+  assert.equal(publisherTarget(0,100e6,105e6),null);
+  assert.equal(publisherTarget(0,110e6,100e6),100e6);
 });
 
 test('a sole cold director can confirm takeover at a safe floor before its deadline', () => {
@@ -45,7 +45,7 @@ test('a sole cold director can confirm takeover at a safe floor before its deadl
     e.tickLoop(now); lease.report(role, 'account', 'match', e.leaseSample(now), 'visible', now);
   }
   assert(lease.canPublish(role)); assert(e.tUs.value >= 68e6);
-  assert(e.tUs.value <= 68.8e6); assert.equal(e.sync.state, 'playing');
+  assert(e.tUs.value >=85e6 && e.tUs.value <=85.8e6); assert.equal(e.sync.state, 'playing');
 });
 
 test('elected publisher starts both frames; two followers wait then track its anchor', () => {
@@ -62,13 +62,13 @@ test('elected publisher starts both frames; two followers wait then track its an
   }
   const [main,a,b] = [page(),page(),page()]; main.setPublisher(true);
   for (let t=0;t<=320;t+=16) for (const e of [main,a,b]) e.tickLoop(t);
-  assert(main.tUs.value >=65e6); assert.equal(a.tUs.value,null); assert.equal(b.tUs.value,null);
+  assert(main.tUs.value >=85e6); assert.equal(a.tUs.value,null); assert.equal(b.tUs.value,null);
   const anchor={t_us:Math.floor(main.tUs.value),epoch:1,seq:1,rate:1};
   a.external.accept(anchor,320); b.external.accept(anchor,320);
   for (let t=336;t<=656;t+=16) {a.tickLoop(t); b.tickLoop(t);}
   assert.equal(a.tUs.value,b.tUs.value); assert(a.tUs.value>=anchor.t_us);
   const before=main.tUs.value; main.resetClockConnection(); main.tickLoop(672);
   assert.equal(main.tUs.value,before); assert.equal(main.playback.speed,0);
-  a.setPublisher(true); a.authorityFloor=80e6; a.tickLoop(672);
-  assert(a.tUs.value<80e6); assert.equal(a.playback.speed,0);
+  a.setPublisher(true); a.authorityFloor=105e6; a.tickLoop(672);
+  assert(a.tUs.value<105e6); assert.equal(a.playback.speed,0);
 });

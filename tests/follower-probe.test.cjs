@@ -45,7 +45,7 @@ test('revocation followed by a no-owner frozen snapshot still permits candidate 
 });
 test('a fresh anchor reclaims a stale private probe and resets its decoder cursor once',()=>{
  const e=follower();e.tUs.value=69e6;e.selectAuthority(null,1);e.leaseSample(0);
- for(const s of e.streams.values())assert.equal(s.cursor,75e6);
+ for(const s of e.streams.values())assert.equal(s.cursor,95e6);
  e.selectAuthority('master',2);assert(e.setExternalTUs(70e6,{epoch:2,seq:1,rate:1,src:'master'}));
  const at=performance.now();for(let dt=0;dt<=500;dt+=25){e.tickLoop(at+dt);e.leaseSample(at+dt);}
  assert.equal(e.sync.state,'playing');assert(e.tUs.value>=70e6);assert.equal(e.candidateProbe,null);

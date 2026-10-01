@@ -13,8 +13,8 @@ test('publisher does not chase every 2-second segment step to the buffer edge',(
   let current=65e6,mode='normal',maxRate=0,stalls=0;
   for(let now=16;now<120000;now+=16){
     const slow=100e6+Math.floor(now/2000)*2e6;
-    const authority=publisherTarget(0,slow,current,false);
-    const p=planCatchup({current,authority,from:0,safeTo:slow-30e6,elapsedMs:16,mode});
+    const authority=publisherTarget(0,slow,current,35,false);
+    const p=planCatchup({current,authority,from:0,safeTo:slow,elapsedMs:16,mode});
     if(p.t===current)stalls++; maxRate=Math.max(maxRate,p.rate);current=p.t;mode=p.mode;
   }
   assert.equal(stalls,0);assert.equal(maxRate,1);

@@ -265,6 +265,7 @@ export const useDirectorStore = defineStore("director", () => {
   function applyAnchorDelay(delta: number, onAccepted?: () => boolean): boolean {
     return requestAnchorDelay(delta, () => {
       autoCatchup = new AutoCatchup(delta);
+      alignEngine.setDelaySeconds(delta);
       return onAccepted?.() ?? true;
     });
   }
@@ -274,7 +275,8 @@ export const useDirectorStore = defineStore("director", () => {
   }
   function requestAnchorDelay(delta: number, onAccepted?: () => boolean): boolean {
     if (!canAdjustAnchor.value || !Number.isFinite(delta) || delta < 0 || delta > 86400) return false;
-    const target = Math.round((Date.now() - delta * 1000) * 1000);
+    const target = alignEngine.delayTargetUs(delta);
+    if (target == null) { anchorAdjustment.value = "等待双路流前沿，暂无法计算目标时间"; return false; }
     if (!Number.isSafeInteger(target) || target <= 0) return false;
     const id = globalThis.crypto?.randomUUID?.() ?? `reset_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
     if (!socket.send(send.directorCommand("frame_align_reset", {
@@ -416,9 +418,10 @@ export const useDirectorStore = defineStore("director", () => {
     const playing = alignEngine.sync.state === "playing";
     // Keep decoded buffers: automatic catchup only moves the shared timeline.
     // Automatic resets preserve the initial deltaT; never compound the +5s margin.
-    const wallMs = Date.now();
-    const targetUs = Math.round((wallMs - autoCatchup.targetSeconds * 1000) * 1000);
-    if (autoCatchup.check(t, wallMs, now, playing && canAdjustAnchor.value && !matchEnded.value &&
+    const slowUs = alignEngine.slowestFrontierUs();
+    const targetUs = alignEngine.delayTargetUs(autoCatchup.targetSeconds);
+    if (slowUs != null && targetUs != null && autoCatchup.check(t, slowUs / 1000, now,
+      playing && canAdjustAnchor.value && !matchEnded.value &&
       !alignEngine.localRecoveryPending(now) && alignEngine.canAutoSeek(targetUs))) {
       if (requestAnchorDelay(autoCatchup.targetSeconds)) return;
     }

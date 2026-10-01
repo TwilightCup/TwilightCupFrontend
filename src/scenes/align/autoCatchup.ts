@@ -7,9 +7,9 @@ export class AutoCatchup {
 
   get targetSeconds(): number { return this.deltaSeconds + 5; }
 
-  check(tUs: number, wallMs: number, monoMs: number, eligible: boolean): boolean {
-    if (!eligible || !Number.isFinite(tUs) || !Number.isFinite(wallMs)) return false;
-    const delayMs = wallMs - tUs / 1000;
+  check(tUs: number, slowFrontierMs: number, monoMs: number, eligible: boolean): boolean {
+    if (!eligible || !Number.isFinite(tUs) || !Number.isFinite(slowFrontierMs)) return false;
+    const delayMs = slowFrontierMs - tUs / 1000;
     if (delayMs <= (this.deltaSeconds + 7) * 1000) this.armed = true;
     if (!this.armed || delayMs <= (this.deltaSeconds + 15) * 1000 || monoMs - this.lastAttempt < 15_000) return false;
     this.armed = false;
