@@ -85,7 +85,18 @@ export class AlignEngine {
   }
   finishTimeline(status: "preparing" | "completed" | "failed", target: number): void {
     this.resetPhase = status;
-    this.manualTarget = target;
+    this.manualTarget = status === "completed" ? null : target;
+    if (status === "completed") {
+      // Reset is a transaction, not a permanent publisher playback mode. Keep
+      // the confirmed picture/monotonic floor while releasing preparation state.
+      this.authorityFloor = Math.max(this.authorityFloor ?? 0, target, this.resumeFloor ?? 0,
+        ...Object.values(this.sync.presentedRt).map(t => t ?? 0));
+      this.pendingSeek = this.waitingT = null;
+      this.latestSeek = this.latestMissingAt = null;
+      this.stableMs = this.missingMs = 0;
+      this.catchupMode = "normal";
+      if (this.resetPresentedUs.value != null) this.takeoverSeek = false;
+    }
   }
 
   refreshAuthority(now: number): void {
@@ -188,13 +199,8 @@ export class AlignEngine {
       this.localRecovery = null;
       this.cadenceTarget = null;
       if (selected && this.manualTarget != null && this.resetPhase !== "preparing") {
-        const from = Math.max(...[...this.requiredSides].map(side =>
-          this.streams.get(side)?.coverage()?.from ?? -Infinity));
-        // On takeover an expired historical reset is only a monotonic floor.
-        // Keep available targets and active reset acknowledgement constraints.
-        if (this.manualTarget < from - 3_000_000) {
-          this.manualTarget = null; this.resetPhase = null;
-        } else this.resetPhase = "completed";
+        // A new owner inherits a time floor, never a previous owner's reset mode.
+        this.finishTimeline("completed", this.manualTarget);
       }
       this.pendingSeek = null; this.waitingT = null; this.stableMs = 0; this.catchupMode = "normal";
       if (selected && this.candidateProbe != null) {
@@ -519,13 +525,14 @@ export class AlignEngine {
     if (coverage.some(c => !c)) { freeze("waiting", false, "coverage"); return; }
     const frontiers = coverage.map(c => c!.to);
     const slow = Math.min(...frontiers);
-    const strictTarget = !this.publisher || this.manualTarget != null;
+    const preparingReset = this.publisher && this.resetPhase === "preparing";
+    const strictTarget = !this.publisher || preparingReset;
     const required = slow;
     const earliest = Math.max(...coverage.map(c => c!.from));
-    const localTarget = this.publisher && this.manualTarget != null
-      ? this.resetPhase === "completed" ? (cadenceTarget ?? this.tUs.value ?? this.manualTarget) + elapsed * 1000 : this.manualTarget
+    const localTarget = preparingReset
+      ? this.manualTarget
       : this.publisher ? publisherTarget(earliest, slow,
-      Math.max(this.authorityFloor ?? 0, this.tUs.value ?? 0), this.delaySeconds, this.tUs.value == null) : null;
+      Math.max(this.authorityFloor ?? 0, this.tUs.value ?? 0, this.resumeFloor == null ? 0 : this.resumeFloor + 1), this.delaySeconds, this.tUs.value == null) : null;
     const external = this.publisher
       ? localTarget == null ? null : { t: localTarget, rate: 1, stale: false }
       : this.external.read(now);
@@ -538,7 +545,7 @@ export class AlignEngine {
       return;
     }
     if (earliest > required) { freeze("waiting", false, "buffer_short"); return; }
-    const plan = planCatchup({ current: this.tUs.value == null ? null : cadenceTarget ?? this.tUs.value, authority: external.t,
+    const plan = planCatchup({ current: this.tUs.value == null ? null : Math.max(cadenceTarget ?? this.tUs.value, this.resumeFloor == null ? -Infinity : this.resumeFloor + 1), authority: external.t,
       from: earliest, safeTo: required, elapsedMs: elapsed,
       reserveUs: Math.min(CATCHUP.publisherReserveUs, this.delaySeconds * 1_000_000),
       mode: this.catchupMode, recovering: (this.takeoverSeek || this.missingMs >= CATCHUP.stallSeekMs) && now - this.lastSeekAt >= CATCHUP.retryMs });
@@ -617,6 +624,7 @@ export class AlignEngine {
     this.playback.speed = this.pendingSeek != null || !advanced ? 0 : plan.rate;
     this.catchupMode = plan.mode === "soft" ? "soft" : "normal";
     this.pendingSeek = null; this.waitingT = null; this.missingMs = 0; this.stableMs = 0;
+    this.resumeFloor = null;
     this.playback.behindS = (required - T) / 1e6;
     for (let i = 0; i < sides.length; i++) {
       const side = sides[i]!;
@@ -631,25 +639,9 @@ export class AlignEngine {
     freeze: (state: "waiting" | "frozen" | "stale", keep?: boolean, reason?: string) => void): void {
     if (this.publisher && this.resetPhase === "preparing" && this.resetPresentedUs.value != null) return;
     const floor = Math.max(this.resumeFloor ?? 0, ...sides.map(s => this.sync.presentedRt[s] ?? 0));
-    const recovering = this.publisher && this.resetPhase === "completed" &&
-      this.resumeFloor == null && this.sync.state !== "playing";
-    // A temporary decoder miss must not trap the local target behind the last
-    // nearest-frame pair. Resume just beyond that pair, with the same 3s bounds;
-    // unpresented explicit resets retain their original target and floor gate.
-    const T = recovering ? Math.max(external.t, floor + 1) : external.t;
+    const T = external.t;
     this.sync.targetUs = T;
-    const holdFrameInterval = (): boolean => {
-      // Completed local resets still run on the shared monotonic cadence.
-      // A nearest frame can repeat briefly at 30/60fps; retain elapsed time
-      // without refreshing picture age or treating that interval as a stall.
-      if (!this.publisher || this.resetPhase !== "completed" || this.sync.state !== "playing" ||
-          !sides.every(s => this.presented[s]) || this.resumeFloor != null ||
-          sides.some(s => Math.abs(T - (this.sync.presentedRt[s] ?? -Infinity)) > 100_000)) return false;
-      this.cadenceTarget = T; this.sync.reason = "frame_interval"; this.playback.speed = 1;
-      return true;
-    };
     if (T <= floor || (external.rate === 0 && !(this.publisher && this.resetPhase === "preparing"))) {
-      if (external.rate > 0 && holdFrameInterval()) return;
       freeze("frozen", false, "authority_behind_or_paused"); return;
     }
     // Readiness is bounded against the newest T, not an earlier pending seek.
@@ -658,12 +650,11 @@ export class AlignEngine {
     }
     const streams = sides.map(s => this.streams.get(s)!);
     const seekT = Math.max(earliest, Math.min(T, latest));
-    const floors = sides.map(s => Math.max((this.sync.presentedRt[s] ?? -Infinity) + (recovering ? 1 : 0),
+    const floors = sides.map(s => Math.max(this.sync.presentedRt[s] ?? -Infinity,
       this.publisher && this.resetPhase === "preparing" ? this.manualTarget! : -Infinity));
     for (const s of streams) s.advance(seekT);
     let frames = commonFrames(streams.map(s => s.queue), T, 3_000_000, floors);
     const fresh = frames?.every((f, i) => f.rtUs > (this.sync.presentedRt[sides[i]!] ?? -Infinity));
-    if (!fresh && frames && holdFrameInterval()) return;
     if (!fresh) this.latestMissingAt ??= now;
     if (!fresh && (this.latestSeek == null || (Math.abs(T - this.latestSeek) > 3_000_000 && Math.abs(T - (this.tUs.value ?? this.latestSeek)) > 3_000_000) || (now - this.latestMissingAt! >= 250 && now - this.lastSeekAt >= 1000))) {
       if (!streams.every(s => s.canSeek(seekT))) { freeze("waiting", false, "no_keyframe"); return; }

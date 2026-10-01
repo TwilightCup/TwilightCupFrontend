@@ -128,7 +128,8 @@ for(const gap of [8,200,2000]) {
   const seeks=e.sync.seekCount;
   for(let now=1008+gap;now<=5000+gap;now+=8)tick(now);
   assert.equal(e.sync.state,'playing',e.sync.reason);
-  assert(e.tUs.value>before+3.8e6,`clock stayed at ${e.tUs.value}`);
+  // Shared recovery can spend 250ms validating stable frames, plus frame quantization.
+  assert(e.tUs.value>before+3.7e6,`clock stayed at ${e.tUs.value}`);
   assert(e.sync.seekCount<=seeks+1,'recovery must not repeatedly rebuild the decoder');
   assert.equal(e.pictureExpired.value,false);
  });

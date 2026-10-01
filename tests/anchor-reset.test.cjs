@@ -295,12 +295,12 @@ test('server snapshot omitting absent authority does not deadlock candidate prep
     assert(sent.some(m=>m.action==='frame_align_status'&&m.payload.media_ready&&m.payload.decode_ready));
     authority(p,1,undefined,p.id,8);
     for(let now=1025;now<=1800;now+=25)p.tick(now);
-    assert(p.store.canEditAnchor);
+    assert(p.store.canAdjustAnchor);
     const published=p.drain();
     assert(published.some(m=>m.action==='frame_align'));
-    // The historical 80s floor is now >30s behind the media frontier.
-    assert(published.some(m=>m.action==='frame_align_reset'));
-    assert(p.store.resetPending);
+    // A historical completed target is only a floor; startup uses current media.
+    assert(!published.some(m=>m.action==='frame_align_reset'));
+    assert(!p.store.resetPending);
    }
   } finally {p.close();}
  }
