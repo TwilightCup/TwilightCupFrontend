@@ -529,10 +529,17 @@ export class AlignEngine {
     const strictTarget = !this.publisher || preparingReset;
     const required = slow;
     const earliest = Math.max(...coverage.map(c => c!.from));
+    const pictureFloor = Math.max(...sides.map(side => this.sync.presentedRt[side] ?? -Infinity));
+    // After a freeze, nearest-frame quantization can leave the actual picture
+    // ahead of committed T. Resume candidates must pass that picture; otherwise
+    // the floor gate prevents both decoder advancement and recovery forever.
+    const resuming = this.sync.state !== "playing" || this.missingMs > 0 || this.takeoverSeek;
+    const resumeFloor = Math.max(this.resumeFloor ?? -Infinity, resuming ? pictureFloor : -Infinity);
+    const resumeAfter = Number.isFinite(resumeFloor) ? resumeFloor + 1 : null;
     const localTarget = preparingReset
       ? this.manualTarget
       : this.publisher ? publisherTarget(earliest, slow,
-      Math.max(this.authorityFloor ?? 0, this.tUs.value ?? 0, this.resumeFloor == null ? 0 : this.resumeFloor + 1), this.delaySeconds, this.tUs.value == null) : null;
+      Math.max(this.authorityFloor ?? 0, this.tUs.value ?? 0, resumeAfter ?? 0), this.delaySeconds, this.tUs.value == null) : null;
     const external = this.publisher
       ? localTarget == null ? null : { t: localTarget, rate: 1, stale: false }
       : this.external.read(now);
@@ -545,7 +552,11 @@ export class AlignEngine {
       return;
     }
     if (earliest > required) { freeze("waiting", false, "buffer_short"); return; }
-    const plan = planCatchup({ current: this.tUs.value == null ? null : Math.max(cadenceTarget ?? this.tUs.value, this.resumeFloor == null ? -Infinity : this.resumeFloor + 1), authority: external.t,
+    // A pinned target at/before a retained picture can never pass presentation.
+    // Release only the uncommitted target; pixels and committed T stay intact.
+    if (this.pendingSeek != null && this.pendingSeek <= pictureFloor) this.pendingSeek = null;
+    if (this.waitingT != null && this.waitingT <= pictureFloor) this.waitingT = null;
+    const plan = planCatchup({ current: this.tUs.value == null ? null : Math.max(cadenceTarget ?? this.tUs.value, resumeAfter ?? -Infinity), authority: external.t,
       from: earliest, safeTo: required, elapsedMs: elapsed,
       reserveUs: Math.min(CATCHUP.publisherReserveUs, this.delaySeconds * 1_000_000),
       mode: this.catchupMode, recovering: (this.takeoverSeek || this.missingMs >= CATCHUP.stallSeekMs) && now - this.lastSeekAt >= CATCHUP.retryMs });
