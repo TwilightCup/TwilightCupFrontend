@@ -603,14 +603,27 @@ export class AlignEngine {
       freeze("frozen", false, "authority_behind_picture"); return;
     }
     for (const stream of streams) stream!.advance(T);
+    // The 3s tolerance accommodates source clock offsets, not seconds of
+    // repeated decoder output. Give mixed frame rates a short reuse grace;
+    // then require progress on that side before advancing the shared timeline.
+    const progressFloors = sides.map(side => {
+      const previous = this.sync.presentedRt[side];
+      return previous == null ? null : previous +
+        (now - this.lastPictureAt[side] >= CATCHUP.transientMissMs ? 1 : 0);
+    });
     const frames = commonFrames(streams.map(s => s!.queue), T, CATCHUP.maxFrameErrorUs,
-      sides.map(side => this.sync.presentedRt[side])) ?? [];
+      progressFloors) ?? [];
     const pairError = frames.length ? Math.max(...frames.map(f => f.rtUs)) - Math.min(...frames.map(f => f.rtUs)) : null;
     if (frames.length !== sides.length || (pairError ?? Infinity) > CATCHUP.maxFrameErrorUs) {
       this.waitingT ??= T;
       this.missingMs += elapsed; this.stableMs = 0; this.catchupMode = "normal";
       const missing = sides.filter((_, i) => !streams[i]!.queue.nearest(T, CATCHUP.maxFrameErrorUs));
-      freeze("frozen", false, missing.length ? `missing_frame:${missing.join("+")}` : "pair_error"); return;
+      const stalled = sides.filter((side, i) => progressFloors[i] != null &&
+        progressFloors[i]! > (this.sync.presentedRt[side] ?? -Infinity) &&
+        !!streams[i]!.queue.nearest(T, CATCHUP.maxFrameErrorUs) &&
+        !streams[i]!.queue.candidates(T, CATCHUP.maxFrameErrorUs, progressFloors[i]!).length);
+      freeze("frozen", false, stalled.length ? `decoder_progress_wait:${stalled.join("+")}`
+        : missing.length ? `missing_frame:${missing.join("+")}` : "pair_error"); return;
     }
     if (this.pendingSeek != null || this.missingMs > 0) {
       const gate = recoveryGate(this.stableMs, true, elapsed, this.pendingSeek == null ? this.missingMs : Infinity);
@@ -652,7 +665,21 @@ export class AlignEngine {
     const floor = Math.max(this.resumeFloor ?? 0, ...sides.map(s => this.sync.presentedRt[s] ?? 0));
     const T = external.t;
     this.sync.targetUs = T;
+    const holdFrameInterval = (): boolean => {
+      // A follower may sample authority more often than one side produces a
+      // picture. Retain readiness briefly, without committing T or renewing age.
+      if (this.publisher || external.rate <= 0 || this.sync.state !== "playing" ||
+          this.resumeFloor != null || !sides.every(side => this.presented[side] &&
+            now - this.lastPictureAt[side] < CATCHUP.transientMissMs &&
+            Math.abs(T - (this.sync.presentedRt[side] ?? -Infinity)) <= 100_000)) return false;
+      // Missing queues are real starvation, not ordinary frame repetition.
+      if (!commonFrames(sides.map(side => this.streams.get(side)!.queue), T,
+          CATCHUP.maxFrameErrorUs, sides.map(side => this.sync.presentedRt[side]))) return false;
+      this.sync.reason = "frame_interval"; this.playback.speed = external.rate;
+      return true;
+    };
     if (T <= floor || (external.rate === 0 && !(this.publisher && this.resetPhase === "preparing"))) {
+      if (holdFrameInterval()) return;
       freeze("frozen", false, "authority_behind_or_paused"); return;
     }
     // Readiness is bounded against the newest T, not an earlier pending seek.
@@ -661,11 +688,12 @@ export class AlignEngine {
     }
     const streams = sides.map(s => this.streams.get(s)!);
     const seekT = Math.max(earliest, Math.min(T, latest));
-    const floors = sides.map(s => Math.max(this.sync.presentedRt[s] ?? -Infinity,
+    const floors = sides.map(s => Math.max((this.sync.presentedRt[s] ?? -Infinity) + 1,
       this.publisher && this.resetPhase === "preparing" ? this.manualTarget! : -Infinity));
     for (const s of streams) s.advance(seekT);
     let frames = commonFrames(streams.map(s => s.queue), T, 3_000_000, floors);
     const fresh = frames?.every((f, i) => f.rtUs > (this.sync.presentedRt[sides[i]!] ?? -Infinity));
+    if (!fresh && holdFrameInterval()) return;
     if (!fresh) this.latestMissingAt ??= now;
     if (!fresh && (this.latestSeek == null || (Math.abs(T - this.latestSeek) > 3_000_000 && Math.abs(T - (this.tUs.value ?? this.latestSeek)) > 3_000_000) || (now - this.latestMissingAt! >= 250 && now - this.lastSeekAt >= 1000))) {
       if (!streams.every(s => s.canSeek(seekT))) { freeze("waiting", false, "no_keyframe"); return; }
