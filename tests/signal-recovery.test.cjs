@@ -1,29 +1,9 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const load=require('./load-ts.cjs')();
-const {SignalRecovery}=load('src/scenes/align/signalPolicy.ts');
 const {planCatchup}=load('src/scenes/align/rateControl.ts');
-test('single loss waits ten seconds, retries do not reset wait, healthy side continues',()=>{
- const s=new SignalRecovery();
- assert.equal(s.update(0,['A','B'],['B'],[]).hold,true);
- assert.equal(s.update(9999,['A','B'],['B'],[]).hold,true);
- assert.deepEqual(s.update(10000,['A','B'],['B'],[]).active,['A']);
- assert.deepEqual(s.update(12000,['A','B'],[],[]).active,['A']);
- assert.deepEqual(s.update(13000,['A','B'],[],['B']).active,['A','B']);
-});
-test('both lost show waiting immediately, either side can recover without the other',()=>{
- const s=new SignalRecovery();
- assert.deepEqual(s.update(0,['A','B'],['A','B'],[]).active,[]);
- assert.deepEqual(s.update(100,['A','B'],['B'],['A']).active,['A']);
-});
-test('short outage recovers without excluding a side; reset has no previous wait',()=>{
- const s=new SignalRecovery();s.update(0,['A','B'],['B'],[]);
- assert.equal(s.update(9999,['A','B'],[],[]).hold,false);
- assert.equal(s.update(10000,['A','B'],['B'],[]).hold,true);
- s.reset();assert.equal(s.update(30000,['A','B'],['B'],[]).hold,true);
-});
 test('publisher delay alone stays soft, persistent missing frames still reanchor',()=>{
- const i={current:50e6,authority:80e6,from:0,safeTo:90e6,elapsedMs:16,rate:1,supply:true,publisher:true};
+ const i={current:50e6,authority:80e6,from:0,safeTo:90e6,elapsedMs:16};
  assert.equal(planCatchup(i).mode,'soft');
  assert.equal(planCatchup({...i,recovering:true}).mode,'seek');
  assert.equal(planCatchup({...i,from:55e6}).mode,'seek');

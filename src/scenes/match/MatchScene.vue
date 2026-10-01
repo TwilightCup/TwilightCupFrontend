@@ -119,19 +119,17 @@ function mockLiveSample(side: "A" | "B"): LiveTime {
     receivedAt: now,
   };
 }
-// ---- SEI 帧级对齐：每侧是否进入对齐渲染（config.alignX && 有流 && 能力 aligned）----
+// ---- SEI 帧级对齐：每侧是否进入对齐渲染（config.alignX && 有流）----
 // 对齐开时叠加层计时锚定虚拟时间 T（useAlignedTiming），画面走 SeiStream；否则回落
 // useLiveTimers + useDelayedRef 手动 delay（MSE StreamFrame）。
 const alignedA = useAlignedTiming("A", {
   enabled: () => config.alignA && !!config.hlsA,
   offsetMs: () => config.delayA * 1000,
-  liveOf: () => (liveReady.value ? displayLive("A") : null),
   sampleAt: wallMs => timerStateAt("A", wallMs),
 });
 const alignedB = useAlignedTiming("B", {
   enabled: () => config.alignB && !!config.hlsB,
   offsetMs: () => config.delayB * 1000,
-  liveOf: () => (liveReady.value ? displayLive("B") : null),
   sampleAt: wallMs => timerStateAt("B", wallMs),
 });
 // 只要对齐开关开着且有 m3u8 地址就挂 SeiStream（立即开始拉流/解码），否则（对齐关）回 MSE。
@@ -603,7 +601,7 @@ onUnmounted(() => {
         </header>
 
         <!-- 双 4:3 选手画面：水平居中、无缝衔接、满屏宽。
-             对齐开且能力可用 → SeiStream（SEI 帧级对齐/共享 T）；否则 StreamFrame(MSE) 兜底 -->
+             对齐开且有 HLS 地址 → SeiStream（SEI 帧级对齐/共享 T）；否则 StreamFrame(MSE) -->
         <section class="streams">
           <SeiStream
             v-if="seiA"

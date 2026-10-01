@@ -263,10 +263,14 @@ export const useDirectorStore = defineStore("director", () => {
   const canEditAnchor = computed(() => connStatus.value === "open" && alignRole.value === "publisher");
   const canAdjustAnchor = computed(() => canEditAnchor.value && !resetPending.value);
   function applyAnchorDelay(delta: number, onAccepted?: () => boolean): boolean {
-    if (!requestAnchorDelay(delta, onAccepted)) return false;
-    // Only an explicit operator setting changes the initial deltaT.
-    autoCatchup = new AutoCatchup(delta);
-    return true;
+    return requestAnchorDelay(delta, () => {
+      autoCatchup = new AutoCatchup(delta);
+      return onAccepted?.() ?? true;
+    });
+  }
+  function recoverPlayback(onAccepted?: () => boolean): boolean {
+    if (alignEngine.localRecoveryPending(performance.now())) return false;
+    return requestAnchorDelay(autoCatchup.deltaSeconds, onAccepted);
   }
   function requestAnchorDelay(delta: number, onAccepted?: () => boolean): boolean {
     if (!canAdjustAnchor.value || !Number.isFinite(delta) || delta < 0 || delta > 86400) return false;
@@ -414,7 +418,8 @@ export const useDirectorStore = defineStore("director", () => {
     // Automatic resets preserve the initial deltaT; never compound the +5s margin.
     const wallMs = Date.now();
     const targetUs = Math.round((wallMs - autoCatchup.targetSeconds * 1000) * 1000);
-    if (autoCatchup.check(t, wallMs, now, playing && canAdjustAnchor.value && !matchEnded.value && alignEngine.canAutoSeek(targetUs))) {
+    if (autoCatchup.check(t, wallMs, now, playing && canAdjustAnchor.value && !matchEnded.value &&
+      !alignEngine.localRecoveryPending(now) && alignEngine.canAutoSeek(targetUs))) {
       if (requestAnchorDelay(autoCatchup.targetSeconds)) return;
     }
     socket.send(send.directorCommand("frame_align", {
@@ -475,7 +480,7 @@ export const useDirectorStore = defineStore("director", () => {
           winsA.value = winsB.value = 0; lastResult.value = null; draft.value = null;
           clearRoundTelemetry();
           history.clear(); // never retain a partially reset old-match snapshot
-          frameAlign.value = null; currentAlignSrc.value = null;
+          currentAlignSrc.value = null;
         }
         seat.value = msg.seat;
         matchId.value = msg.match_id;
@@ -821,7 +826,6 @@ export const useDirectorStore = defineStore("director", () => {
     ready_b?: boolean;
     src?: string | null;
   }
-  const frameAlign = ref<{ tUs: number | null; readyA: boolean; readyB: boolean } | null>(null);
   /** 当前唯一权威 id——由后端选举决定（align_authority 通知 / state_sync.align_authority_src）。
    *  后端已只扇出权威的 frame_align，前端不再自己锁 src，避免拒绝后端合法接管的新权威。 */
   const currentAlignSrc = ref<string | null>(null);
@@ -837,7 +841,6 @@ export const useDirectorStore = defineStore("director", () => {
         awaitingPromotionAnchor = false;
         alignEngine.setPublisher(true);
       }
-      frameAlign.value = { tUs: p.t_us, readyA: !!p.ready_a, readyB: !!p.ready_b };
     }
   }
 
@@ -1001,9 +1004,8 @@ export const useDirectorStore = defineStore("director", () => {
     // subsegment 实时时间差（偏差条数据源）+ 到达时刻（防剧透门控）
     subsegmentGap,
     subsegmentGapAt,
-    // 主控制台上报的帧对齐统一虚拟时间 T + A/B 就绪（跨文档一致性）
-    frameAlign,
-    alignRole, timelineVersion, anchorAdjustment, resetPending, canEditAnchor, canAdjustAnchor, applyAnchorDelay,
+    // 对齐角色与公共时间线重锚控制
+    alignRole, timelineVersion, anchorAdjustment, resetPending, canEditAnchor, canAdjustAnchor, applyAnchorDelay, recoverPlayback,
     // 双席 live_time 实时计时（主计时器实时走表数据源）
     liveTimeA,
     liveTimeB,

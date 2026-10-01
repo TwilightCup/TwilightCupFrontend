@@ -7,8 +7,6 @@
  * flags bit0=关键帧、bit1=NTP 校准。UUID 无 0x00 字节可直接在段字节里搜；
  * 字段区可能含 0x00 被插入 0x03(EPB)，读字段必须先反转义。
  */
-export { UUID, UUID_HEX, FIELD_SIZE, FLAG_KEYFRAME, FLAG_CLOCK_NTP };
-
 const UUID_HEX = "7e57c2ee0dd24b539b3593edf97a12c1";
 const UUID = new Uint8Array(16);
 {
@@ -155,84 +153,4 @@ export function parseSampleSei(payload: Uint8Array, codec: Codec): SeiFrameInfo 
     if (info) return info;
   }
   return null;
-}
-
-/**
- * 造 SEI NAL（自检用）——镜像 sei_ts_build_nal 的转义/编码算法，与 C/Python 同。
- */
-export function buildSeiNal(codec: Codec, info: {
-  keyframe: boolean;
-  clock_ntp: boolean;
-  seq: number;
-  media_pts: bigint;
-  realtime_us: bigint;
-}): Uint8Array {
-  const payload = new Uint8Array(16 + FIELD_SIZE);
-  payload.set(UUID, 0);
-  payload[16] = 1;
-  payload[17] =
-    (info.keyframe ? FLAG_KEYFRAME : 0) | (info.clock_ntp ? FLAG_CLOCK_NTP : 0);
-  payload[18] = (info.seq >> 24) & 0xff;
-  payload[19] = (info.seq >> 16) & 0xff;
-  payload[20] = (info.seq >> 8) & 0xff;
-  payload[21] = info.seq & 0xff;
-  let v = BigInt.asUintN(64, BigInt(info.media_pts));
-  for (let k = 7; k >= 0; k--) payload[22 + (7 - k)] = Number((v >> BigInt(k * 8)) & 0xffn);
-  v = BigInt.asUintN(64, BigInt(info.realtime_us));
-  for (let k = 7; k >= 0; k--) payload[30 + (7 - k)] = Number((v >> BigInt(k * 8)) & 0xffn);
-
-  const varUint = (x: number): number[] => {
-    const a: number[] = [];
-    while (x >= 0xff) { a.push(0xff); x -= 0xff; }
-    a.push(x);
-    return a;
-  };
-  const typeB = varUint(SEI_PAYLOAD_TYPE);
-  const sizeB = varUint(payload.length);
-
-  const head = codec === "h264" ? [0x06] : [NAL_SEI_H265[0] << 1, 0x01];
-  const buf: number[] = [0, 0, 0, 1, ...head, ...typeB, ...sizeB];
-  let zeros = 0;
-  for (const b of buf) zeros = b === 0 ? zeros + 1 : 0; // 跨 NAL 前缀统计零游程
-  for (let i = 0; i < payload.length; i++) {
-    const b = payload[i];
-    if (zeros >= 2 && b <= 0x03) { buf.push(0x03); zeros = 0; }
-    buf.push(b);
-    zeros = b === 0 ? zeros + 1 : 0;
-  }
-  buf.push(0x80); // rbsp_stop_one_bit
-  return new Uint8Array(buf);
-}
-
-/** 造帧↔解析对拍自检。buildSeiNal 产出含起始码的完整 NAL，真实解析路径
- *  （splitAvcc / splitAnnexb）剥起始码后喂 parseSeiNal——自检同样剥掉前 4 字节。 */
-export function seiSelfTest(): string[] {
-  const infos: {
-    codec: Codec;
-    info: { keyframe: boolean; clock_ntp: boolean; seq: number; media_pts: bigint; realtime_us: bigint };
-  }[] = [
-    { codec: "h264", info: { keyframe: true, clock_ntp: true, seq: 42, media_pts: 8400000000n, realtime_us: 1767153600123456n } },
-    { codec: "hevc", info: { keyframe: false, clock_ntp: false, seq: 7, media_pts: 1400000000n, realtime_us: 1767153600222222n } },
-  ];
-  const lines: string[] = [];
-  for (const { codec, info } of infos) {
-    const nal = buildSeiNal(codec, info);
-    const got = parseSeiNal(nal.subarray(4), codec); // 剥起始码
-    const pass =
-      !!got && got.seq === info.seq && got.keyframe === info.keyframe &&
-      got.clock_ntp === info.clock_ntp && got.media_pts === info.media_pts &&
-      got.realtime_us === info.realtime_us;
-    lines.push(
-      `[${codec.toUpperCase()}] 造帧 ${nal.length}B → 解析 ${pass ? "OK" : "FAIL"} seq=${got?.seq} key=${got?.keyframe} ntp=${got?.clock_ntp} rt=${got?.realtime_us}`,
-    );
-  }
-  const nal = buildSeiNal("h264", infos[0]!.info);
-  // UUID 无 0x00（≤0x03 才被 EPB 转义），在原始字节里应整段连续可搜到（字节级，非字符串比 HEX 字形）
-  let hit = -1;
-  outer: for (let i = 0; i + 16 <= nal.length; i++) {
-    for (let j = 0; j < 16; j++) if (nal[i + j] !== UUID[j]) continue outer;
-    hit = i; break;
-  }
-  lines.push(`[H264] 原始 NAL 内 UUID（16B 字节序列）${hit >= 0 ? `命中 @${hit}` : "未命中"}`);
-  return lines;
 }

@@ -40,7 +40,6 @@ export class ExternalClock {
   private lastInput = -Infinity;
   private lastOutput = -Infinity;
   private seenSources = new Set<string>();
-  get attached(): boolean { return this.anchor !== null; }
   /** Ownership survives a late heartbeat. A server no-owner freeze is only a
    * timeline floor and must not block private candidate preparation. */
   get hasAuthority(): boolean {

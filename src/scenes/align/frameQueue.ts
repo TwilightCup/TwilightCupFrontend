@@ -3,7 +3,6 @@
  * GPU 显存被 10 分钟解码帧撑爆（10 分钟"缓冲"在 HLS 原始下载层，见 frameLock.ts）。
  * T 单调前向 → nearest 选取天然稳定、不回放。
  */
-import type { AlignedFrame } from "./types";
 
 export interface FrameEntry {
   rtUs: number;
@@ -146,7 +145,6 @@ export class FrameQueue {
   }
 }
 
-export type { AlignedFrame };
 /** Select a common A/B pair, rather than rejecting independently nearest frames.
  * Both target error and pair error retain the same bound; presented rt cannot rewind. */
 export function commonFrames(queues: FrameQueue[], targetUs: number, maxErrorUs: number,

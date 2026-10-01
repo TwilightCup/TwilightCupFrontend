@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /**
  * 对齐渲染展示层（canvas）——不做独立解码/独立对齐，只消费单一权威 alignEngine 的
- * 帧（舞台 A/B 与控制台 A/B 同 T 同帧，像素一致，§1.2）。能力不可用(off) → 序言占位，
- * 由父组件据 modeOf 切回 StreamFrame(MSE) 兜底。
+ * 帧。同一文档内复用解码帧，独立舞台与控制台经 WS 跟随公共 T。
+ * 能力不可用(off)时展示等待或解码错误；对齐关闭时由父组件切回 StreamFrame。
  *
  * side='A' 蓝（左）、'B' 红（右）。
  */
@@ -76,7 +76,7 @@ watch(
   (m) => { aligned.value = m === "aligned"; },
 );
 
-// canvas 元素随 aligned 出现/消失 → 注册/注销到权威（同一侧可多 canvas）
+// canvas 元素挂载/卸载 → 注册/注销到本页引擎（同一侧可多 canvas）
 watch(cv, (c) => {
   unreg?.();
   unreg = c ? alignEngine.registerCanvas(props.side, c, props.directorOutput ? {

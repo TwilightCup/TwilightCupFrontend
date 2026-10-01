@@ -4,9 +4,8 @@ import { reactive, ref, type Ref } from "vue";
 import type { LeaseSample } from "./frameLeaseClient";
 import { DirectorFrameRenderer, type DirectorSurfaceOptions } from "./directorFrameRenderer";
 import { PlaybackDriver } from "./playbackDriver";
-import { SIGNAL } from "./signalPolicy";
 import { ExternalClock, type FrameAlignAnchor } from "./externalClock";
-import { commonFrames } from "./frameQueue";
+import { commonFrames, type FrameEntry } from "./frameQueue";
 import { CATCHUP, planCatchup, recoveryGate, publisherTarget, type CatchupMode } from "./rateControl";
 import { FrameLockStream } from "./frameLock";
 import { createFrameSource } from "./transport";
@@ -45,6 +44,7 @@ export class AlignEngine {
   readonly authorityReady = ref(false);
   readonly pictureExpired = ref(false);
   private lastPictureAt: Record<Side, number> = { A: -Infinity, B: -Infinity };
+  private localRecovery: { at: number; frames: Record<Side, number | null> } | null = null;
   private manualTarget: number | null = null;
   private resetPhase: "preparing" | "completed" | "failed" | null = null;
   private resumeFloor: number | null = null;
@@ -52,6 +52,7 @@ export class AlignEngine {
   private latestMissingAt: number | null = null;
   readonly resetPresentedUs = ref<number | null>(null);
   beginTimeline(target: number): void {
+    this.localRecovery = null;
     this.cadenceTarget = null;
     // Retain pixels and their actual presentation floor, never play backwards.
     const shown = Object.values(this.sync.presentedRt).filter((x): x is number => x != null);
@@ -81,12 +82,23 @@ export class AlignEngine {
   }
 
   private recordPictureProgress(now: number, sides: Side[], frames: { rtUs: number }[]): void {
+    if (this.localRecovery && sides.every((side, index) =>
+      frames[index]!.rtUs > (this.localRecovery!.frames[side] ?? -Infinity))) this.localRecovery = null;
     for (let i = 0; i < sides.length; i++) {
       const side = sides[i]!;
       // A/B can advance on different ticks. Repeated frames never renew a side.
       if (frames[i]!.rtUs > (this.sync.presentedRt[side] ?? -Infinity)) this.lastPictureAt[side] = now;
     }
     this.refreshPictureExpiry(now);
+  }
+
+  private beginLocalRecovery(now: number): void {
+    if (this.tUs.value == null || this.resetPhase === "preparing") return;
+    this.localRecovery ??= { at: now, frames: { ...this.sync.presentedRt } };
+  }
+
+  localRecoveryPending(now: number): boolean {
+    return this.localRecovery != null && now - this.localRecovery.at < CATCHUP.localRecoveryMs;
   }
 
   private streams = new Map<Side, FrameLockStream>();
@@ -133,7 +145,7 @@ export class AlignEngine {
 
   /** 虚拟对齐时间戳 T（epoch 微秒）；未就绪 null */
   readonly tUs: Ref<number | null> = ref(null);
-  /** 各侧解码能力（响应式，供 UI 切 SeiStream/回退 MSE） */
+  /** 各侧解码能力（响应式，供 UI 展示解码状态） */
   readonly modes = reactive<Record<Side, "aligned" | "off">>({ A: "off", B: "off" });
   /** 各侧最近拉流错误（可读文案；有内容后清空）。供导播界面直接提示，不必翻 console */
   readonly streamError = reactive<Record<Side, string | null>>({ A: null, B: null });
@@ -156,6 +168,7 @@ export class AlignEngine {
   setPublisher(selected: boolean): void {
     selected = selected && this.candidateEnabled;
     if (this.publisher !== selected) {
+      this.localRecovery = null;
       this.cadenceTarget = null;
       if (selected && this.manualTarget != null && this.resetPhase !== "preparing") {
         const from = Math.max(...[...this.requiredSides].map(side =>
@@ -180,6 +193,7 @@ export class AlignEngine {
     this.refreshAuthority(performance.now());
   }
   resetClockConnection(): void {
+    this.localRecovery = null;
     this.cadenceTarget = null;
     this.manualTarget = null; this.resetPhase = null; this.resumeFloor = null; this.latestSeek = null; this.latestMissingAt = null;
     this.resetPresentedUs.value = null;
@@ -273,7 +287,7 @@ export class AlignEngine {
       if (target < from || target > to || probe?.sides !== active.join()) target = Math.max(from, to - 5_000_000);
       media = streams.length > 0 && target >= from && target <= to && streams.every(s => s.canSeek(target));
       if (media) {
-        if (!probe || probe.target !== target || probe.sides !== active.join() || (now - probe.at >= SIGNAL.retryMs && !commonFrames(streams.map(s => s.queue), target, CATCHUP.maxFrameErrorUs))) {
+        if (!probe || probe.target !== target || probe.sides !== active.join() || (now - probe.at >= CATCHUP.retryMs && !commonFrames(streams.map(s => s.queue), target, CATCHUP.maxFrameErrorUs))) {
           for (const s of streams) s.seek(target);
           this.candidateProbe = { target, sides: active.join(), at: now };
         }
@@ -298,12 +312,13 @@ export class AlignEngine {
       state: media && decoded && !holdingSignal ? "running" : "media_wait" };
   }
   setRequiredSides(sides: Side[]): void {
+    this.localRecovery = null;
     this.cadenceTarget = null;
     this.requiredSides = new Set(sides);
     this.enabled.value = sides.length > 0;
   }
 
-  /* ---- 流管理（每侧唯一流，引用计数：舞台/控制台共同引用，计数归零才停） ---- */
+  /* ---- 流管理（每文档每侧唯一流，引用计数归零才停） ---- */
   private refs = new Map<Side, Set<symbol>>();
   startStream(side: Side, url: string, kind: "hls" | "annexb" = "hls"): () => void {
     if (this.sourceUrls.get(side) !== url && this.streams.has(side)) {
@@ -368,6 +383,7 @@ export class AlignEngine {
     release();
   }
   resetSession(): void {
+    this.localRecovery = null;
     this.cadenceTarget = null;
     for (const stream of this.streams.values()) stream.stop();
     this.streams.clear(); this.refs.clear(); this.sourceUrls.clear(); this.refreshNonces.clear();
@@ -397,6 +413,7 @@ export class AlignEngine {
   }
   /** Restart decoding while retaining the last pixels and their time floor. */
   private resetPresented(side: Side): void {
+    this.localRecovery = null;
     this.cadenceTarget = null;
     for (const canvas of this.canvases.get(side) ?? []) {
       this.directorRenderer.forget(canvas);
@@ -411,9 +428,6 @@ export class AlignEngine {
       const coverage = stream?.coverage();
       return !!coverage && targetUs >= coverage.from && targetUs <= coverage.to && !!stream?.canSeek(targetUs);
     });
-  }
-  frontierOf(side: Side): number | null {
-    return this.streams.get(side)?.frontier() ?? null;
   }
   /** 已注册展示 canvas 数（供监控统计） */
   registerCanvas(side: Side, canvas: HTMLCanvasElement, options?: DirectorSurfaceOptions): () => void {
@@ -465,25 +479,15 @@ export class AlignEngine {
     });
   }
 
-  /** Only locally configured sides participate; remote readiness is informational. */
-  private playbackSides(required: Side[]): { sides: Side[]; hold: boolean } {
-    this.sync.activeSides = [...required]; this.sync.waitingSides = [];
-    return { sides: [...required], hold: false };
-  }
-
   private tickLoop(now: number): void {
     this.refreshAuthority(now);
     const cadenceTarget = this.sync.state === "playing" ? this.cadenceTarget : null;
     this.cadenceTarget = null;
     const elapsed = Math.max(0, Math.min(now - this.last, 100));
     this.last = now;
-    const requiredSides = this.requiredSides.size ? [...this.requiredSides] : [...this.streams.keys()];
+    const sides = this.requiredSides.size ? [...this.requiredSides] : [...this.streams.keys()];
     // Every document owns its A/B readiness; another page cannot drop a side.
-    const membership = this.playbackSides(requiredSides);
-    const sides = membership.sides;
-    for (const side of requiredSides) if (!sides.includes(side)) {
-      this.presented[side] = false; this.sync.presentedRt[side] = null; this.sync.targetErrorUs[side] = null;
-    }
+    this.sync.activeSides = [...sides]; this.sync.waitingSides = [];
     const streams = sides.map(side => this.streams.get(side));
     const coverage = streams.map(stream => stream?.coverage() ?? null);
     const freeze = (state: "waiting" | "frozen" | "stale", keepRecovery = false, reason = state as string) => {
@@ -494,7 +498,7 @@ export class AlignEngine {
       this.playback.speed = 0;
       for (const side of sides) this.presented[side] = false;
     };
-    if (membership.hold || !sides.length) { freeze("waiting", false, "signal_wait"); return; }
+    if (!sides.length) { freeze("waiting", false, "signal_wait"); return; }
     if (coverage.some(c => !c)) { freeze("waiting", false, "coverage"); return; }
     const frontiers = coverage.map(c => c!.to);
     const slow = Math.min(...frontiers);
@@ -518,16 +522,17 @@ export class AlignEngine {
     }
     if (earliest > required) { freeze("waiting", false, "buffer_short"); return; }
     const plan = planCatchup({ current: this.tUs.value == null ? null : cadenceTarget ?? this.tUs.value, authority: external.t,
-      from: earliest, safeTo: required, elapsedMs: elapsed, rate: external.rate,
-      supply: true, publisher: this.publisher, mode: this.catchupMode, recovering: (this.takeoverSeek || this.missingMs >= CATCHUP.stallSeekMs) && now - this.lastSeekAt >= SIGNAL.retryMs });
+      from: earliest, safeTo: required, elapsedMs: elapsed,
+      mode: this.catchupMode, recovering: (this.takeoverSeek || this.missingMs >= CATCHUP.stallSeekMs) && now - this.lastSeekAt >= CATCHUP.retryMs });
     if (this.pendingSeek != null && (this.pendingSeek < earliest || this.pendingSeek > required ||
-        (this.missingMs >= CATCHUP.stallSeekMs && now - this.lastSeekAt >= SIGNAL.retryMs))) {
+        (this.missingMs >= CATCHUP.stallSeekMs && now - this.lastSeekAt >= CATCHUP.retryMs))) {
       this.pendingSeek = null; this.waitingT = null;
     }
     if (this.pendingSeek == null && plan.mode === "seek" && plan.t != null) {
       if (!streams.every(stream => stream!.canSeek(plan.t!))) { freeze("waiting", false, "no_keyframe"); return; }
       // Preflight both GOPs before invalidating either decoder. Commit T only after both decode.
       this.lastSeekAt = now;
+      this.beginLocalRecovery(now);
       this.sync.seekCount++;
       this.sync.lastSeekReason = this.tUs.value == null ? "startup" : this.tUs.value < earliest
         ? "coverage_gap" : this.missingMs >= CATCHUP.stallSeekMs ? "decode_stall" : "clock_drift";
@@ -576,35 +581,15 @@ export class AlignEngine {
       this.stableMs = gate.stableMs;
       if (!gate.ready) { freeze("frozen", true, "recovery_hysteresis"); return; }
     }
-    // Stage all draws before touching any visible canvas. A missing/closed frame cannot
-    // advance one side alone. JS canvas commits run in the same task, before browser paint.
-    const directorCommits: (() => HTMLCanvasElement[])[] = [];
-    const prepared: { canvas: HTMLCanvasElement; buffer: HTMLCanvasElement }[] = [];
+    let commit: () => void;
     try {
-      for (let i = 0; i < sides.length; i++) {
-        const side = sides[i]!;
-        const optimized = (this.canvases.get(side) ?? []).filter(c => this.surfaceOptions.has(c));
-        if (optimized.length) directorCommits.push(this.directorRenderer.prepare(side,
-          frames[i]!.handle as globalThis.VideoFrame, this.streamGenerations.get(side) ?? 0,
-          optimized.map(canvas => ({ canvas, options: this.surfaceOptions.get(canvas)! }))));
-        for (const canvas of this.canvases.get(sides[i]!) ?? []) {
-          if (this.surfaceOptions.has(canvas)) continue;
-          const buffer = this.drawBuffer(canvas, frames[i]!.handle as globalThis.VideoFrame);
-          prepared.push({ canvas, buffer });
-        }
-      }
+      commit = this.preparePresentation(sides, frames);
     } catch {
       this.waitingT ??= T;
       this.missingMs += elapsed; this.stableMs = 0; this.catchupMode = "normal";
       freeze("frozen"); return;
     }
-    for (const { canvas, buffer } of prepared) {
-      if (canvas.width !== buffer.width) canvas.width = buffer.width;
-      if (canvas.height !== buffer.height) canvas.height = buffer.height;
-      canvas.getContext("2d")!.drawImage(buffer, 0, 0);
-      this.paintedCanvases.add(canvas);
-    }
-    for (const commit of directorCommits) for (const canvas of commit()) this.paintedCanvases.add(canvas);
+    commit();
     const advanced = this.tUs.value == null || T > this.tUs.value;
     this.recordPictureProgress(now, sides, frames);
     this.tUs.value = T; // committed presentation time; overlays must never use targetUs
@@ -665,6 +650,7 @@ export class AlignEngine {
     if (!fresh && (this.latestSeek == null || (Math.abs(T - this.latestSeek) > 3_000_000 && Math.abs(T - (this.tUs.value ?? this.latestSeek)) > 3_000_000) || (now - this.latestMissingAt! >= 250 && now - this.lastSeekAt >= 1000))) {
       if (!streams.every(s => s.canSeek(seekT))) { freeze("waiting", false, "no_keyframe"); return; }
       for (const s of streams) s.seek(seekT);
+      this.beginLocalRecovery(now);
       this.latestSeek = T; this.lastSeekAt = now; this.sync.seekCount++;
       this.sync.lastSeekReason = "latest_target";
     }
@@ -680,35 +666,15 @@ export class AlignEngine {
         frames.some(f => f.rtUs < this.manualTarget! || f.rtUs > this.manualTarget! + 1_000_000)) {
       freeze("frozen", false, "reset_target_frame"); return;
     }
-    // Stage all draws before touching any visible canvas. A missing/closed frame cannot
-    // advance one side alone. JS canvas commits run in the same task, before browser paint.
-    const directorCommits: (() => HTMLCanvasElement[])[] = [];
-    const prepared: { canvas: HTMLCanvasElement; buffer: HTMLCanvasElement }[] = [];
+    let commit: () => void;
     try {
-      for (let i = 0; i < sides.length; i++) {
-        const side = sides[i]!;
-        const optimized = (this.canvases.get(side) ?? []).filter(c => this.surfaceOptions.has(c));
-        if (optimized.length) directorCommits.push(this.directorRenderer.prepare(side,
-          frames[i]!.handle as globalThis.VideoFrame, this.streamGenerations.get(side) ?? 0,
-          optimized.map(canvas => ({ canvas, options: this.surfaceOptions.get(canvas)! }))));
-        for (const canvas of this.canvases.get(sides[i]!) ?? []) {
-          if (this.surfaceOptions.has(canvas)) continue;
-          const buffer = this.drawBuffer(canvas, frames[i]!.handle as globalThis.VideoFrame);
-          prepared.push({ canvas, buffer });
-        }
-      }
+      commit = this.preparePresentation(sides, frames);
     } catch {
       this.waitingT ??= T;
       this.missingMs += elapsed; this.stableMs = 0; this.catchupMode = "normal";
       freeze("frozen"); return;
     }
-    for (const { canvas, buffer } of prepared) {
-      if (canvas.width !== buffer.width) canvas.width = buffer.width;
-      if (canvas.height !== buffer.height) canvas.height = buffer.height;
-      canvas.getContext("2d")!.drawImage(buffer, 0, 0);
-      this.paintedCanvases.add(canvas);
-    }
-    for (const commit of directorCommits) for (const canvas of commit()) this.paintedCanvases.add(canvas);
+    commit();
     this.tUs.value = this.publisher && this.resetPhase === "preparing" ? actual : T;
     this.recordPictureProgress(now, sides, frames); this.latestMissingAt = null;
     this.resumeFloor = null; this.sync.state = "playing"; this.sync.reason = "playing";
@@ -721,6 +687,33 @@ export class AlignEngine {
       this.presented[side] = true;
     }
     if (this.publisher && this.resetPhase === "preparing") this.resetPresentedUs.value = actual;
+  }
+  private preparePresentation(sides: Side[], frames: FrameEntry[]): () => void {
+    // Stage all draws before touching any visible canvas. A missing/closed frame cannot
+    // advance one side alone. JS canvas commits run in the same task, before browser paint.
+    const directorCommits: (() => HTMLCanvasElement[])[] = [];
+    const prepared: { canvas: HTMLCanvasElement; buffer: HTMLCanvasElement }[] = [];
+    for (let index = 0; index < sides.length; index++) {
+      const side = sides[index]!;
+      const optimized = (this.canvases.get(side) ?? []).filter(canvas => this.surfaceOptions.has(canvas));
+      if (optimized.length) directorCommits.push(this.directorRenderer.prepare(side,
+        frames[index]!.handle as globalThis.VideoFrame, this.streamGenerations.get(side) ?? 0,
+        optimized.map(canvas => ({ canvas, options: this.surfaceOptions.get(canvas)! }))));
+      for (const canvas of this.canvases.get(side) ?? []) {
+        if (this.surfaceOptions.has(canvas)) continue;
+        const buffer = this.drawBuffer(canvas, frames[index]!.handle as globalThis.VideoFrame);
+        prepared.push({ canvas, buffer });
+      }
+    }
+    return () => {
+      for (const { canvas, buffer } of prepared) {
+        if (canvas.width !== buffer.width) canvas.width = buffer.width;
+        if (canvas.height !== buffer.height) canvas.height = buffer.height;
+        canvas.getContext("2d")!.drawImage(buffer, 0, 0);
+        this.paintedCanvases.add(canvas);
+      }
+      for (const commit of directorCommits) for (const canvas of commit()) this.paintedCanvases.add(canvas);
+    };
   }
   private buffers = new WeakMap<HTMLCanvasElement, HTMLCanvasElement>();
   private drawBuffer(canvas: HTMLCanvasElement, frame: globalThis.VideoFrame): HTMLCanvasElement {

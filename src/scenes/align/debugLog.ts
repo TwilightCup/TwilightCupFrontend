@@ -43,10 +43,5 @@ export const logSeg: (key: string, ...parts: unknown[]) => void = mk();
 export const logDec: (key: string, ...parts: unknown[]) => void = mk();
 /** 解码错误 / 重同步事件 */
 export const logResync: (key: string, ...parts: unknown[]) => void = mk();
-/** T 速率控制决策（追回触发/完成/重锚/冻结回退） */
-export const logT: (key: string, ...parts: unknown[]) => void = mk();
 /** 外部权威 T / 超时回退（useFrameAlign） */
 export const logAuth: (key: string, ...parts: unknown[]) => void = mk();
-
-/** 是否开启（诊断提示用） */
-export const alignDebugEnabled = enabled;
