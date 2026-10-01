@@ -257,6 +257,7 @@ export const useDirectorStore = defineStore("director", () => {
   let requestedReset: string | null = null;
   let onResetAccepted: (() => boolean) | null = null;
   let reloadFailed = false;
+  let lastFailedResetReconnect = -Infinity;
   let autoCatchup = new AutoCatchup();
   let resetRecord: { request_id: string; status: "preparing" | "completed" | "failed"; target_t_us: number; owner_id: string; authority_epoch: number } | null = null;
   let ackSent = false;
@@ -341,6 +342,30 @@ export const useDirectorStore = defineStore("director", () => {
     anchorAdjustment.value = p.status === "preparing" ? "准备目标画面中（最长 10 秒）"
       : p.status === "completed" ? "应用成功" : `调整失败：${p.code}`;
     if (reloadFailed) anchorAdjustment.value += "；双路重拉未发送，请重试";
+    if (p.status === "failed" && p.owner_id === authorityRole.connectionId &&
+        authorityRole.publisher && !frameLease.required) {
+      const request = p.request_id, connection = authorityRole.connectionId, epoch = authorityRole.epoch;
+      queueMicrotask(() => reconnectFailedReset(request, connection, epoch));
+    }
+  }
+
+  function reconnectFailedReset(request: string, connection: string | null, epoch: number): boolean {
+    // Latest-console registration creates a new owner. The backend rejects
+    // ordinary anchors from the failed transaction's original owner; never
+    // forge completion or reclaim authority after another console took over.
+    const now = performance.now();
+    const target = alignEngine.delayTargetUs(autoCatchup.deltaSeconds);
+    if (resetRecord?.request_id !== request || resetRecord.status !== "failed" ||
+        resetRecord.owner_id !== connection || !authorityRole.publisher || authorityRole.connectionId !== connection ||
+        authorityRole.epoch !== epoch || frameLease.required || !auth.token || !matchId.value ||
+        connStatus.value !== "open" || matchEnded.value || now - lastFailedResetReconnect < 30_000 ||
+        target == null || !alignEngine.canAutoSeek(target)) return false;
+    lastFailedResetReconnect = now;
+    const mid = matchId.value;
+    disconnect();
+    anchorAdjustment.value = "调整失败，正在重连控制台恢复播放";
+    connectWithAuth(mid);
+    return true;
   }
 
   let awaitingPromotionAnchor = false;
@@ -387,6 +412,10 @@ export const useDirectorStore = defineStore("director", () => {
     // Also expire stage visibility when no aligned media component is mounted.
     alignEngine.refreshAuthority(now);
     if (!alignEngine.canCompete) return; // Stage connections receive only; the backend ignores their leases.
+    // Retry readiness/cooldown checks even if reset cleared all presented frames:
+    // the UI picture watchdog deliberately cannot act before first presentation.
+    if (resetRecord?.status === "failed" && reconnectFailedReset(resetRecord.request_id,
+      authorityRole.connectionId, authorityRole.epoch)) return;
     let leaseRunning = true;
     let reportedReady = false;
     if (frameLease.supported && accountId.value && matchId.value) {

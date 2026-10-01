@@ -602,7 +602,9 @@ export class AlignEngine {
       }
       freeze("frozen", false, "authority_behind_picture"); return;
     }
-    for (const stream of streams) stream!.advance(T);
+    // A held T must still decode admissible future candidates; the ordinary
+    // 250ms horizon can otherwise wait forever on the next available picture.
+    for (const stream of streams) stream!.advance(T, this.missingMs > 0 ? CATCHUP.maxFrameErrorUs : 250_000);
     // The 3s tolerance accommodates source clock offsets, not seconds of
     // repeated decoder output. Give mixed frame rates a short reuse grace;
     // then require progress on that side before advancing the shared timeline.
@@ -690,7 +692,7 @@ export class AlignEngine {
     const seekT = Math.max(earliest, Math.min(T, latest));
     const floors = sides.map(s => Math.max((this.sync.presentedRt[s] ?? -Infinity) + 1,
       this.publisher && this.resetPhase === "preparing" ? this.manualTarget! : -Infinity));
-    for (const s of streams) s.advance(seekT);
+    for (const s of streams) s.advance(seekT, this.latestMissingAt != null ? CATCHUP.maxFrameErrorUs : 250_000);
     let frames = commonFrames(streams.map(s => s.queue), T, 3_000_000, floors);
     const fresh = frames?.every((f, i) => f.rtUs > (this.sync.presentedRt[sides[i]!] ?? -Infinity));
     if (!fresh && holdFrameInterval()) return;
@@ -702,7 +704,7 @@ export class AlignEngine {
       this.latestSeek = T; this.lastSeekAt = now; this.sync.seekCount++;
       this.sync.lastSeekReason = "latest_target";
     }
-    for (const s of streams) s.advance(seekT);
+    for (const s of streams) s.advance(seekT, this.latestMissingAt != null ? CATCHUP.maxFrameErrorUs : 250_000);
     frames = commonFrames(streams.map(s => s.queue), T, 3_000_000, floors);
     if (!frames || frames.some((f, i) => f.rtUs <= (this.sync.presentedRt[sides[i]!] ?? -Infinity))) {
       freeze("frozen", false, "missing_common_frame"); return;

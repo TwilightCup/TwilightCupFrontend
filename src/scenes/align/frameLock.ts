@@ -505,10 +505,10 @@ export class FrameLockStream {
     return true;
   }
 
-  advance(targetUs: number): void {
+  advance(targetUs: number, lookaheadUs = 250_000): void {
     this.targetUs = targetUs;
     this.queue.advance(targetUs);
-    this.pump(targetUs);
+    this.pump(targetUs, lookaheadUs);
     this.trimRaw(this.lastArrivedRtUs ?? 0);
   }
 
@@ -530,7 +530,8 @@ export class FrameLockStream {
     return idx;
   }
 
-  private pump(targetUs: number): void {
+  private pump(targetUs: number, lookaheadUs = 250_000): void {
+    const horizonUs = Math.max(250_000, Math.min(CATCHUP.maxFrameErrorUs, lookaheadUs));
     if (this.stopped || this.pendingConfigure || performance.now() < this.decodeRetryAt) return;
     if (!this.encapsulation) {
       const start = this.findStartKeyframe(targetUs);
@@ -552,13 +553,13 @@ export class FrameLockStream {
     while (this.decPos < this.raw.length && this.decoder.queueSize < 12 &&
       this.decoder.pendingSize < 32 && this.queue.length < 96 && this.queue.bytes + (this.decoder.pendingSize + 1) * this.frameBytes <= 128 * 1024 * 1024) {
       const sample = this.raw[this.decPos]!;
-      if (sample.rtUs > targetUs + 250_000) {
+      if (sample.rtUs > targetUs + horizonUs) {
         // Decode order can lead presentation order: a future reference frame
         // may precede B frames near T. Keep order, but look ahead within bounded
         // time/sample limits instead of blocking those dependent frames forever.
         const needed = sample.rtUs <= targetUs + CATCHUP.maxFrameErrorUs &&
           this.raw.slice(this.decPos + 1, this.decPos + 65).some(next =>
-            next.epoch === sample.epoch && next.rtUs >= targetUs - 150_000 && next.rtUs <= targetUs + 250_000);
+            next.epoch === sample.epoch && next.rtUs >= targetUs - 150_000 && next.rtUs <= targetUs + horizonUs);
         if (!needed) break;
       }
       if (sample.epoch !== this.decodedEpoch) this.needKey = true;

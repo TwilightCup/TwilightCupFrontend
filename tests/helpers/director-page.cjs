@@ -40,7 +40,7 @@ function createPage({ id, kind = 'stage', offset = 0, api = {} }) {
   engine.drawBuffer = () => ({ width: 1, height: 1 });
   class Socket {
     constructor() { socket = this; }
-    connect(...args) { this.args = args; this.onStatusChange('open'); }
+    connect(...args) { this.args = args; this.connectCalls = (this.connectCalls ?? 0) + 1; this.onStatusChange('open'); }
     send(msg) { sent.push(msg); return true; }
     sendQueued(msg) { return this.send(msg); }
     disconnect() { this.onStatusChange('closed'); }
