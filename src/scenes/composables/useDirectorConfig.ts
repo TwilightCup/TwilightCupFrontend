@@ -1,5 +1,7 @@
 /**
- * 导播场景页配置持久化（RTMP/HLS 流地址、画面显隐 / 计时显示延迟等实时控制）。
+ * 导播场景本地展示配置（画面显隐 / 计时显示延迟等实时控制）。
+ * 四个流地址在此仅保留旧缓存/URL迁移输入；实际播放由 streamLinks store 覆盖，
+ * 只有导播控制台可显式导入，舞台不能通过本地编辑改共享地址。
  *
  * 仿 src/stores/draft.ts 的 localStorage 模式：按 matchId 键控（无 matchId 用 "_global_"），
  * JSON 序列化，try/catch 容错。导播在编辑面板填一次，刷新 / OBS 重开即恢复。

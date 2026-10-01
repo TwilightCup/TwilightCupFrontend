@@ -1,81 +1,26 @@
 <script setup lang="ts">
-/**
- * 导播配置弹层：编辑选手 A/B 的 HLS 流地址 + 外部直播嵌入地址。
- *
- * 由 ?edit=1 自动唤起，或齿轮按钮手动唤起。保存即写 localStorage 并 emit('saved')，
- * 场景页据此实时反映。OBS 抓图前应关闭此面板（点遮罩或保存均可）。
- *
- * 纯原生表单（不引 Element Plus，与 overlay 轻量入口一致）。
- */
-import { reactive, watch } from "vue";
-import { useI18n } from "vue-i18n";
 import type { DirectorConfig } from "@/scenes/composables/useDirectorConfig";
-
-const props = defineProps<{
-  visible: boolean;
-  /** 打开时回显的当前配置 */
-  model: DirectorConfig;
-}>();
-const emit = defineEmits<{
-  (e: "update:visible", v: boolean): void;
-  (e: "saved", patch: Partial<DirectorConfig>): void;
-  (e: "close"): void;
-}>();
-
-const { t } = useI18n();
-
-// 表单本地副本（编辑中不直接改 props.model，取消可回退）
-const form = reactive<DirectorConfig>({ ...props.model });
-watch(
-  () => props.visible,
-  (v) => {
-    if (v) Object.assign(form, props.model);
-  },
-);
-
-interface Field {
-  key: keyof DirectorConfig;
-  label: string;
-  placeholder: string;
-}
-
-const fields: Field[] = [
-  { key: "hlsA", label: t("scenes.edit.hlsA"), placeholder: "https://.../a.m3u8" },
-  { key: "hlsB", label: t("scenes.edit.hlsB"), placeholder: "https://.../b.m3u8" },
-  { key: "embedA", label: t("scenes.edit.embedA"), placeholder: "B站房间号/直播间链接 或 YouTube 直播链接（自动代理）" },
-  { key: "embedB", label: t("scenes.edit.embedB"), placeholder: "B站房间号/直播间链接 或 YouTube 直播链接（自动代理）" },
-];
-
-function close(): void {
-  emit("update:visible", false);
-  emit("close");
-}
-function save(): void {
-  emit("saved", { ...form });
-  emit("update:visible", false);
-}
+import { LINK_FIELDS } from "@/stores/streamLinks";
+defineProps<{ visible: boolean; model: DirectorConfig }>();
+const emit = defineEmits<{ (e: "update:visible", value: boolean): void; (e: "close"): void }>();
+function close() { emit("update:visible", false); emit("close"); }
 </script>
-
 <template>
   <Transition name="fade">
     <div v-if="visible" class="mask" @click.self="close">
       <div class="panel neon-panel">
         <header class="head">
-          <span class="title neon-text">{{ t("scenes.edit.title") }}</span>
+          <span class="title neon-text">{{ $t("scenes.edit.title") }}</span>
           <button class="x" @click="close" aria-label="close">✕</button>
         </header>
-
+        <p>{{ $t("streamLinks.stageReadOnly") }}</p>
         <div class="grid">
-          <label v-for="f in fields" :key="f.key" class="field">
-            <span class="lbl">{{ f.label }}</span>
-            <input v-model="form[f.key]" :placeholder="f.placeholder" />
+          <label v-for="key in LINK_FIELDS" :key="key" class="field">
+            <span class="lbl">{{ $t(`scenes.edit.${key}`) }}</span>
+            <input :value="model[key]" readonly />
           </label>
         </div>
-
-        <footer class="foot">
-          <button class="btn ghost" @click="close">{{ t("scenes.edit.close") }}</button>
-          <button class="btn primary" @click="save">{{ t("scenes.edit.save") }}</button>
-        </footer>
+        <footer class="foot"><button class="btn ghost" @click="close">{{ $t("scenes.edit.close") }}</button></footer>
       </div>
     </div>
   </Transition>

@@ -1,3 +1,4 @@
+import { useStreamLinksStore, withoutStreamLinks } from "./streamLinks";
 import { mergeMessageHistory } from "@/utils/mergeMessageHistory";
 import { loadScoreRounds } from "@/scenes/align/loadScoreRounds";
 import { ScoreHistory } from "@/scenes/align/scoreHistory";
@@ -115,6 +116,7 @@ function freshPlayer(): PlayerLive {
 
 export const useDirectorStore = defineStore("director", () => {
   const auth = useAuthStore();
+  const streamLinks = useStreamLinksStore();
   const socket = new MatchSocket();
 
   const tokenRef = ref("");
@@ -498,6 +500,9 @@ export const useDirectorStore = defineStore("director", () => {
 
   function handle(msg: ServerMessage): void {
     switch (msg.type) {
+      case "stream_links_update":
+        streamLinks.receive(msg.payload);
+        break;
       case "auth_ok":
         if (matchId.value !== msg.match_id || accountId.value !== msg.account_id) {
           history.clear();
@@ -518,6 +523,7 @@ export const useDirectorStore = defineStore("director", () => {
         matchId.value = msg.match_id;
         accountId.value = msg.account_id;
         displayName.value = msg.display_name;
+        void streamLinks.activate(tokenRef.value, msg.match_id, msg.account_id);
         stopPublishing();
         if (msg.seat === "DIRECTOR" && msg.connection_id) {
           authorityRole.connect(msg.connection_id);
@@ -537,6 +543,7 @@ export const useDirectorStore = defineStore("director", () => {
         void loadChatHistory();
         break;
       case "auth_error":
+        streamLinks.clear();
         authError.value = msg.msg;
         break;
       case "phase_change":
@@ -738,7 +745,7 @@ export const useDirectorStore = defineStore("director", () => {
           // 直播配置实时下发（控制台保存 → 舞台/其他控制台，后端排除发送者）：
           // 落库（舞台此刻可能不在比赛场景，挂载后 load 才能读到）+ 更新 ref
           // 供已挂载的 MatchScene / 控制台面板实时并入。
-          const patch = msg.payload.config as Partial<DirectorConfig>;
+          const patch = withoutStreamLinks(msg.payload.config as Partial<DirectorConfig>);
           remoteConfig.value = patch;
           if (matchId.value) mergeStoredConfig(matchId.value, patch);
         } else if (msg.action === "frame_align" && typeof msg.payload?.t_us === "number") {
@@ -819,6 +826,7 @@ export const useDirectorStore = defineStore("director", () => {
 
   function connect(token: string, matchId?: string, mode: "receiver" | "console" = "receiver"): void {
     alignEngine.setCandidateEnabled(mode === "console");
+    if (streamLinks.matchId && (streamLinks.matchId !== matchId || tokenRef.value !== token)) streamLinks.clear();
     tokenRef.value = token;
     // Existing backend exclusive key is account + seat + match. Stage sockets
     // reconnect as receivers after displacement; old consoles stay invalid.
@@ -900,7 +908,7 @@ export const useDirectorStore = defineStore("director", () => {
       };
     }
 
-    const cfg = p.config as Partial<DirectorConfig> | undefined;
+    const cfg = p.config ? withoutStreamLinks(p.config as Partial<DirectorConfig>) : undefined;
     if (cfg && Object.keys(cfg).length > 0) {
       remoteConfig.value = cfg;
       if (matchId.value) mergeStoredConfig(matchId.value, cfg);
@@ -948,6 +956,9 @@ export const useDirectorStore = defineStore("director", () => {
       soonCmdState.value = { targetMs: soonCmdState.value.targetMs, startedAt: null, pausedAt: null };
     }
 
+    if (action === "config_update" && payload?.config) {
+      payload = { ...payload, config: withoutStreamLinks(payload.config as Partial<DirectorConfig>) };
+    }
     // 发 WS（可排队：连接未就绪时暂存，open 后按序补发，断线窗口点按钮不丢指令）
     return socket.sendQueued(send.directorCommand(action, payload));
   }

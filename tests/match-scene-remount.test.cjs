@@ -13,9 +13,10 @@ const { MatchPhase, PlayerStatus, PickType } = load('src/api/types.ts');
 function setupScene(type, attempts = [], configPatch = {}) {
   const timers = new Set();
   const config = vue.reactive({ decoupled: false, alignA: true, alignB: true, hlsA: 'a', hlsB: 'b', delayA: 0, delayB: 0, delayDiff: 0, ...configPatch });
-  const engine = { tUs: vue.ref(1000000), authorityReady: vue.ref(false), pictureExpired: vue.ref(true), requiredSides: [], setRequiredSides(sides) { this.requiredSides = sides; } };
+  const shared = vue.reactive({ values: { hlsA: config.hlsA, hlsB: config.hlsB, embedA: '', embedB: '' }, linksFor() { return this.values; } });
+  const engine = { tUs: vue.ref(1000000), authorityReady: vue.ref(false), pictureExpired: vue.ref(true), requiredSides: [], requiredUpdates: 0, setRequiredSides(sides) { this.requiredSides = sides; this.requiredUpdates++; } };
   const watchers = [];
-  const localVue = { ...vue, onMounted() {}, onUnmounted() {}, onBeforeUnmount() {}, watch(source, callback, options) { watchers.push(callback); if (options?.immediate) callback(source()); } };
+  const localVue = { ...vue, onMounted() {}, onUnmounted() {}, onBeforeUnmount() {}, watch(source, callback, options) { const read = typeof source === "function" ? source : () => source; let previous = read(); watchers.push(() => { const next = read(); if (next !== previous) { callback(next, previous); previous = next; } }); if (options?.immediate) callback(previous); } };
   const player = () => ({ status: PlayerStatus.IN_GAME, completedLevels: [], attempts, currentLevelIndex: 0 });
   const state = { phase: MatchPhase.IN_ROUND, currentRound: { type,
     pick: { code: 'IL1', category: 'IL', retry_count: 4 }, collection: { raw: {} } },
@@ -33,6 +34,7 @@ function setupScene(type, attempts = [], configPatch = {}) {
   const overrides = {
     vue: localVue,
     'vue-i18n': { useI18n: () => ({ t: x => x }) },
+    '@/stores/streamLinks': { useStreamLinksStore: () => shared, withoutStreamLinks: p => { const q={...p}; for (const k of ['hlsA','hlsB','embedA','embedB']) delete q[k]; return q; } },
     '@/stores/director': { useDirectorStore: () => store },
     '@/scenes/align/useFrameAlign': { alignEngine: engine },
     '@/api/speedrun': { setSpeedrunToken() {} },
@@ -51,7 +53,7 @@ function setupScene(type, attempts = [], configPatch = {}) {
     return load(id.startsWith('@/') ? `src/${id.slice(2)}.ts` : path.resolve('src/scenes/match', `${id}.ts`));
   }).default;
   const bindings = component.setup({}, { expose() {} });
-  return { bindings, timers, config, engine, store, updateRequiredSides: watchers[0] };
+  return { bindings, timers, config, engine, store, shared, updateRequiredSides: watchers[0] };
 }
 
 test('returning to match during an active single round initializes both timer panels', () => {
@@ -73,7 +75,7 @@ test('multi-round scene setup remains valid', () => {
 
 
 test('decoupled scene plays each side without authority and returns to saved alignment settings', () => {
-  const { bindings: b, config, engine, store, updateRequiredSides } = setupScene(PickType.MULTI, [], {
+  const { bindings: b, config, engine, store, shared, updateRequiredSides } = setupScene(PickType.MULTI, [], {
     decoupled: true, delayA: 12, delayB: 15, delayDiff: 20,
   });
   store.liveBroadcast = { ...store.liveBroadcast, subsegmentGap: 450, subsegmentGapAt: 5000 };
@@ -84,7 +86,7 @@ test('decoupled scene plays each side without authority and returns to saved ali
   assert.equal(b.broadcast.value, store.liveBroadcast);
   assert.equal(b.twMs.value, null, 'old aligned T must not gate realtime data');
   assert.equal(b.diffV.value, 450, 'saved manual delay must not delay realtime gap');
-  config.hlsB = '';
+  shared.values.hlsB = '';
   updateRequiredSides();
   assert.equal(b.waitingForAuthority.value, false, 'missing B cannot hide independent A');
   config.decoupled = false;
@@ -95,4 +97,18 @@ test('decoupled scene plays each side without authority and returns to saved ali
   assert.deepEqual(engine.requiredSides, ['A']);
   assert.equal(b.broadcast.value, store.presentation);
   assert.deepEqual([config.alignA, config.alignB, config.delayA, config.delayB, config.delayDiff], [true, true, 12, 15, 20]);
+});
+
+test('stage canonical empty links defeat cached/URL values without changing non-link settings', () => {
+ const { bindings, config, shared, updateRequiredSides, engine } = setupScene(PickType.MULTI);
+ shared.values = { hlsA: '', hlsB: '', embedA: '', embedB: '' }; updateRequiredSides();
+ assert.equal(config.hlsA,'a'); assert.equal(bindings.config.value.hlsA,''); assert.deepEqual(engine.requiredSides,[]);
+ assert.equal(bindings.config.value.alignA,true);
+});
+
+test('same stream URLs in a new snapshot do not reset engine cadence or recovery', () => {
+ const { shared, engine, updateRequiredSides } = setupScene(PickType.MULTI);
+ const updates=engine.requiredUpdates; shared.values={...shared.values}; updateRequiredSides();
+ assert.equal(engine.requiredUpdates,updates);
+ shared.values.hlsB=''; updateRequiredSides(); assert.equal(engine.requiredUpdates,updates+1);
 });

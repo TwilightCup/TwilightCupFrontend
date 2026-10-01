@@ -1,3 +1,4 @@
+import { useStreamLinksStore } from "./streamLinks";
 /**
  * 鉴权状态：登录、令牌持久化、登出。
  *
@@ -74,6 +75,7 @@ export const useAuthStore = defineStore("auth", () => {
   }
 
   function clear(): void {
+    useStreamLinksStore().clear();
     localStorage.removeItem(STORAGE_KEY);
     token.value = "";
     accountId.value = "";

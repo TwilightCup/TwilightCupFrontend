@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { useI18n } from "vue-i18n";
 import { useAuthStore } from "@/stores/auth";
 import { useDirectorStore } from "@/stores/director";
+import { useStreamLinksStore, pickStreamLinks } from "@/stores/streamLinks";
+import { StreamLinkDraft } from "@/utils/streamLinkDraft";
 import RoleSwitcher from "@/components/RoleSwitcher.vue";
 import AccountMenu from "@/components/AccountMenu.vue";
 import ColorField from "@/components/ColorField.vue";
@@ -104,8 +106,17 @@ function refreshSpeedrun(): void {
   ElMessage.success(t("directorView.speedrunRefreshDone"));
 }
 
-// ---- 导播配置（HLS/嵌入）：控制台集中编辑，保存后写入舞台链接 ----
-const { config: cfgConfig, load: loadCfg, save: saveCfg } = useDirectorConfig();
+// ---- 共享直播地址：服务器保存，编辑草稿独立于正在播放的配置 ----
+const { config: cfgLocal, load: loadCfg, save: saveCfg } = useDirectorConfig();
+const streamLinks = useStreamLinksStore();
+const cfgConfig = computed(() => ({ ...cfgLocal, ...streamLinks.linksFor(director.matchId ?? "", cfgLocal) }));
+const streamDraft = reactive(new StreamLinkDraft());
+const legacyLinks = ref(pickStreamLinks({}));
+const canImportLinks = computed(() => streamLinks.loaded && streamLinks.version === 0 && Object.values(legacyLinks.value).some(Boolean));
+watch(() => [streamLinks.matchId, streamLinks.version, streamLinks.loaded], () => {
+  if (streamLinks.loaded && streamLinks.matchId === director.matchId && !streamLinks.saving)
+    streamDraft.load(streamLinks.values, streamLinks.version);
+});
 /** 场景配置下拉的本地副本：打开时从当前配置回填，保存才写 cfgForm / localStorage */
 const sceneThemeA = ref(DEFAULT_THEME_A);
 const sceneThemeB = ref(DEFAULT_THEME_B);
@@ -124,13 +135,13 @@ function onSceneCfgVisibleChange(visible: boolean): void {
     sceneCfgPickerOpen.value = false;
     return;
   }
-  sceneThemeA.value = cfgForm.themeA || cfgConfig.themeA || DEFAULT_THEME_A;
-  sceneThemeB.value = cfgForm.themeB || cfgConfig.themeB || DEFAULT_THEME_B;
+  sceneThemeA.value = cfgForm.themeA || cfgConfig.value.themeA || DEFAULT_THEME_A;
+  sceneThemeB.value = cfgForm.themeB || cfgConfig.value.themeB || DEFAULT_THEME_B;
   sceneBackground.value = normalizeSceneBackground(
-    cfgForm.background || cfgConfig.background || DEFAULT_SCENE_BACKGROUND,
+    cfgForm.background || cfgConfig.value.background || DEFAULT_SCENE_BACKGROUND,
   );
 }
-/** 表单本地副本：编辑中不落库，点保存才写 localStorage + 更新舞台链接 */
+/** 非链接展示控制的本地副本；四个共享地址由 streamDraft 管理。 */
 const cfgForm = reactive<DirectorConfig>({
   hlsA: "",
   hlsB: "",
@@ -150,7 +161,7 @@ const cfgForm = reactive<DirectorConfig>({
   themeB: DEFAULT_THEME_B,
   background: DEFAULT_SCENE_BACKGROUND,
 });
-const cfgFields: { key: keyof DirectorConfig; label: string }[] = [
+const cfgFields: { key: "hlsA" | "hlsB" | "embedA" | "embedB"; label: string }[] = [
   { key: "hlsA", label: "scenes.edit.hlsA" },
   { key: "hlsB", label: "scenes.edit.hlsB" },
   { key: "embedA", label: "scenes.edit.embedA" },
@@ -162,17 +173,31 @@ watch(
   (id) => {
     if (!id) return;
     loadCfg(id, {});
-    Object.assign(cfgForm, cfgConfig);
+    Object.assign(cfgForm, cfgConfig.value);
+    legacyLinks.value = pickStreamLinks(cfgLocal);
+    streamDraft.load(streamLinks.linksFor(id), streamLinks.version, true);
   },
   { immediate: true },
 );
-function saveConfig(): void {
-  if (!director.matchId) return;
-  saveCfg(director.matchId, { ...cfgForm });
-  // WS 广播 config_update：已打开的舞台（可能另一浏览器/机器）实时并入；
-  // 后端只发给同账号其他导播连接（排除本发送方），无回环
-  director.sendDirectorCommand("config_update", { config: { ...cfgForm } });
-  ElMessage.success(t("directorView.cfgSaved"));
+async function saveConfig(): Promise<void> {
+  if (!director.matchId || readOnly.value) return;
+  if (await streamLinks.save({ ...streamDraft.values }, streamDraft.version)) {
+    streamDraft.load(streamLinks.values, streamLinks.version, true);
+    ElMessage.success(t("streamLinks.saved"));
+  } else ElMessage.error(streamLinks.conflict ? t("streamLinks.conflict") : streamLinks.error || t("streamLinks.saveFailed"));
+}
+async function reloadLinkDraft(): Promise<void> {
+  await streamLinks.refresh();
+  if (streamLinks.loaded && !streamLinks.error) streamDraft.load(streamLinks.values, streamLinks.version, true);
+}
+async function importLegacyLinks(): Promise<void> {
+  if (!canImportLinks.value || readOnly.value) return;
+  const mid = director.matchId, legacy = { ...legacyLinks.value };
+  try { await ElMessageBox.confirm(t("streamLinks.importConfirm"), t("streamLinks.importTitle"), { type: "warning" }); }
+  catch { return; }
+  if (director.matchId !== mid || !canImportLinks.value || readOnly.value) return;
+  streamDraft.load(legacy, 0, true); streamDraft.dirty = true;
+  await saveConfig();
 }
 
 /** 保存场景外观（选手主题色 + 背景样式）：落库 + WS 实时下发已打开的舞台/预览 */
@@ -214,8 +239,8 @@ const showB = computed({
 
 // 控制台监控预览：对齐开且有 HLS 地址 → SeiStream（使用本页引擎）；
 // 否则使用 MSE StreamFrame
-const previewAlignedA = computed(() => !cfgConfig.decoupled && !!cfgConfig.alignA && !!cfgConfig.hlsA);
-const previewAlignedB = computed(() => !cfgConfig.decoupled && !!cfgConfig.alignB && !!cfgConfig.hlsB);
+const previewAlignedA = computed(() => !cfgConfig.value.decoupled && !!cfgConfig.value.alignA && !!cfgConfig.value.hlsA);
+const previewAlignedB = computed(() => !cfgConfig.value.decoupled && !!cfgConfig.value.alignB && !!cfgConfig.value.hlsB);
 const showStreamDebug = ref(true);
 const anchorDelta = ref<number | undefined>(15);
 const wallNow = ref(Date.now());
@@ -235,17 +260,17 @@ function applyAnchor(): void {
 
 // 拉流失败只内联显示在 A/B 位置（指标条/画面占位），不弹窗打扰
 
-watch(() => [cfgConfig.decoupled, cfgConfig.alignA, cfgConfig.hlsA, cfgConfig.alignB, cfgConfig.hlsB], () => {
+watch(() => JSON.stringify([cfgConfig.value.decoupled, cfgConfig.value.alignA, cfgConfig.value.hlsA, cfgConfig.value.alignB, cfgConfig.value.hlsB]), () => {
   alignEngine.setRequiredSides((["A", "B"] as const).filter(side =>
-    !cfgConfig.decoupled && (side === "A" ? cfgConfig.alignA && !!cfgConfig.hlsA : cfgConfig.alignB && !!cfgConfig.hlsB)));
+    !cfgConfig.value.decoupled && (side === "A" ? cfgConfig.value.alignA && !!cfgConfig.value.hlsA : cfgConfig.value.alignB && !!cfgConfig.value.hlsB)));
 }, { immediate: true });
 
 // 连通性指标条（维度对齐 SEIInjector 冒烟工具，刷新由 alignEngine.health ~2.5Hz）
 function healthText(side: "A" | "B"): string {
-  if (cfgConfig.decoupled) return "脱钩模式 · 独立直播，不等待对齐";
+  if (cfgConfig.value.decoupled) return "脱钩模式 · 独立直播，不等待对齐";
   const err = alignEngine.streamError[side];
-  const on = side === "A" ? cfgConfig.alignA : cfgConfig.alignB;
-  const url = side === "A" ? cfgConfig.hlsA : cfgConfig.hlsB;
+  const on = side === "A" ? cfgConfig.value.alignA : cfgConfig.value.alignB;
+  const url = side === "A" ? cfgConfig.value.hlsA : cfgConfig.value.hlsB;
   if (err) return `拉不到流 · ${err} ·（${url}）`;
   if (!on || !url) return "对齐未启用（MSE 播放）";
   const h = alignEngine.health[side];
@@ -286,19 +311,19 @@ function healthText(side: "A" | "B"): string {
   return s;
 }
 function healthCls(side: "A" | "B"): "h-ok" | "h-err" | "" {
-  if (cfgConfig.decoupled) return "";
+  if (cfgConfig.value.decoupled) return "";
   if (alignEngine.streamError[side]) return "h-err";
-  const on = side === "A" ? cfgConfig.alignA : cfgConfig.alignB;
-  const url = side === "A" ? cfgConfig.hlsA : cfgConfig.hlsB;
+  const on = side === "A" ? cfgConfig.value.alignA : cfgConfig.value.alignB;
+  const url = side === "A" ? cfgConfig.value.hlsA : cfgConfig.value.hlsB;
   if (!on || !url) return "";
   return alignEngine.health[side].frames > 0 ? "h-ok" : "";
 }
 
 /** A/B 信息行显示本控制台的同步、解码和呈现状态。舞台不参与主 T 选举。 */
 function readyState(side: "A" | "B"): { cls: string; label: string } {
-  if (cfgConfig.decoupled) return { cls: "off", label: "独立播放" };
-  const on = side === "A" ? cfgConfig.alignA : cfgConfig.alignB;
-  const url = side === "A" ? cfgConfig.hlsA : cfgConfig.hlsB;
+  if (cfgConfig.value.decoupled) return { cls: "off", label: "独立播放" };
+  const on = side === "A" ? cfgConfig.value.alignA : cfgConfig.value.alignB;
+  const url = side === "A" ? cfgConfig.value.hlsA : cfgConfig.value.hlsB;
   if (!on || !url) return { cls: "off", label: "未启用" };
   if (alignEngine.sync.waitingSides.includes(side)) return { cls: "wait", label: "等待信号 / 恢复对齐中" };
   if (alignEngine.sync.authorityUs == null) return { cls: "wait", label: director.alignRole === "publisher" ? "主时钟攒缓冲中" : "等待主时钟" };
@@ -316,14 +341,14 @@ const readyB = computed(() => readyState("B"));
 /** 对齐模式重锚后刷新；脱钩模式直接重拉两路流。 */
 function resyncStreams(): void {
   if (readOnly.value || !director.matchId) return;
-  if (cfgConfig.decoupled) { reloadStreams(); return; }
+  if (cfgConfig.value.decoupled) { reloadStreams(); return; }
   if (anchorDelta.value == null) return;
   director.applyAnchorDelay(anchorDelta.value, reloadStreams);
 }
 function reloadStreams(): boolean {
   const patch = {
-    refreshA: Math.max(cfgForm.refreshA, cfgConfig.refreshA) + 1,
-    refreshB: Math.max(cfgForm.refreshB, cfgConfig.refreshB) + 1,
+    refreshA: Math.max(cfgForm.refreshA, cfgConfig.value.refreshA) + 1,
+    refreshB: Math.max(cfgForm.refreshB, cfgConfig.value.refreshB) + 1,
   };
   if (!director.sendDirectorCommand("config_update", { config: patch })) return false;
   Object.assign(cfgForm, patch);
@@ -350,7 +375,7 @@ function toggleAlign(key: "alignA" | "alignB"): void {
 /** 保留每侧对齐/延迟配置，退出脱钩时恢复。 */
 function toggleDecoupled(): void {
   if (!director.matchId || readOnly.value) return;
-  cfgForm.decoupled = !cfgConfig.decoupled;
+  cfgForm.decoupled = !cfgConfig.value.decoupled;
   pushConfig({ decoupled: cfgForm.decoupled });
 }
 
@@ -365,13 +390,8 @@ watch(
 );
 
 /** 合并舞台：单 OBS 源承载全部场景（叠加信息 / 比赛详情 / 图池 / 赛程图）。
- *  链接附带已保存的导播配置（hls/embed 参数）——舞台可能在另一浏览器/
- *  机器（localStorage 不通），配置只能经 URL 下发；舞台加载时会采用并落本地。 */
+ *  链接携带非链接外观配置；四个流地址由舞台从服务器读取。 */
 const CFG_URL_KEYS: Partial<Record<keyof DirectorConfig, string>> = {
-  hlsA: "hls_a",
-  hlsB: "hls_b",
-  embedA: "embed_a",
-  embedB: "embed_b",
   alignA: "align_a",
   alignB: "align_b",
   decoupled: "decoupled",
@@ -394,13 +414,13 @@ function directorPageUrl(page: string): string {
   return url.toString();
 }
 
-/** 场景页链接通用后缀：附当前导播配置（hls/embed），跨浏览器随链接下发 */
+/** 场景页链接只附非链接展示配置；直播地址从服务器读取。 */
 function withCfgParams(base: string): string {
   if (!base) return "";
   const entries = Object.entries(CFG_URL_KEYS) as [keyof DirectorConfig, string][];
   const qs = entries
-    .filter(([k]) => cfgConfig[k] !== "")
-    .map(([k, p]) => `${p}=${encodeURIComponent(String(cfgConfig[k]))}`)
+    .filter(([k]) => cfgConfig.value[k] !== "")
+    .map(([k, p]) => `${p}=${encodeURIComponent(String(cfgConfig.value[k]))}`)
     .join("&");
   return qs ? `${base}&${qs}` : base;
 }
@@ -622,9 +642,9 @@ onUnmounted(() => {
           </template>
         </el-dropdown>
 
-        <!-- 导播配置下拉：HLS/嵌入链接填写 + 保存（WS 实时推送到已打开的舞台，并写入舞台链接） -->
-        <el-dropdown trigger="click" placement="bottom-end" :disabled="readOnly">
-          <el-button size="small" :disabled="readOnly">{{ $t("directorView.cfgTitle") }}</el-button>
+        <!-- 共享链接：PUT 保存；服务器通知其他页面，舞台链接不携带地址副本 -->
+        <el-dropdown trigger="click" placement="bottom-end" :disabled="readOnly || streamLinks.saving">
+          <el-button size="small" :disabled="readOnly || streamLinks.saving">{{ $t("directorView.cfgTitle") }}</el-button>
           <template #dropdown>
             <el-dropdown-menu>
               <div class="cfg-dd">
@@ -632,24 +652,32 @@ onUnmounted(() => {
                   <label v-for="f in cfgFields" :key="f.key" class="cfg-field">
                     <span class="lbl">{{ $t(f.label) }}</span>
                     <el-input
-                      v-model="cfgForm[f.key]"
+                      :model-value="streamDraft.values[f.key]"
+                      @input="streamDraft.edit(f.key, $event)"
                       size="small"
-                      :disabled="readOnly"
+                      :disabled="readOnly || streamLinks.saving"
                       :placeholder="f.key.startsWith('hls') ? 'https://.../a.m3u8' : 'B站房间号/直播间链接 或 YouTube 直播链接（自动代理）'"
                     />
                   </label>
                 </div>
+                <div class="cfg-note">
+                  {{ streamLinks.unsupported ? $t('streamLinks.localOnly') : streamLinks.loaded ? $t('streamLinks.serverVersion', { version: streamLinks.version }) : $t('streamLinks.loading') }}
+                  <div v-if="streamLinks.error">{{ streamLinks.conflict ? $t('streamLinks.conflict') : streamLinks.error }}</div>
+                </div>
                 <div class="cfg-foot">
+                  <el-button size="small" :disabled="streamLinks.loading || streamLinks.saving" @click="reloadLinkDraft">{{ $t('streamLinks.reload') }}</el-button>
+                  <el-button v-if="canImportLinks" size="small" :disabled="readOnly || streamLinks.saving" @click="importLegacyLinks">{{ $t('streamLinks.import') }}</el-button>
                   <el-button
                     size="small"
                     type="primary"
-                    :disabled="!director.matchId || readOnly"
+                    :disabled="!director.matchId || readOnly || !streamLinks.loaded || streamLinks.unsupported || streamLinks.saving"
+                    :loading="streamLinks.saving"
                     @click="saveConfig()"
                   >
-                    {{ $t("common.save") }}
+                    {{ $t("streamLinks.saveServer") }}
                   </el-button>
                 </div>
-                <!-- 直播画面链接：合并舞台单源（全部场景在其中渲染 + 控制台切场景），链接随保存的配置下发 -->
+                <!-- 合并舞台单源：根据比赛身份从服务器读取直播地址 -->
                 <div class="card-title stage-title">{{ $t("directorView.sceneTitle") }}</div>
                 <el-input
                   :model-value="stageUrl || $t('directorView.sceneUnavailable')"
@@ -1382,8 +1410,16 @@ onUnmounted(() => {
 .delay-num {
   width: 128px;
 }
+.cfg-note {
+  margin-top: 8px;
+  font-size: 12px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .cfg-foot {
   display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
   justify-content: flex-end;
   margin-top: 8px;
 }

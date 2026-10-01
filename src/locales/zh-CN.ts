@@ -11,6 +11,21 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 const messages = {
+  "streamLinks.saved": "已保存到服务器",
+  "streamLinks.conflict": "链接已被其他页面更新。草稿已保留，请读取服务器配置后重新编辑。",
+  "streamLinks.saveFailed": "保存失败，草稿已保留",
+  "streamLinks.importConfirm": "将本机保存的旧直播地址导入当前比赛的服务器配置？",
+  "streamLinks.importTitle": "导入本机地址",
+  "streamLinks.import": "导入本机旧地址",
+  "streamLinks.reload": "读取服务器（放弃草稿）",
+  "streamLinks.saveServer": "保存到服务器",
+  "streamLinks.localOnly": "后端尚不支持共享链接，仅本机兼容，未保存服务器",
+  "streamLinks.serverVersion": "服务器配置 · v{version}",
+  "streamLinks.loading": "正在读取服务器直播地址",
+  "streamLinks.stageReadOnly": "直播地址由导播控制台统一保存，舞台只读。",
+  "streamLinks.refereeReadOnly": "直播地址来自导播服务器配置，裁判只读。",
+  "streamLinks.refresh": "刷新共享配置",
+
   // ── common：跨文件复用的通用词 ─────────────────────────────────────────
   "common.cancel": "取消",
   "common.confirm": "确认",

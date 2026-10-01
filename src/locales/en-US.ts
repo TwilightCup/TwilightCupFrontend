@@ -8,6 +8,21 @@
 import type { MessageSchema } from "./zh-CN";
 
 const messages: MessageSchema = {
+  "streamLinks.saved": "Saved to server",
+  "streamLinks.conflict": "Links changed on another page. Draft retained; reload server links before editing again.",
+  "streamLinks.saveFailed": "Save failed; draft retained",
+  "streamLinks.importConfirm": "Import the old links saved on this browser into this match on the server?",
+  "streamLinks.importTitle": "Import local links",
+  "streamLinks.import": "Import old local links",
+  "streamLinks.reload": "Reload server (discard draft)",
+  "streamLinks.saveServer": "Save to server",
+  "streamLinks.localOnly": "Backend lacks shared links; local compatibility only, not saved to server",
+  "streamLinks.serverVersion": "Server configuration · v{version}",
+  "streamLinks.loading": "Loading stream links from server",
+  "streamLinks.stageReadOnly": "Stream links are managed by the director console. This stage is read-only.",
+  "streamLinks.refereeReadOnly": "Links come from the director server configuration. Referee access is read-only.",
+  "streamLinks.refresh": "Refresh shared configuration",
+
   // ── common ───────────────────────────────────────────────────────────
   "common.cancel": "Cancel",
   "common.confirm": "Confirm",

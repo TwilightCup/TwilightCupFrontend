@@ -643,3 +643,13 @@ export interface FixtureCreateMatchBody {
   /** 引用图池库 id（冻结为快照内嵌本场） */
   mappool_id: string;
 }
+
+/** Match-scoped canonical links; updated_at_ms is UTC Unix epoch milliseconds. */
+export interface StreamLinkValues { hlsA: string; hlsB: string; embedA: string; embedB: string; }
+export interface StreamLinks extends StreamLinkValues {
+  match_id: string;
+  version: number;
+  updated_at_ms: number | null;
+  updated_by: string | null;
+}
+export interface StreamLinksPut extends StreamLinkValues { expected_version: number; }

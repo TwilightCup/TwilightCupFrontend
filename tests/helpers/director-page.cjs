@@ -47,18 +47,20 @@ function createPage({ id, kind = 'stage', offset = 0, api = {} }) {
   }
   const overrides = Object.fromEntries(Object.entries({
     'src/ws/socket.ts': { MatchSocket: Socket },
-    'src/api/client.ts': { api: { getMyMatch: async () => ({}), getMatchLog: async () => { throw new Error('no match log'); }, ...api } },
+    'src/api/client.ts': { api: { getStreamLinks: async match_id => ({ match_id, version: 0, hlsA: "", hlsB: "", embedA: "", embedB: "", updated_at_ms: null, updated_by: null }), getMyMatch: async () => ({}), getMatchLog: async () => { throw new Error('no match log'); }, ...api } },
     'src/stores/auth.ts': { useAuthStore: () => ({ token: 'test-token' }) },
     'src/locales.ts': { t: key => key },
     'src/scenes/composables/useDirectorConfig.ts': { mergeStoredConfig() {} },
     'src/scenes/align/useFrameAlign.ts': { alignEngine: engine },
   }).map(([file, value]) => [path.resolve(file), value]));
-  const { useDirectorStore } = createLoader(overrides)('src/stores/director.ts');
+  const scopedLoad = createLoader(overrides);
+  const { useDirectorStore } = scopedLoad('src/stores/director.ts');
   const pinia = createPinia();
   const store = ports(() => useDirectorStore(pinia));
   ports(() => kind === 'console' ? store.connectWithAuth('match') : store.connect('test-token', 'match'));
+  const links = ports(() => scopedLoad("src/stores/streamLinks.ts").useStreamLinksStore(pinia));
   return {
-    id, kind, engine, store, socket, canvases,
+    id, kind, engine, store, socket, canvases, links,
     deliver(message, at = now) { now = at; ports(() => socket.onMessage(message)); },
     tick(at) { now = at; ports(() => { engine.tickLoop(now + offset); engine.clockPulse?.(); }); },
     adjust(delta, wallMs) {

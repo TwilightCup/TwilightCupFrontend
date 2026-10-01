@@ -1,15 +1,18 @@
-/**
- * 裁判端选手画面配置（复用导播端的 localStorage 持久化）。
- *
- * 与导播端共用同一份 HLS/嵌入地址，裁判和导播打开同一场时无需重复填写。
- * 这里把 useDirectorConfig 的实例做成模块级单例，保证裁判端监控面板与
- * 顶栏「选手画面」配置下拉共享同一份响应式配置。
- */
-import { useDirectorConfig } from "@/scenes/composables/useDirectorConfig";
+import { computed, reactive } from "vue";
+import { useMatchStore } from "@/stores/match";
+import { useStreamLinksStore } from "@/stores/streamLinks";
 
-let singleton: ReturnType<typeof useDirectorConfig> | null = null;
-
-export function useRefereeStreamConfig(): ReturnType<typeof useDirectorConfig> {
-  if (!singleton) singleton = useDirectorConfig();
-  return singleton;
+/** Canonical links are read-only; refresh counters belong to this page, not the server. */
+export function useRefereeStreamConfig() {
+  const match = useMatchStore();
+  const shared = useStreamLinksStore();
+  const refresh = reactive({ matchId: "", refreshA: 0, refreshB: 0 });
+  const config = computed(() => ({ ...shared.linksFor(match.matchId ?? ""),
+    refreshA: refresh.matchId === match.matchId ? refresh.refreshA : 0,
+    refreshB: refresh.matchId === match.matchId ? refresh.refreshB : 0 }));
+  function refreshStream(side: "A" | "B") {
+    if (refresh.matchId !== match.matchId) { refresh.matchId = match.matchId ?? ""; refresh.refreshA = refresh.refreshB = 0; }
+    refresh[side === "A" ? "refreshA" : "refreshB"]++;
+  }
+  return { config, refreshStream };
 }

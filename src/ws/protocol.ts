@@ -3,6 +3,7 @@
  * 与后端 src/twilightcupbackend/protocol.py 对齐。
  */
 import type {
+  StreamLinks,
   Attempt,
   LevelTime,
   MatchPhase,
@@ -487,7 +488,10 @@ export interface SrvError {
   msg: string;
 }
 
+export interface SrvStreamLinksUpdate { type: "stream_links_update"; payload: StreamLinks; }
+
 export type ServerMessage =
+  | SrvStreamLinksUpdate
   | SrvAuthOk
   | SrvAuthError
   | SrvDisplaced

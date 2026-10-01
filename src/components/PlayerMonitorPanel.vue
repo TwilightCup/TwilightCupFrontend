@@ -1,28 +1,11 @@
 <script setup lang="ts">
-import { watch } from "vue";
 import { Refresh } from "@element-plus/icons-vue";
-import { useMatchStore } from "@/stores/match";
 import { useAuthStore } from "@/stores/auth";
 import StreamFrame from "@/scenes/match/StreamFrame.vue";
 import { useRefereeStreamConfig } from "@/composables/useRefereeStreamConfig";
 
-const match = useMatchStore();
 const auth = useAuthStore();
-const { config, load, save } = useRefereeStreamConfig();
-
-watch(
-  () => match.matchId,
-  (id) => {
-    if (id) load(id, {});
-  },
-  { immediate: true },
-);
-
-function refreshStream(side: "A" | "B"): void {
-  if (!match.matchId) return;
-  const key = side === "A" ? "refreshA" : "refreshB";
-  save(match.matchId, { [key]: config[key] + 1 });
-}
+const { config, refreshStream } = useRefereeStreamConfig();
 </script>
 
 <template>

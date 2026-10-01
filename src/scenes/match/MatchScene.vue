@@ -45,6 +45,7 @@ import { useCategoryInfo } from "@/scenes/categoryinfo/useCategoryInfo";
 import SynthwaveBg from "@/scenes/components/SynthwaveBg.vue";
 import DirectorConfigPanel from "@/scenes/components/DirectorConfigPanel.vue";
 import { useSceneContext } from "@/scenes/composables/useSceneContext";
+import { useStreamLinksStore } from "@/stores/streamLinks";
 import { useDirectorConfig } from "@/scenes/composables/useDirectorConfig";
 import { MOCK_MATCH, MOCK_TOPBAR } from "@/scenes/mock/matchDetail";
 import { MOCK_MAPPOOL } from "@/scenes/mock/mappool";
@@ -67,10 +68,12 @@ import { alignEngine } from "@/scenes/align/useFrameAlign";
 const { t } = useI18n();
 const director = useDirectorStore();
 const { params, hosted, sharedBg, sharedTopBar } = useSceneContext();
-const { config, load, save } = useDirectorConfig();
+const { config: localConfig, load, save } = useDirectorConfig();
+const streamLinks = useStreamLinksStore();
+const config = computed(() => ({ ...localConfig, ...streamLinks.linksFor(director.matchId ?? params.matchId, localConfig) }));
 
 const broadcast = computed(() =>
-  (!config.decoupled && config.alignA && !!config.hlsA) || (!config.decoupled && config.alignB && !!config.hlsB)
+  (!config.value.decoupled && config.value.alignA && !!config.value.hlsA) || (!config.value.decoupled && config.value.alignB && !!config.value.hlsB)
     ? director.presentation ?? director.emptyBroadcast : director.liveBroadcast);
 function displayPlayer(side: "A" | "B") { return side === "A" ? broadcast.value.playerA : broadcast.value.playerB; }
 function displayLive(side: "A" | "B") { return side === "A" ? broadcast.value.liveTimeA : broadcast.value.liveTimeB; }
@@ -83,9 +86,9 @@ function timerStateAt(side: "A" | "B", wallMs: number) {
   return { sample, running: state.phase === MatchPhase.IN_ROUND &&
     player.status === PlayerStatus.IN_GAME && sample?.advancing === true };
 }
-watch(() => [config.decoupled, config.alignA, config.hlsA, config.alignB, config.hlsB], () => {
+watch(() => JSON.stringify([config.value.decoupled, config.value.alignA, config.value.hlsA, config.value.alignB, config.value.hlsB]), () => {
   alignEngine.setRequiredSides((["A", "B"] as const).filter(side =>
-    !config.decoupled && (side === "A" ? config.alignA && !!config.hlsA : config.alignB && !!config.hlsB)));
+    !config.value.decoupled && (side === "A" ? config.value.alignA && !!config.value.hlsA : config.value.alignB && !!config.value.hlsB)));
 }, { immediate: true });
 
 const panelOpen = ref(params.editMode);
@@ -119,27 +122,27 @@ function mockLiveSample(side: "A" | "B"): LiveTime {
     receivedAt: now,
   };
 }
-// ---- SEI 帧级对齐：每侧是否进入对齐渲染（config.alignX && 有流）----
+// ---- SEI 帧级对齐：每侧是否进入对齐渲染（config.value.alignX && 有流）----
 // 对齐开时叠加层计时锚定虚拟时间 T（useAlignedTiming），画面走 SeiStream；否则回落
 // useLiveTimers + useDelayedRef 手动 delay（MSE StreamFrame）。
 const alignedA = useAlignedTiming("A", {
-  enabled: () => !config.decoupled && config.alignA && !!config.hlsA,
-  offsetMs: () => config.delayA * 1000,
+  enabled: () => !config.value.decoupled && config.value.alignA && !!config.value.hlsA,
+  offsetMs: () => config.value.delayA * 1000,
   sampleAt: wallMs => timerStateAt("A", wallMs),
 });
 const alignedB = useAlignedTiming("B", {
-  enabled: () => !config.decoupled && config.alignB && !!config.hlsB,
-  offsetMs: () => config.delayB * 1000,
+  enabled: () => !config.value.decoupled && config.value.alignB && !!config.value.hlsB,
+  offsetMs: () => config.value.delayB * 1000,
   sampleAt: wallMs => timerStateAt("B", wallMs),
 });
 // 只要对齐开关开着且有 m3u8 地址就挂 SeiStream（立即开始拉流/解码），否则（对齐关）回 MSE。
 // 不能因"当前 mode/error 未定"而不挂——那会导致引擎不拉流、永远卡"等待内容"。
-const seiA = computed(() => !config.decoupled && config.alignA && !!config.hlsA);
-const seiB = computed(() => !config.decoupled && config.alignB && !!config.hlsB);
+const seiA = computed(() => !config.value.decoupled && config.value.alignA && !!config.value.hlsA);
+const seiB = computed(() => !config.value.decoupled && config.value.alignB && !!config.value.hlsB);
 
 // Both the combined stage and standalone match scene only receive console T.
 // 对齐模式下等待权威；脱钩模式下 MSE/embed 各自直接播放。
-const waitingForAuthority = computed(() => !config.decoupled && !alignEngine.authorityReady.value && alignEngine.pictureExpired.value);
+const waitingForAuthority = computed(() => !config.value.decoupled && !alignEngine.authorityReady.value && alignEngine.pictureExpired.value);
 
 const { liveMsA, liveMsB, liveSegA, liveSegB } = useLiveTimers(
   (side) =>
@@ -163,7 +166,7 @@ const { sideA, sideB } = useMatchTiming({
   isMulti: () => isMulti.value,
   liveOf: (side) => {
     const al = side === "A" ? alignedA : alignedB;
-    if (!config.decoupled && al.active.value) return al.main.value;
+    if (!config.value.decoupled && al.active.value) return al.main.value;
     return side === "A" ? liveMsA.value : liveMsB.value;
   },
   levelsOf: (side) =>
@@ -192,7 +195,7 @@ const { sideA, sideB } = useMatchTiming({
 //      防剧透：对齐时仅在虚拟时间 T 越过该条 gap 的到达时刻 subsegmentGapAt 才揭示，
 //      T 前 '' 期间保持 0（中性），T 单调 → 揭示一次不反复。----
 const twMs = computed<number | null>(() =>
-  config.decoupled || alignEngine.tUs.value == null ? null : alignEngine.tUs.value / 1000,
+  config.value.decoupled || alignEngine.tUs.value == null ? null : alignEngine.tUs.value / 1000,
 );
 const diffMs = computed(() => {
   if (!liveReady.value) return MOCK_MATCH.gapDiffMs;
@@ -246,7 +249,7 @@ function levelNameOf(idx: number): string | null {
 
 function liveSegTime(side: "A" | "B"): string | null {
   const al = side === "A" ? alignedA : alignedB;
-  if (!config.decoupled && al.active.value) return al.seg.value == null ? null : formatMs(al.seg.value);
+  if (!config.value.decoupled && al.active.value) return al.seg.value == null ? null : formatMs(al.seg.value);
   const val = side === "A" ? liveSegA.value : liveSegB.value;
   return val == null ? null : formatMs(val);
 }
@@ -421,7 +424,7 @@ const timerAV = useDelayedRef(
     prevLevel: prevLevelA.value,
     prevSeg: prevSegA.value,
   }),
-  () => (config.decoupled || alignedA.active.value ? 0 : config.delayA * 1000),
+  () => (config.value.decoupled || alignedA.active.value ? 0 : config.value.delayA * 1000),
 );
 const timerBV = useDelayedRef(
   () => ({
@@ -431,11 +434,11 @@ const timerBV = useDelayedRef(
     prevLevel: prevLevelB.value,
     prevSeg: prevSegB.value,
   }),
-  () => (config.decoupled || alignedB.active.value ? 0 : config.delayB * 1000),
+  () => (config.value.decoupled || alignedB.active.value ? 0 : config.value.delayB * 1000),
 );
 const diffV = useDelayedRef(
   () => diffMs.value,
-  () => (config.decoupled || (alignedA.active.value && alignedB.active.value) ? 0 : config.delayDiff * 1000),
+  () => (config.value.decoupled || (alignedA.active.value && alignedB.active.value) ? 0 : config.value.delayDiff * 1000),
 );
 
 // ---- 右下角 PB 角标卡（speedrun.com 数据与 categoryinfo 场景同源共享） ----
@@ -481,9 +484,6 @@ const pbCardVisible = computed(() =>
 const pbNameA = computed(() => (liveReady.value ? director.nameA : MOCK_TOPBAR.nameA));
 const pbNameB = computed(() => (liveReady.value ? director.nameB : MOCK_TOPBAR.nameB));
 
-function onSaved(patch: Parameters<typeof save>[1]): void {
-  save(params.matchId, patch);
-}
 
 // ---- 角标卡几何（左选图 / 右 PB）：分别锚定 A / B 计时器 ----
 // 选图卡右缘锚 A 计时器左侧留 12px、PB 卡左缘锚 B 计时器右侧留 12px，两卡
@@ -720,7 +720,6 @@ onUnmounted(() => {
       <DirectorConfigPanel
         v-model:visible="panelOpen"
         :model="config"
-        @saved="onSaved"
       />
     </template>
   </div>

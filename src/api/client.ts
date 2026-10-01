@@ -4,6 +4,8 @@
  */
 import { restBase } from "./config";
 import type {
+  StreamLinks,
+  StreamLinksPut,
   AccountCreate,
   AccountOut,
   AccountUpdate,
@@ -79,6 +81,7 @@ function extractMsg(data: unknown, status: number, fallback: string): string {
       if (first && typeof first.msg === "string") return first.msg;
     }
     if (typeof d.detail === "string") return d.detail;
+    if (d.detail && typeof d.detail === "object" && "message" in d.detail && typeof d.detail.message === "string") return d.detail.message;
   }
   if (typeof data === "string" && data.length > 0) return data;
   return fallback || `HTTP ${status}`;
@@ -87,7 +90,8 @@ function extractMsg(data: unknown, status: number, fallback: string): string {
 /** 取错误体的稳定字符串码（CodedHTTPException 输出 {"msg", "code"}）；缺失返回 undefined */
 function extractErrorCode(data: unknown): string | undefined {
   if (data && typeof data === "object") {
-    const c = (data as Record<string, unknown>).code;
+    const d = data as Record<string, unknown>;
+    const c = d.detail && typeof d.detail === "object" ? (d.detail as Record<string, unknown>).code : d.code;
     if (typeof c === "string" && c.length > 0) return c;
   }
   return undefined;
@@ -162,6 +166,12 @@ async function uploadFile(
 }
 
 export const api = {
+  getStreamLinks(matchId: string, token: string): Promise<StreamLinks> {
+    return request(`/me/matches/${encodeURIComponent(matchId)}/stream-links`, { method: "GET", token });
+  },
+  putStreamLinks(matchId: string, body: StreamLinksPut, token: string): Promise<StreamLinks> {
+    return request(`/me/matches/${encodeURIComponent(matchId)}/stream-links`, { method: "PUT", token, body: JSON.stringify(body) });
+  },
   login(body: LoginRequest): Promise<TokenResponse> {
     return request<TokenResponse>("/auth/login", {
       method: "POST",

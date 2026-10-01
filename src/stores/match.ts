@@ -1,3 +1,4 @@
+import { useStreamLinksStore } from "./streamLinks";
 import { mergeMessageHistory } from "@/utils/mergeMessageHistory";
 /**
  * 比赛中央状态：WebSocket 连接、阶段/比分/选手实时状态、聊天、回合历史。
@@ -103,6 +104,7 @@ let liveSeq = 0;
 
 export const useMatchStore = defineStore("match", () => {
   const auth = useAuthStore();
+  const streamLinks = useStreamLinksStore();
 
   /**
    * 连接/加载世代号。每次切场或重置都会递增；所有异步 REST 重建（match detail、
@@ -249,6 +251,7 @@ export const useMatchStore = defineStore("match", () => {
     // 切到另一场比赛（或从已清空状态重新建立连接）前先清掉上一场残留数据，
     // 避免旧数据在 auth_ok/REST 回来前短暂显示，也避免旧异步请求写回新场。
     if (target !== matchId.value) {
+      streamLinks.clear();
       $reset();
     }
     authErrorMessage.value = "";
@@ -293,9 +296,13 @@ export const useMatchStore = defineStore("match", () => {
 
   function handleMessage(msg: ServerMessage): void {
     switch (msg.type) {
+      case "stream_links_update":
+        streamLinks.receive(msg.payload);
+        break;
       case "auth_ok":
         matchId.value = msg.match_id;
         seat.value = msg.seat;
+        void streamLinks.activate(auth.token, msg.match_id, msg.account_id);
         if (msg.match_name) matchName.value = msg.match_name;
         // 双方选手名：auth_ok 即带（后端已补），连入即有
         if (msg.player_a_name) playerNames.A = msg.player_a_name;
@@ -308,6 +315,7 @@ export const useMatchStore = defineStore("match", () => {
         void loadHistory();
         break;
       case "auth_error":
+        streamLinks.clear();
         authErrorMessage.value = msg.msg || tr("toast.matchAuthFailed");
         socket?.disconnect();
         break;
