@@ -15,8 +15,8 @@ export const SCENE_BACKGROUND_KEYS = [
 
 export type SceneBackgroundKey = (typeof SCENE_BACKGROUND_KEYS)[number];
 
-/** 默认背景 = 目前正在使用的合成器浪潮风（太阳 + 网格） */
-export const DEFAULT_SCENE_BACKGROUND: SceneBackgroundKey = "default";
+/** 默认背景 = 水面浪潮（synthwave） */
+export const DEFAULT_SCENE_BACKGROUND: SceneBackgroundKey = "synthwave";
 
 export interface SceneBackgroundOption {
   key: SceneBackgroundKey;
