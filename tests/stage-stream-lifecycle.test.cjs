@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const ts = require('typescript');
 const { parse, compileScript } = require('@vue/compiler-sfc');
 const vue = require('vue');
+const scenes = require('./load-ts.cjs')()('src/scenes/stage/useStageScene.ts');
 
 // Run the real host setup. Any attempt to acquire media from the host fails;
 // media belongs to the dynamically mounted MatchScene children instead.
@@ -25,7 +26,7 @@ function mountStage(scene) {
     if (id.endsWith('useSceneContext')) return { SCENE_CONTEXT_KEY: Symbol() };
     if (id.endsWith('bilingual')) return { bi: key => key };
     if (id === './useStageScene') return {
-      isSceneKey: s => ['match', 'soon', 'bracket', 'mappool', 'categoryinfo'].includes(s),
+      isSceneKey: scenes.isSceneKey,
       readStoredScene: () => null, sceneStorageKey: () => 'fixture',
     };
     if (id.endsWith('.vue')) return { default: components[id] ??= { name: id } };
@@ -47,11 +48,33 @@ test('stage restores non-match scene without owning background media, and can re
   const stage = mountStage('soon');
   try {
     assert.match(stage.bindings.activeComponent.value.name, /SoonScene/);
-    for (const scene of ['match', 'mappool', 'bracket', 'categoryinfo', 'soon', 'match']) {
+    for (const scene of ['match', 'mappool', 'bracket', 'categoryinfo', 'soon', 'victory', 'match']) {
       stage.store.currentSceneCmd = scene;
       await vue.nextTick();
       assert.equal(stage.bindings.currentScene.value, scene);
       assert.equal(stage.bindings.activeComponent.value, stage.bindings.sceneMap[scene]);
     }
   } finally { stage.stop(); }
+});
+
+
+test('stage restores victory on mount and ignores unknown scene commands', async () => {
+  const stage = mountStage('victory');
+  try {
+    assert.match(stage.bindings.activeComponent.value.name, /VictoryScene/);
+    stage.bindings.onSceneStorage({ key: 'fixture', newValue: 'match' });
+    await vue.nextTick();
+    assert.equal(stage.bindings.currentScene.value, 'match');
+    stage.bindings.onSceneStorage({ key: 'fixture', newValue: 'victory' });
+    await vue.nextTick();
+    assert.match(stage.bindings.activeComponent.value.name, /VictoryScene/);
+    stage.bindings.onSceneStorage({ key: 'fixture', newValue: 'unknown' });
+    stage.store.currentSceneCmd = 'unknown';
+    await vue.nextTick();
+    assert.equal(stage.bindings.currentScene.value, 'victory');
+    assert.match(stage.bindings.activeComponent.value.name, /VictoryScene/);
+  } finally { stage.stop(); }
+  const unknown = mountStage('unknown');
+  try { assert.equal(unknown.bindings.currentScene.value, 'match'); }
+  finally { unknown.stop(); }
 });

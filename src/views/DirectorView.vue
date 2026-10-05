@@ -11,6 +11,7 @@ import RoleSwitcher from "@/components/RoleSwitcher.vue";
 import AccountMenu from "@/components/AccountMenu.vue";
 import ColorField from "@/components/ColorField.vue";
 import DirectorSpeedrunInfo from "@/components/DirectorSpeedrunInfo.vue";
+import VictoryResult from "@/scenes/victory/VictoryResult.vue";
 import StreamFrame from "@/scenes/match/StreamFrame.vue";
 import SeiStream from "@/scenes/match/SeiStream.vue";
 import { usePanelVisibility } from "@/scenes/composables/usePanelVisibility";
@@ -22,6 +23,7 @@ import { AttemptStatus, MatchPhase } from "@/api/types";
 import { formatMs, formatUtcTime, phaseInfo, playerStatusInfo, preloadTagInfo, shortTime } from "@/utils/format";
 import {
   DEFAULT_SCENE,
+  isSceneKey,
   readStoredScene,
   writeStoredScene,
   type SceneKey,
@@ -432,6 +434,7 @@ const sceneBtnLabels: Record<SceneKey, string> = {
   mappool: "directorView.sceneBtnMappool",
   bracket: "directorView.sceneBtnBracket",
   soon: "directorView.sceneBtnSoon",
+  victory: "directorView.sceneBtnVictory",
 };
 const activeScene = ref<SceneKey>(DEFAULT_SCENE);
 // 同源缓存初始化：WS 尚未回放/未连接时先对齐本地上次场景（仅作控制台显示，
@@ -457,7 +460,7 @@ function onSwitchScene(key: SceneKey): void {
 watch(
   () => director.currentSceneCmd,
   (s) => {
-    if (s) activeScene.value = s as SceneKey;
+    if (isSceneKey(s)) activeScene.value = s;
   },
 );
 
@@ -565,7 +568,7 @@ onUnmounted(() => {
         @update:model-value="(v: string | number | boolean) => onSwitchScene(v as SceneKey)"
       >
         <el-radio-button
-          v-for="key in (['soon','mappool','categoryinfo','match','bracket'] as SceneKey[])"
+          v-for="key in (['soon','mappool','categoryinfo','match','bracket','victory'] as SceneKey[])"
           :key="key"
           :value="key"
         >
@@ -788,6 +791,11 @@ onUnmounted(() => {
               {{ $t("directorView.soonReset") }}
             </el-button>
           </div>
+        </div>
+
+        <div v-if="activeScene === 'victory'" class="card">
+          <div class="card-title">{{ $t("directorView.sceneBtnVictory") }}</div>
+          <VictoryResult />
         </div>
 
         <!-- 选手画面监控：与舞台同源同配置实时预览（不受隐藏开关影响——先验证

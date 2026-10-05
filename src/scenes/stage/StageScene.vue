@@ -1,13 +1,13 @@
 <script setup lang="ts">
 /**
- * 合并舞台根：一个 OBS 浏览器源承载 5 个场景，导播控制台经 WS 广播切换。
+ * 合并舞台根：一个 OBS 浏览器源承载 6 个场景，导播控制台经 WS 广播切换。
  *
  * 职责：
  *  1. 读一次 URL（token/match/tournament/...）—— 舞台 URL 由导播控制台拼好（含 tournament）。
  *  2. 连唯一 director store WS（内嵌场景不得再连，由 useSceneContext.hosted 守卫）。
  *  3. provide SceneContext（hosted:true, sharedBg:true, sharedTopBar:true）
- *    给 5 个内嵌场景。
- *  4. 渲染单个共享 SynthwaveBg + <Transition> 在 5 场景间交叉淡入切换。
+ *    给 6 个内嵌场景。
+ *  4. 渲染单个共享 SynthwaveBg + <Transition> 在 6 场景间交叉淡入切换。
  *  5. 监听 WS director_cmd 消息 + localStorage 兜底（同进程 Chrome 标签页）即时切换。
  *  6. 顶部信息栏常驻单实例（match/mappool/categoryinfo 场景显示，v-show 切换不重挂）：
  *    跨场景切换零闪烁——场景各自内嵌的顶栏在 hosted 模式下让位（sharedTopBar）。
@@ -32,6 +32,7 @@ import { bi } from "@/utils/bilingual";
 import MatchScene from "@/scenes/match/MatchScene.vue";
 import MappoolScene from "@/scenes/mappool/MappoolScene.vue";
 import BracketScene from "@/scenes/bracket/BracketScene.vue";
+import VictoryScene from "@/scenes/victory/VictoryScene.vue";
 import SoonScene from "@/scenes/soon/SoonScene.vue";
 
 const params = useSceneParams();
@@ -122,6 +123,7 @@ const sceneMap: Record<SceneKey, typeof CategoryInfoScene> = {
   mappool: MappoolScene,
   bracket: BracketScene,
   soon: SoonScene,
+  victory: VictoryScene,
 };
 const activeComponent = shallowRef<typeof CategoryInfoScene>(
   sceneMap[currentScene.value],

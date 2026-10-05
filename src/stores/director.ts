@@ -149,6 +149,9 @@ export const useDirectorStore = defineStore("director", () => {
   const winsA = ref(0);
   const winsB = ref(0);
   const threshold = ref(0);
+  let winnerRevision = 0;
+  let cumulativeRevision = 0;
+  const resultScoreReady = ref(false);
   const matchWinner = ref<"A" | "B" | null>(null);
   const lastResult = ref<{
     verdict: RoundVerdict;
@@ -477,7 +480,7 @@ export const useDirectorStore = defineStore("director", () => {
   const isMulti = computed(() => currentRound.value?.type === PickType.MULTI);
   /** 已结束比赛：导播仅可查看；除场景切换（纯舞台展示控制）外，倒计时 / 配置广播等操作全部锁定。 */
   const matchEnded = computed(
-    () => matchStatus.value === MS.ENDED || phase.value === MatchPhase.MATCH_END,
+    () => matchWinner.value !== null || matchStatus.value === MS.ENDED || phase.value === MatchPhase.MATCH_END,
   );
 
   function log(kind: string, text: string, ts?: string): void {
@@ -510,6 +513,11 @@ export const useDirectorStore = defineStore("director", () => {
           messages.value = []; chatLines.value = [];
           historyRevision.value++;
           if (matchId.value) alignEngine.resetSession();
+          resultScoreReady.value = false; cumulativeRevision++; winnerRevision++;
+          matchStatus.value = null; metaReady.value = false; matchName.value = "";
+          boFormat.value = winThreshold.value = threshold.value = 0;
+          nameA.value = tr("seat.a"); nameB.value = tr("seat.b");
+          currentSceneCmd.value = null; remoteConfig.value = null;
           phase.value = MatchPhase.IDLE; matchWinner.value = null; lastResultAt.value = null;
           aOnline.value = bOnline.value = false;
           currentRound.value = null;
@@ -585,6 +593,7 @@ export const useDirectorStore = defineStore("director", () => {
         };
         playerA.value = freshPlayer();
         playerB.value = freshPlayer();
+        winnerRevision++;
         matchWinner.value = null;
         lastResult.value = null;
         lastResultAt.value = null;
@@ -600,6 +609,7 @@ export const useDirectorStore = defineStore("director", () => {
         };
         playerA.value = freshPlayer();
         playerB.value = freshPlayer();
+        winnerRevision++;
         matchWinner.value = null;
         lastResult.value = null;
         lastResultAt.value = null;
@@ -663,6 +673,7 @@ export const useDirectorStore = defineStore("director", () => {
         lastResultAt.value = Date.now();
         break;
       case "cumulative_score":
+        cumulativeRevision++; resultScoreReady.value = true;
         scoreHistory.add(Date.now(), { winsA: msg.wins_a, winsB: msg.wins_b });
         scoreRevision.value++;
         winsA.value = msg.wins_a;
@@ -670,6 +681,7 @@ export const useDirectorStore = defineStore("director", () => {
         threshold.value = msg.threshold;
         break;
       case "match_end":
+        winnerRevision++;
         matchWinner.value = msg.winner;
         break;
       case "chat":
@@ -782,6 +794,8 @@ export const useDirectorStore = defineStore("director", () => {
     if (!matchId.value || !tokenRef.value) return;
     const mid = matchId.value, token = tokenRef.value, generation = ++metaGeneration;
     const requestedAt = Date.now();
+    const requestedWinnerRevision = winnerRevision;
+    const requestedCumulativeRevision = cumulativeRevision;
     const current = () => generation === metaGeneration && matchId.value === mid && tokenRef.value === token;
     // 1) /me/matches/{id}：首回合前即可用（match_log 要首回合后才生成），
     //    尽早补比赛名/状态/赛事归属（Coming Soon 场景与舞台 URL 依赖），
@@ -790,7 +804,12 @@ export const useDirectorStore = defineStore("director", () => {
       const m = await api.getMyMatch(mid, token);
       if (!current()) return;
       matchName.value = m.name || matchName.value;
-      matchStatus.value = m.status;
+      if (winnerRevision === requestedWinnerRevision) {
+        matchStatus.value = m.status;
+        if (m.winner === "A" || m.winner === "B") matchWinner.value = m.winner;
+      }
+      if (m.player_a_username) nameA.value = m.player_a_username;
+      if (m.player_b_username) nameB.value = m.player_b_username;
       tournamentId.value = m.tournament_id || tournamentId.value;
       boFormat.value = m.bo_format || boFormat.value;
       winThreshold.value = m.win_threshold || winThreshold.value;
@@ -803,10 +822,22 @@ export const useDirectorStore = defineStore("director", () => {
     try {
       const doc = await api.getMatchLog(mid, token);
       if (!current()) return;
+      const final = doc.final_result;
+      if (!matchWinner.value && winnerRevision === requestedWinnerRevision && (final?.winner === "A" || final?.winner === "B")) {
+        matchWinner.value = final.winner;
+      }
+      const finalWinsA = final?.wins_a, finalWinsB = final?.wins_b;
+      const hasFinalScore = typeof finalWinsA === "number" && typeof finalWinsB === "number"
+        && Number.isInteger(finalWinsA) && Number.isInteger(finalWinsB)
+        && finalWinsA >= 0 && finalWinsB >= 0;
+      if (hasFinalScore && cumulativeRevision === requestedCumulativeRevision) {
+        winsA.value = finalWinsA; winsB.value = finalWinsB;
+        resultScoreReady.value = true;
+      }
       const info = doc.initial_info;
-      matchName.value = info.name ?? "";
-      boFormat.value = info.bo_format ?? 0;
-      winThreshold.value = info.win_threshold ?? 0;
+      matchName.value = info.name ?? matchName.value;
+      boFormat.value = info.bo_format ?? boFormat.value;
+      winThreshold.value = info.win_threshold ?? winThreshold.value;
       scoringMethodName.value =
         (info.scoring_method as "FASTEST" | "AVERAGE" | undefined) ?? "";
       countdownDelay.value = info.start_countdown_delay ?? null;
@@ -816,7 +847,10 @@ export const useDirectorStore = defineStore("director", () => {
       const records = await loadScoreRounds(mid, doc.round_ids, number => api.getRoundDetail(mid, number, token));
       if (!current()) return;
       const restored = scoreHistory.restore(records, Date.now(), requestedAt);
-      winsA.value = restored.winsA; winsB.value = restored.winsB;
+      if (!hasFinalScore || cumulativeRevision !== requestedCumulativeRevision) {
+        winsA.value = restored.winsA; winsB.value = restored.winsB;
+      }
+      if (records.length > 0) resultScoreReady.value = true;
       scoreRevision.value++;
     } catch {
       // 首回合前 match_log 尚未生成（404），忽略
@@ -1025,6 +1059,7 @@ export const useDirectorStore = defineStore("director", () => {
     winsB,
     threshold,
     matchWinner,
+    resultScoreReady,
     lastResult,
     lastResultAt,
     // 名字 / 元数据

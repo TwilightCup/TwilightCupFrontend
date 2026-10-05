@@ -9,7 +9,7 @@
  * 键含 accountId，避免旧全局键导致同机不同导播互相切台。
  */
 
-export type SceneKey = "categoryinfo" | "match" | "mappool" | "bracket" | "soon";
+export type SceneKey = "categoryinfo" | "match" | "mappool" | "bracket" | "soon" | "victory";
 
 export const SCENE_KEYS: SceneKey[] = [
   "categoryinfo",
@@ -17,6 +17,7 @@ export const SCENE_KEYS: SceneKey[] = [
   "mappool",
   "bracket",
   "soon",
+  "victory",
 ];
 
 /** 默认场景（state_sync 到达前的初始值） */
