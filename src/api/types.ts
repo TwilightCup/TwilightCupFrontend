@@ -145,9 +145,14 @@ export type BracketSide = (typeof BracketSide)[keyof typeof BracketSide];
 // 领域模型（REST 返回结构）
 // ---------------------------------------------------------------------------
 
+/** 登录端标识（admin/referee/director/player），后端据此校验角色 */
+export type LoginEndpoint = "admin" | "referee" | "director" | "player";
+
 export interface LoginRequest {
   username: string;
   password: string;
+  /** 可选登录端：无对应角色则后端 403 ENDPOINT_FORBIDDEN 且不签发令牌 */
+  endpoint?: LoginEndpoint | null;
 }
 
 export interface TokenResponse {
@@ -183,6 +188,16 @@ export interface Pick {
   logo?: string | null;
   /** logo 的公开访问 URL（桶公开读 + nginx 反代，固定永久有效；由后端输出层填，不持久化）。 */
   logo_url?: string | null;
+  /**
+   * speedrun.com 排行榜映射（**持久化**，管理端图池编辑器配置；游戏固定为
+   * Human: Fall Flat）。导播 categoryinfo 场景按此拉取该项目 Top 榜。
+   * speedrun_category_id 为空 = 未映射（场景显示占位卡）。
+   */
+  speedrun_category_id?: string | null;
+  /** 单关 IL 分类的关卡 id；全游戏分类为 null */
+  speedrun_level_id?: string | null;
+  /** 子分类过滤 {varId: valueId}（如 IL subcategory: Checkpoint%） */
+  speedrun_variables?: Record<string, string>;
 }
 
 export interface LevelTime {
@@ -308,6 +323,8 @@ export interface AccountOut {
   username: string;
   roles: AccountType[];
   display_name: string;
+  /** speedrun.com 账号绑定（用户名或 8 位用户 id；未绑定为 null） */
+  speedrun_id?: string | null;
   created_at: string;
 }
 
@@ -316,13 +333,15 @@ export interface AccountCreate {
   password: string;
   display_name: string;
   roles: AccountType[];
+  speedrun_id?: string | null;
 }
 
-/** PATCH /admin/accounts/{id} 按字段局部更新，传哪个改哪个 */
+/** PATCH /admin/accounts/{id} 按字段局部更新，传哪个改哪个（speedrun_id 空串=解绑） */
 export interface AccountUpdate {
   display_name?: string;
   password?: string;
   roles?: AccountType[];
+  speedrun_id?: string | null;
 }
 
 /** PATCH /me 修改自己的展示名（任意已登录账号） */
@@ -340,6 +359,8 @@ export interface PasswordChange {
 export interface Category {
   name: string;
   picks: Pick[];
+  /** CT 类别支持的词条（管理端词条库中的 name 列表；None=旧数据未配置，回退内置词条；[]=不支持词条） */
+  ct_tags?: string[] | null;
 }
 
 /** 图池：一场比赛所有可选项目的集合 */
@@ -391,6 +412,17 @@ export interface LevelUpdate {
   logo?: string | null;
 }
 
+/** 词条库条目（后端 /admin/ct-tags，「词条管理」页维护）；name 唯一且不可改 */
+export interface CustomTag {
+  id: string;
+  name: string;
+  created_at: string;
+}
+
+export interface CustomTagCreate {
+  name: string;
+}
+
 export interface MatchOut {
   id: string;
   name: string;
@@ -408,12 +440,19 @@ export interface MatchOut {
   player_b_id: string;
   player_a_username: string;
   player_b_username: string;
+  /** 双方选手的 speedrun.com 账号绑定（categoryinfo 场景高亮用；未绑定为 null） */
+  player_a_speedrun?: string | null;
+  player_b_speedrun?: string | null;
   referee_id: string;
   director_id: string;
   winner: "A" | "B" | null;
+  /** 所属赛事 id（孤立比赛为默认容器 "default"；后端已下发，前端用于舞台 URL 等 */
+  tournament_id?: string | null;
   created_at: string;
   started_at?: string | null;
   ended_at?: string | null;
+  /** 归档时间（仅 ENDED 可归档；null/缺失 = 未归档。纯列表整理，不影响状态机） */
+  archived_at?: string | null;
 }
 
 export interface MatchCreate {
@@ -497,6 +536,9 @@ export interface TournamentStanding {
   buchholz: number | null;
   note: string | null;
 }
+
+/** 默认赛事（孤立比赛容器）固定主键，与后端 datatypes.DEFAULT_TOURNAMENT_ID 对齐 */
+export const DEFAULT_TOURNAMENT_ID = "default";
 
 export interface TournamentOut {
   id: string;
@@ -601,3 +643,13 @@ export interface FixtureCreateMatchBody {
   /** 引用图池库 id（冻结为快照内嵌本场） */
   mappool_id: string;
 }
+
+/** Match-scoped canonical links; updated_at_ms is UTC Unix epoch milliseconds. */
+export interface StreamLinkValues { hlsA: string; hlsB: string; embedA: string; embedB: string; }
+export interface StreamLinks extends StreamLinkValues {
+  match_id: string;
+  version: number;
+  updated_at_ms: number | null;
+  updated_by: string | null;
+}
+export interface StreamLinksPut extends StreamLinkValues { expected_version: number; }

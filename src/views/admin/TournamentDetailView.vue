@@ -8,6 +8,7 @@ import {
   type BracketView,
   type TournamentOut,
   type TournamentStandingOut,
+  DEFAULT_TOURNAMENT_ID,
   TournamentFormat,
   TournamentStatus,
 } from "@/api/types";
@@ -31,6 +32,10 @@ const tournament = computed<TournamentOut | undefined>(() =>
 );
 const isDraft = computed(
   () => tournament.value?.status === TournamentStatus.DRAFT,
+);
+/** 默认赛事（孤立比赛容器）：不可改/删/排赛程，后端 9 个变更端点均 400 */
+const isDefault = computed(
+  () => tournament.value?.id === DEFAULT_TOURNAMENT_ID,
 );
 
 const editOpen = ref(false);
@@ -140,7 +145,7 @@ onMounted(async () => {
         <template #header>
           <div class="card-head">
             <span>{{ $t('admin.tourDetail.basicInfo') }}</span>
-            <el-button v-if="isDraft" link type="primary" @click="openEdit">
+            <el-button v-if="isDraft && !isDefault" link type="primary" @click="openEdit">
               {{ $t('common.edit') }}
             </el-button>
           </div>
@@ -176,7 +181,7 @@ onMounted(async () => {
           <div class="card-head">
             <span>{{ $t('admin.tourDetail.membersPool') }}</span>
             <span class="dim">
-              {{ isDraft ? $t('admin.tourDetail.editableHint') : $t('admin.tourDetail.readOnlyHint') }}
+              {{ isDefault ? $t('admin.tourDetail.defaultMembersHint') : isDraft ? $t('admin.tourDetail.editableHint') : $t('admin.tourDetail.readOnlyHint') }}
             </span>
           </div>
         </template>
@@ -191,7 +196,11 @@ onMounted(async () => {
           </div>
         </template>
 
-        <div v-if="tournament.status === TournamentStatus.DRAFT" class="gen-area">
+        <div v-if="isDefault" class="dim">
+          {{ $t('admin.tourDetail.defaultScheduleHint') }}
+        </div>
+
+        <div v-else-if="tournament.status === TournamentStatus.DRAFT" class="gen-area">
           <div class="gen-tip">
             {{ $t('admin.tourDetail.genBracketTip', { count: tournament.participant_ids.length }) }}
           </div>

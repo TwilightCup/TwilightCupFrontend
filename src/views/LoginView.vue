@@ -1,16 +1,28 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import { useI18n } from "vue-i18n";
 import { useAuthStore } from "@/stores/auth";
+import type { LoginEndpoint } from "@/api/types";
 
 const { t } = useI18n();
 const auth = useAuthStore();
 const router = useRouter();
+const route = useRoute();
+
+/** 可指定进入的端；endpoint 为空串表示自动（按角色优先级落默认端）。
+ * 权限由后端登录接口校验（无该角色 → 403 ENDPOINT_FORBIDDEN 不签发令牌）。 */
+const ENDPOINTS: { value: LoginEndpoint; path: string; labelKey: string }[] = [
+  { value: "admin", path: "/admin/matches", labelKey: "role.admin" },
+  { value: "referee", path: "/referee", labelKey: "role.referee" },
+  { value: "director", path: "/director", labelKey: "role.director" },
+  { value: "player", path: "/player", labelKey: "role.player" },
+];
 
 const username = ref("");
 const password = ref("");
+const endpoint = ref<LoginEndpoint | "">("");
 const loading = ref(false);
 
 async function onSubmit(): Promise<void> {
@@ -22,10 +34,12 @@ async function onSubmit(): Promise<void> {
   const ok = await auth.login({
     username: username.value.trim(),
     password: password.value,
+    endpoint: endpoint.value === "" ? undefined : endpoint.value,
   });
   loading.value = false;
   if (ok) {
-    router.replace(auth.roleHome());
+    const picked = ENDPOINTS.find((e) => e.value === endpoint.value);
+    router.replace(picked ? picked.path : auth.roleHome());
   }
 }
 </script>
@@ -34,7 +48,7 @@ async function onSubmit(): Promise<void> {
   <div class="login-page">
     <div class="login-card">
       <div class="brand">
-        <div class="logo">🌇</div>
+        <img src="/logo.png" class="logo" alt="logo" />
         <h1>{{ $t("brand.appTitle") }}</h1>
         <p class="subtitle">{{ $t("brand.subtitle") }}</p>
       </div>
@@ -43,6 +57,14 @@ async function onSubmit(): Promise<void> {
         v-if="auth.loginError"
         :title="auth.loginError"
         type="error"
+        show-icon
+        :closable="false"
+        class="alert"
+      />
+      <el-alert
+        v-else-if="route.query.expired === '1'"
+        :title="$t('login.expired')"
+        type="warning"
         show-icon
         :closable="false"
         class="alert"
@@ -67,6 +89,17 @@ async function onSubmit(): Promise<void> {
             show-password
             @keyup.enter="onSubmit"
           />
+        </el-form-item>
+        <el-form-item :label="$t('login.endpoint')">
+          <el-select v-model="endpoint" style="width: 100%">
+            <el-option :label="$t('login.endpointAuto')" value="" />
+            <el-option
+              v-for="e in ENDPOINTS"
+              :key="e.value"
+              :label="$t(e.labelKey)"
+              :value="e.value"
+            />
+          </el-select>
         </el-form-item>
         <el-button
           type="primary"
@@ -109,8 +142,9 @@ async function onSubmit(): Promise<void> {
   margin-bottom: 20px;
 }
 .logo {
-  font-size: 44px;
-  line-height: 1;
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
 }
 .brand h1 {
   margin: 10px 0 2px;

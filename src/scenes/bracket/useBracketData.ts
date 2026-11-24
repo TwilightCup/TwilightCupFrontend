@@ -6,7 +6,8 @@
  *
  * 流程：
  * 1. 对阵树：api.getMyBracket（GET /me/tournaments/{id}/bracket，赛事成员可读）。
- *    失败（非成员 / token 无效 / 无赛事 / 无 tournamentId）→ MOCK_BRACKET 兜底（绝不让 OBS 黑屏）。
+ *    失败（非成员 / token 无效 / 无赛事 / 无 tournamentId）或 200 但零对阵
+ *    （默认赛事容器无 fixture）→ MOCK_BRACKET 兜底（绝不让 OBS 黑屏）。
  * 2. 30s 轮询 refresh（对阵推进非 WS 实时）。
  */
 import { onUnmounted, ref } from "vue";
@@ -53,7 +54,13 @@ export function useBracketData() {
     } else {
       try {
         view = await api.getMyBracket(tournamentId, token);
-        isMock.value = false;
+        // 200 但零对阵（默认赛事容器无 fixture）→ 与失败同走 mock 兜底，绝不黑屏
+        if (view.rounds.every((r) => r.fixtures.length === 0)) {
+          view = MOCK_BRACKET;
+          isMock.value = true;
+        } else {
+          isMock.value = false;
+        }
       } catch {
         // 非赛事成员 / token 无效 / 无对阵 → mock 兜底
         view = MOCK_BRACKET;

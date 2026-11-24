@@ -12,30 +12,32 @@ export interface SceneParams {
   /** 赛事 id（赛程图 / 图池按赛事） */
   tournamentId: string;
   /** 选手 A（蓝）RTMP ingest 地址 */
-  rtmpA: string;
-  /** 选手 B（红）RTMP ingest 地址 */
-  rtmpB: string;
-  /** 选手 A 浏览器可播流（HLS），有则 <video> 直放 */
+  /** 选手 A 浏览器可播流（HLS），有则 hls.js / 原生 <video> 播放 */
   hlsA: string;
   /** 选手 B 浏览器可播流（HLS） */
   hlsB: string;
-  /** 选手 A PB 文本（单行） */
-  pbA: string;
-  /** 选手 B PB 文本 */
-  pbB: string;
-  /** 选手 A 历史速通战绩（多行） */
-  histA: string;
-  /** 选手 B 历史速通战绩 */
-  histB: string;
+  /** 选手 A 外部直播嵌入地址（B站直播链接走后端代理流；YouTube 走后端 HLS 代理） */
+  embedA: string;
+  /** 选手 B 外部直播嵌入地址 */
+  embedB: string;
+  /** 选手 A 场景主题色（HEX） */
+  themeA: string;
+  /** 选手 B 场景主题色（HEX） */
+  themeB: string;
+  /** 场景背景样式 key（URL 覆盖，供跨浏览器舞台链接下发） */
+  background: string;
+  /** 选手 A/B SEI 对齐开关（"1"=开，随链接下发给舞台/控制台，跨浏览器本地不互通） */
+  alignA?: boolean;
+  alignB?: boolean;
+  /** 两路独立直播，不等待对齐。 */
+  decoupled?: boolean;
   /** 编辑态（=1 唤出导播配置面板） */
   editMode: boolean;
-  /** 赛事 logo URL（中上展示） */
-  logoUrl: string;
-  /** 进度条满偏对应的计时差（毫秒），默认 60000 */
+  /** 偏差条满偏对应的计时差（毫秒），默认 60000 */
   gapMs: number;
 }
 
-/** 缺省满偏计时差：60s 差 → 进度条满偏 */
+/** 缺省满偏计时差：60s 差 → 偏差条满偏 */
 const DEFAULT_GAP_MS = 60_000;
 
 /** 解析当前页面 URL 的场景参数。 */
@@ -46,16 +48,17 @@ export function useSceneParams(): SceneParams {
     token: get("token"),
     matchId: get("match"),
     tournamentId: get("tournament"),
-    rtmpA: get("rtmp_a"),
-    rtmpB: get("rtmp_b"),
     hlsA: get("hls_a"),
     hlsB: get("hls_b"),
-    pbA: get("pb_a"),
-    pbB: get("pb_b"),
-    histA: get("hist_a"),
-    histB: get("hist_b"),
+    embedA: get("embed_a"),
+    embedB: get("embed_b"),
+    themeA: get("theme_a"),
+    themeB: get("theme_b"),
+    background: get("background"),
+    alignA: p.has("align_a") ? p.get("align_a") === "1" || p.get("align_a") === "true" : undefined,
+    alignB: p.has("align_b") ? p.get("align_b") === "1" || p.get("align_b") === "true" : undefined,
+    decoupled: p.has("decoupled") ? p.get("decoupled") === "1" || p.get("decoupled") === "true" : undefined,
     editMode: p.get("edit") === "1",
-    logoUrl: get("logo"),
     gapMs: parseGap(get("gap")),
   };
 }

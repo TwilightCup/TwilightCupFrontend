@@ -1,3 +1,4 @@
+import { useStreamLinksStore } from "./streamLinks";
 /**
  * 鉴权状态：登录、令牌持久化、登出。
  *
@@ -7,10 +8,23 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { api, ApiError } from "@/api/client";
-import { AccountType, type LoginRequest, type TokenResponse } from "@/api/types";
+import {
+  AccountType,
+  type LoginEndpoint,
+  type LoginRequest,
+  type TokenResponse,
+} from "@/api/types";
 import { t as tr } from "@/locales";
 
 const STORAGE_KEY = "twc_auth";
+
+/** 登录端 → 展示名词条（后端 403 ENDPOINT_FORBIDDEN 时本地化提示用） */
+const ENDPOINT_LABEL_KEYS: Record<LoginEndpoint, string> = {
+  admin: "role.admin",
+  referee: "role.referee",
+  director: "role.director",
+  player: "role.player",
+};
 
 interface PersistedAuth {
   token: string;
@@ -61,6 +75,7 @@ export const useAuthStore = defineStore("auth", () => {
   }
 
   function clear(): void {
+    useStreamLinksStore().clear();
     localStorage.removeItem(STORAGE_KEY);
     token.value = "";
     accountId.value = "";
@@ -111,8 +126,19 @@ export const useAuthStore = defineStore("auth", () => {
       persist();
       return true;
     } catch (e) {
-      loginError.value =
-        e instanceof ApiError ? e.message : tr("login.failed");
+      // 选了端但无对应角色：后端 403 ENDPOINT_FORBIDDEN，按端名本地化提示
+      if (
+        e instanceof ApiError &&
+        e.errorCode === "ENDPOINT_FORBIDDEN" &&
+        req.endpoint
+      ) {
+        loginError.value = tr("login.noPermission", {
+          role: tr(ENDPOINT_LABEL_KEYS[req.endpoint]),
+        });
+      } else {
+        loginError.value =
+          e instanceof ApiError ? e.message : tr("login.failed");
+      }
       return false;
     }
   }

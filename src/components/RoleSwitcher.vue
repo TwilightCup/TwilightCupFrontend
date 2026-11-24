@@ -78,7 +78,9 @@ function go(path: string): void {
   align-items: center;
   gap: 4px;
   cursor: pointer;
-  padding: 4px 10px;
+  height: 24px;
+  padding: 0 10px;
+  box-sizing: border-box;
   border-radius: 6px;
   border: 1px solid var(--tc-border);
   background: var(--tc-hover);

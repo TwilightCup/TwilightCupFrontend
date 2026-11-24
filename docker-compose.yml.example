@@ -1,0 +1,10 @@
+services:
+  frontend:
+    build: .
+    ports:
+      - "${FRONTEND_BIND_ADDRESS:-127.0.0.1}:${FRONTEND_PORT:-5174}:8080"
+    restart: "no"
+networks:
+  default:
+    external: true
+    name: ${TWILIGHT_NETWORK:-twilight_cup_default}

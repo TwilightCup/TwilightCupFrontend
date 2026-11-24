@@ -31,6 +31,11 @@ const form = reactive<{ name: string; mappool: Mappool }>({
   mappool: emptyMappool(),
 });
 
+const savedForm = ref("");
+const hasUnsavedChanges = computed(() =>
+  savedForm.value !== "" && JSON.stringify(form) !== savedForm.value,
+);
+
 watch(
   () => props.modelValue,
   (open) => {
@@ -46,6 +51,7 @@ watch(
       form.name = "";
       form.mappool = emptyMappool();
     }
+    savedForm.value = JSON.stringify(form);
   },
 );
 
@@ -92,12 +98,13 @@ async function onSubmit(): Promise<void> {
   <el-dialog
     :model-value="modelValue"
     :title="editingId ? $t('mappoolForm.titleEdit') : $t('mappoolForm.titleCreate')"
-    width="760px"
+    width="900px"
+    class="mappool-dialog"
     :close-on-click-modal="false"
-    top="6vh"
+    top="0"
     @update:model-value="emit('update:modelValue', $event)"
   >
-    <el-form :model="form" label-width="90px" label-position="right">
+    <el-form :model="form" label-position="top">
       <el-form-item :label="$t('mappoolForm.labelName')" required>
         <el-input v-model="form.name" :placeholder="$t('mappoolForm.namePlaceholder')" />
       </el-form-item>
@@ -110,6 +117,9 @@ async function onSubmit(): Promise<void> {
     </el-form>
 
     <template #footer>
+      <p v-if="hasUnsavedChanges" class="unsaved-hint" role="status">
+        {{ $t("mappoolForm.unsavedHint") }}
+      </p>
       <el-button @click="close">{{ $t('common.cancel') }}</el-button>
       <el-button type="primary" :loading="submitting" @click="onSubmit">
         {{ editingId ? $t('mappoolForm.saveEditBtn') : $t('mappoolForm.createBtn') }}
@@ -119,6 +129,10 @@ async function onSubmit(): Promise<void> {
 </template>
 
 <style scoped>
+.unsaved-hint {
+  margin: 0 0 8px;
+  color: var(--el-color-warning);
+}
 .mappool-wrap {
   width: 100%;
 }
@@ -126,5 +140,65 @@ async function onSubmit(): Promise<void> {
   font-size: 12px;
   color: var(--tc-text-dim);
   margin-top: 6px;
+}
+</style>
+
+<style>
+.mappool-dialog {
+  height: 100vh;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.mappool-dialog .el-dialog__header,
+.mappool-dialog .el-dialog__footer {
+  flex-shrink: 0;
+}
+.mappool-dialog .el-dialog__body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.mappool-dialog .el-form {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mappool-dialog .el-form-item:last-child {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0;
+}
+
+.mappool-dialog .el-form-item:last-child .el-form-item__content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.mappool-dialog .mappool-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mappool-dialog .mappool-wrap .field-hint {
+  flex-shrink: 0;
+}
+
+.mappool-dialog .mappool-editor {
+  flex: 1;
+  min-height: 0;
 }
 </style>

@@ -11,6 +11,7 @@ import { api, ApiError } from "@/api/client";
 import { useAdminStore } from "@/stores/admin";
 import { useAuthStore } from "@/stores/auth";
 import type { Level } from "@/api/types";
+import { officialDisplayName } from "@/utils/officialLevels";
 
 const props = defineProps<{
   modelValue: boolean;
@@ -47,6 +48,14 @@ const rules = computed<FormRules>(() => ({
     ? []
     : [{ required: true, message: t("levelForm.nameRequired"), trigger: "blur" }],
 }));
+
+/** 展示名占位：关卡名命中官方 ID 时提示官方默认展示名，否则通用占位 */
+const displayNamePlaceholder = computed(() => {
+  const official = officialDisplayName(form.name.trim());
+  return official
+    ? t("levelForm.displayNameDefaultPlaceholder", { name: official })
+    : t("levelForm.displayNamePlaceholder");
+});
 
 watch(
   () => props.modelValue,
@@ -174,7 +183,7 @@ async function onSubmit(): Promise<void> {
       <el-form-item :label="$t('levelForm.labelDisplayName')">
         <el-input
           v-model="form.displayName"
-          :placeholder="$t('levelForm.displayNamePlaceholder')"
+          :placeholder="displayNamePlaceholder"
         />
       </el-form-item>
       <el-form-item :label="$t('levelForm.labelLogo')">

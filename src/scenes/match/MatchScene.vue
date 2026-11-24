@@ -1,87 +1,591 @@
 <script setup lang="ts">
 /**
- * 比赛详情场景页根组件。
+ * 比赛详情场景页根组件（直播主界面，需求见 ignored/黄昏杯导播端比赛详情页面需求.md）。
  *
- * 合成器浪潮背景之上：
- *   中上：赛事 logo（?logo=）或霓虹赛事名 + matchName
- *   顶部两侧：A(蓝,左) / B(红,右) 名字 + ScoreBlocks（BO 胜点方块）
- *   中间：TugBar 计时差进度条（双方最后共同关卡的累计用时差）
- *   下方：两个 4:3 StreamFrame（A 左 / B 右），各下接一个 PlayerInfoBox（PB + 历史）
+ * 布局（1920×1080）：
+ *   顶部：信息栏 TopBar（选手名/比分指示器/赛事·比赛标题，需求见顶栏文档）
+ *   中部：双 4:3 选手画面满宽无缝并列（16:9 推流裁左右）
+ *   下部：多关偏差条（单关隐藏）→ 双方计时器（主大字 + 副计时两行：多关
+ *         上行当前关卡名 + 实时单段，下行上一关名 + 单段用时；单关第一行为
+ *         「当前次数/总次数」+ 当前尝试实时分段时间，第二行为「上一次次数/总次数」
+ *         + 上一次尝试用时（跳过显示 N/A）。完成最后一关/最后一次尝试后，第一行
+ *         定格在最终成绩，不再往下推），屏幕中轴对称
+ *   左下角：当前选图角标卡（裁判宣布选图后常驻，PickCornerCard）
+ *   底部：WR/PB 背景板（neon-panel 同款，横向铺满画面、垫在全部计时器与
+ *         角标卡之下；顶缘拉到偏差条底部，含偏差值数字随游标移动的轨道范围）
+ *         + PB 卡内容（当前项目 WR + 双方 PB，PbCornerCard，speedrun 同源，
+ *         透明背景浮于背景板上，排版锚定不变）
  *
  * 数据：onMounted 连 WS（director.connect），WS 断 / 无 match → mock 兜底（绝不黑屏）。
- * 导播配置（RTMP/HLS/PB/历史）走 useDirectorConfig（localStorage），?edit=1 唤出面板。
+ * 计时口径见 useMatchTiming：多关主计时 = live_time 实时走表（每秒上报矫正 +
+ * 墙钟外推，见 useLiveTimers / ignored/需求-live_time实时计时中转.md），无实时
+ * 数据回退离线累计口径。偏差条由 subsegment 实时时间差驱动（subsegment_gap
+ * 广播 → broadcast.value.subsegmentGap，最近一条覆盖、回合级生命周期，见
+ * ignored/需求-subsegment实时时间差追踪与前端接入.md）。导播配置（RTMP/HLS）走
+ * useDirectorConfig（localStorage），?edit=1 唤出面板。计时显示延迟（对齐有延迟
+ * 的选手画面，控制台 0.5s 步进设置、config_update 实时下发）由 useDelayedRef
+ * 按 delayA/delayB/delayDiff 回放实现。
  */
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useDirectorStore } from "@/stores/director";
-import { PlayerStatus, type LevelTime } from "@/api/types";
+import {
+  CategoryKind,
+  MatchPhase,
+  PickType,
+  PlayerStatus,
+  type Attempt,
+  type LevelTime,
+} from "@/api/types";
+import { formatMs } from "@/utils/format";
+import { categoryKindOf } from "@/utils/mappool";
+import { officialDisplayName } from "@/utils/officialLevels";
+import { setSpeedrunToken } from "@/api/speedrun";
+import { useCategoryInfo } from "@/scenes/categoryinfo/useCategoryInfo";
 import SynthwaveBg from "@/scenes/components/SynthwaveBg.vue";
 import DirectorConfigPanel from "@/scenes/components/DirectorConfigPanel.vue";
 import { useSceneContext } from "@/scenes/composables/useSceneContext";
+import { useStreamLinksStore } from "@/stores/streamLinks";
 import { useDirectorConfig } from "@/scenes/composables/useDirectorConfig";
-import { MOCK_MATCH } from "@/scenes/mock/matchDetail";
-import ScoreBlocks from "./ScoreBlocks.vue";
-import TugBar from "./TugBar.vue";
+import { MOCK_MATCH, MOCK_TOPBAR } from "@/scenes/mock/matchDetail";
+import { MOCK_MAPPOOL } from "@/scenes/mock/mappool";
+import { MOCK_LEADERBOARD, MOCK_SPEEDRUN_A, MOCK_SPEEDRUN_B } from "@/scenes/mock/categoryinfo";
+import { useDraftStatus, retryOf } from "@/scenes/mappool/useDraftStatus";
+import TopBar from "@/scenes/components/TopBar.vue";
+import { useMatchTiming } from "./useMatchTiming";
+import { useLiveTimers } from "./useLiveTimers";
+import { useDelayedRef } from "./useDelayedRef";
+import type { LiveTime } from "@/stores/director";
+import DiffBar from "./DiffBar.vue";
+import PlayerTimer from "./PlayerTimer.vue";
 import StreamFrame from "./StreamFrame.vue";
-import PlayerInfoBox from "./PlayerInfoBox.vue";
+import SeiStream from "./SeiStream.vue";
+import PickCornerCard from "./PickCornerCard.vue";
+import PbCornerCard from "./PbCornerCard.vue";
+import { useAlignedTiming } from "./useAlignedTiming";
+import { alignEngine } from "@/scenes/align/useFrameAlign";
 
 const { t } = useI18n();
 const director = useDirectorStore();
-const { params, hosted, sharedBg } = useSceneContext();
-const { config, load, save } = useDirectorConfig();
+const { params, hosted, sharedBg, sharedTopBar } = useSceneContext();
+const { config: localConfig, load, save } = useDirectorConfig();
+const streamLinks = useStreamLinksStore();
+const config = computed(() => ({ ...localConfig, ...streamLinks.linksFor(director.matchId ?? params.matchId, localConfig) }));
+
+const broadcast = computed(() =>
+  (!config.value.decoupled && config.value.alignA && !!config.value.hlsA) || (!config.value.decoupled && config.value.alignB && !!config.value.hlsB)
+    ? director.presentation ?? director.emptyBroadcast : director.liveBroadcast);
+function displayPlayer(side: "A" | "B") { return side === "A" ? broadcast.value.playerA : broadcast.value.playerB; }
+function displayLive(side: "A" | "B") { return side === "A" ? broadcast.value.liveTimeA : broadcast.value.liveTimeB; }
+function timerStateAt(side: "A" | "B", wallMs: number) {
+  const state = director.presentationAt(wallMs);
+  if (!state) return null;
+  const sample = side === "A" ? state.liveTimeA : state.liveTimeB;
+  const player = side === "A" ? state.playerA : state.playerB;
+  // Status alone cannot prove running: also require observed timer growth.
+  return { sample, running: state.phase === MatchPhase.IN_ROUND &&
+    player.status === PlayerStatus.IN_GAME && sample?.advancing === true };
+}
+watch(() => JSON.stringify([config.value.decoupled, config.value.alignA, config.value.hlsA, config.value.alignB, config.value.hlsB]), () => {
+  alignEngine.setRequiredSides((["A", "B"] as const).filter(side =>
+    !config.value.decoupled && (side === "A" ? config.value.alignA && !!config.value.hlsA : config.value.alignB && !!config.value.hlsB)));
+}, { immediate: true });
 
 const panelOpen = ref(params.editMode);
 
-/** 是否已收到任何 WS 真实数据（playerA 状态被更新过即算）；否则用 mock */
-const liveReady = ref(false);
-
-// 派生：WS 有数据用 director store，否则 mock
-const nameA = computed(() => (liveReady.value ? director.nameOf("A") : MOCK_MATCH.nameA));
-const nameB = computed(() => (liveReady.value ? director.nameOf("B") : MOCK_MATCH.nameB));
-const winsA = computed(() => (liveReady.value ? director.winsA : MOCK_MATCH.winsA));
-const winsB = computed(() => (liveReady.value ? director.winsB : MOCK_MATCH.winsB));
-const threshold = computed(() =>
-  liveReady.value && director.winThreshold ? director.winThreshold : MOCK_MATCH.winThreshold,
-);
-const matchName = computed(() => director.matchName || MOCK_MATCH.matchName);
-
-const levelsA = computed<LevelTime[]>(() =>
-  liveReady.value ? director.playerOf("A").completedLevels : MOCK_MATCH.levelsA,
-);
-const levelsB = computed<LevelTime[]>(() =>
-  liveReady.value ? director.playerOf("B").completedLevels : MOCK_MATCH.levelsB,
-);
-const statusA = computed<PlayerStatus>(() =>
-  liveReady.value ? director.playerOf("A").status : MOCK_MATCH.statusA,
-);
-const statusB = computed<PlayerStatus>(() =>
-  liveReady.value ? director.playerOf("B").status : MOCK_MATCH.statusB,
-);
+/** 是否已连 WS（独立入口连上即视为 live；hosted 由舞台根维持）；否则用 mock。
+ *  hosted 初始即 true：舞台切场景重挂载时 store 已有实时数据，若先渲染一帧 mock，
+ *  偏差条游标会以 mock 位置为过渡起点滑到真实位置（初始状态即"左→中"漂移） */
+const liveReady = ref(hosted);
 
 const isMock = computed(() => !liveReady.value);
 
-function onSaved(patch: Parameters<typeof save>[1]): void {
-  save(params.matchId, patch);
+/** 多关选图模式：开赛后以回合类型为准，无回合信息时按多关展示（偏差条常驻） */
+const isMulti = computed(() => {
+  if (isMock.value) return MOCK_MATCH.isMulti;
+  return broadcast.value.currentRound ? broadcast.value.currentRound.type === PickType.MULTI : true;
+});
+
+// ---- 多关主计时实时走表：live_time 每秒上报（director store 按席暂存）→
+//      useLiveTimers 墙钟外推 + 新样本矫正；mock 模式合成「自挂载起从 mock
+//      累计值继续走」的样本（receivedAt 恒为当下，演示平滑走表不触发陈旧冻结） ----
+const mockLiveStart = Date.now();
+const mockLiveBaseA = MOCK_MATCH.levelsA.reduce((s, l) => s + l.time_ms, 0);
+const mockLiveBaseB = MOCK_MATCH.levelsB.reduce((s, l) => s + l.time_ms, 0);
+function mockLiveSample(side: "A" | "B"): LiveTime {
+  const now = Date.now();
+  return {
+    levelIndex: side === "A" ? MOCK_MATCH.currentLevelA : MOCK_MATCH.currentLevelB,
+    totalMs: (side === "A" ? mockLiveBaseA : mockLiveBaseB) + (now - mockLiveStart),
+    // 演示分段：60 秒一循环，看起来像「当前关进行中」
+    segmentMs: (now - mockLiveStart) % 60_000,
+    receivedAt: now,
+  };
+}
+// ---- SEI 帧级对齐：每侧是否进入对齐渲染（config.value.alignX && 有流）----
+// 对齐开时叠加层计时锚定虚拟时间 T（useAlignedTiming），画面走 SeiStream；否则回落
+// useLiveTimers + useDelayedRef 手动 delay（MSE StreamFrame）。
+const alignedA = useAlignedTiming("A", {
+  enabled: () => !config.value.decoupled && config.value.alignA && !!config.value.hlsA,
+  offsetMs: () => config.value.delayA * 1000,
+  sampleAt: wallMs => timerStateAt("A", wallMs),
+});
+const alignedB = useAlignedTiming("B", {
+  enabled: () => !config.value.decoupled && config.value.alignB && !!config.value.hlsB,
+  offsetMs: () => config.value.delayB * 1000,
+  sampleAt: wallMs => timerStateAt("B", wallMs),
+});
+// 只要对齐开关开着且有 m3u8 地址就挂 SeiStream（立即开始拉流/解码），否则（对齐关）回 MSE。
+// 不能因"当前 mode/error 未定"而不挂——那会导致引擎不拉流、永远卡"等待内容"。
+const seiA = computed(() => !config.value.decoupled && config.value.alignA && !!config.value.hlsA);
+const seiB = computed(() => !config.value.decoupled && config.value.alignB && !!config.value.hlsB);
+
+// Both the combined stage and standalone match scene only receive console T.
+// 对齐模式下等待权威；脱钩模式下 MSE/embed 各自直接播放。
+const waitingForAuthority = computed(() => !config.value.decoupled && !alignEngine.authorityReady.value && alignEngine.pictureExpired.value);
+
+const { liveMsA, liveMsB, liveSegA, liveSegB } = useLiveTimers(
+  (side) =>
+    liveReady.value
+      ? // 完赛（status 离开 IN_GAME，player_status 即时下发）即停表：忽略残存
+        // 样本走离线权威口径——完赛 = 计时器最终累计读数（completed_levels
+        // 末关 total_ms，与 live_time 同一时间线）。否则插件完赛后停报，外推会
+        // 多走 STALE_MS（数秒）才冻结，停表值失真。弃权不停在此处（见下方
+        // holdOf，原地冻结而非回跳累计）
+        displayPlayer(side).status === PlayerStatus.IN_GAME
+        ? displayLive(side)
+        : null
+      : mockLiveSample(side),
+  // 弃权（FORFEITED）→ 原地冻结：可能没有任何完成时间，回退离线累计会把
+  // 已走的主计时回跳一大截，保持停表瞬间的读数即可（不过冲不回跳）
+  (side) =>
+    liveReady.value && displayPlayer(side).status === PlayerStatus.FORFEITED,
+);
+
+const { sideA, sideB } = useMatchTiming({
+  isMulti: () => isMulti.value,
+  liveOf: (side) => {
+    const al = side === "A" ? alignedA : alignedB;
+    if (!config.value.decoupled && al.active.value) return al.main.value;
+    return side === "A" ? liveMsA.value : liveMsB.value;
+  },
+  levelsOf: (side) =>
+    liveReady.value
+      ? displayPlayer(side).completedLevels
+      : side === "A"
+        ? MOCK_MATCH.levelsA
+        : MOCK_MATCH.levelsB,
+  attemptsOf: (side) =>
+    liveReady.value
+      ? displayPlayer(side).attempts
+      : side === "A"
+        ? MOCK_MATCH.attemptsA
+        : MOCK_MATCH.attemptsB,
+  scoring: () => (liveReady.value ? director.scoringMethodName : MOCK_MATCH.scoringMethod),
+  scoreOf: (side) => {
+    if (!liveReady.value || !broadcast.value.lastResult) return null;
+    // 防剧透：对齐且该回合结果尚未被虚拟时间 T 越过时暂不揭示
+    if (twMs.value != null && broadcast.value.lastResultAt != null && twMs.value < broadcast.value.lastResultAt) return null;
+    return side === "A" ? broadcast.value.lastResult.scoreA : broadcast.value.lastResult.scoreB;
+  },
+});
+
+// ---- 多关偏差条：subsegment 实时时间差（最近一条 gap 直接覆盖，双向交错同理；
+//      回合结束 / 新回合由 store 清空归 0；mock 用静态演示值）。
+//      防剧透：对齐时仅在虚拟时间 T 越过该条 gap 的到达时刻 subsegmentGapAt 才揭示，
+//      T 前 '' 期间保持 0（中性），T 单调 → 揭示一次不反复。----
+const twMs = computed<number | null>(() =>
+  config.value.decoupled || alignEngine.tUs.value == null ? null : alignEngine.tUs.value / 1000,
+);
+const diffMs = computed(() => {
+  if (!liveReady.value) return MOCK_MATCH.gapDiffMs;
+  const g = broadcast.value.subsegmentGap;
+  if (g == null) return 0;
+  if (twMs.value != null && broadcast.value.subsegmentGapAt != null && twMs.value < broadcast.value.subsegmentGapAt) {
+    return 0;
+  }
+  return g;
+});
+
+// ---- 副计时器两行统一计算 ----
+// 多关：进行中 = 第一行当前关 + 实时单段、第二行上一关；完赛/无当前关时第一行
+// 定格在最后一关最终单段，不再往第二行推，第二行显示倒数第二关（如有）。
+// 单关：进行中 = 第一行当前尝试 + 实时分段、第二行上一次尝试；完成最后一次后
+// 第一行定格在最后一次尝试成绩，第二行显示上一次（倒数第二次，如有）。
+// 未开始/未连接/未进入游戏时第一行隐藏，第二行仅在已有历史记录时出现。
+interface SubRow {
+  label: string | null;
+  time: string | null;
 }
 
+const levelNames = computed<string[]>(() => {
+  if (!liveReady.value) return MOCK_MATCH.levelNames;
+  const raw = broadcast.value.currentRound?.collection.raw as { levels?: unknown } | undefined;
+  return Array.isArray(raw?.levels) ? raw.levels.map((x) => (x == null ? "" : String(x))) : [];
+});
+
+function completedLevelsOf(side: "A" | "B"): LevelTime[] {
+  const levels = liveReady.value
+    ? displayPlayer(side).completedLevels
+    : side === "A"
+      ? MOCK_MATCH.levelsA
+      : MOCK_MATCH.levelsB;
+  return [...levels].sort((a, b) => a.level_index - b.level_index);
+}
+
+function attemptsOf(side: "A" | "B"): Attempt[] {
+  const attempts = liveReady.value
+    ? displayPlayer(side).attempts
+    : side === "A"
+      ? MOCK_MATCH.attemptsA
+      : MOCK_MATCH.attemptsB;
+  return [...attempts].sort((a, b) => a.index - b.index);
+}
+
+function levelNameOf(idx: number): string | null {
+  const name = levelNames.value[idx];
+  return name ? (officialDisplayName(name) ?? name) : null;
+}
+
+function liveSegTime(side: "A" | "B"): string | null {
+  const al = side === "A" ? alignedA : alignedB;
+  if (!config.value.decoupled && al.active.value) return al.seg.value == null ? null : formatMs(al.seg.value);
+  const val = side === "A" ? liveSegA.value : liveSegB.value;
+  return val == null ? null : formatMs(val);
+}
+
+function multiActive(side: "A" | "B"): boolean {
+  if (!liveReady.value) return true;
+  if (broadcast.value.phase !== MatchPhase.IN_ROUND) return false;
+  if (!(side === "A" ? broadcast.value.aOnline : broadcast.value.bOnline)) return false;
+  if (displayPlayer(side).status !== PlayerStatus.IN_GAME) return false;
+  // 最后一关已上报、等待项目完成信号的瞬间也视为“已完赛”，让第一行立即定格
+  const idx = displayPlayer(side).currentLevelIndex;
+  return levelNames.value.length === 0 || idx < levelNames.value.length;
+}
+
+function singleActive(side: "A" | "B"): boolean {
+  if (!liveReady.value) return true;
+  if (broadcast.value.phase !== MatchPhase.IN_ROUND) return false;
+  if (!(side === "A" ? broadcast.value.aOnline : broadcast.value.bOnline)) return false;
+  if (displayPlayer(side).status !== PlayerStatus.IN_GAME) return false;
+  // 最后一次尝试已上报但尚未发项目完成信号时，同样按“已完成”定格第一行
+  const total = attemptTotal();
+  return total == null || attemptsOf(side).length < total;
+}
+
+function multiFirstRow(side: "A" | "B"): SubRow {
+  const levels = completedLevelsOf(side);
+  if (multiActive(side)) {
+    const idx = liveReady.value
+      ? displayPlayer(side).currentLevelIndex
+      : side === "A"
+        ? MOCK_MATCH.currentLevelA
+        : MOCK_MATCH.currentLevelB;
+    const time = liveSegTime(side);
+    return { label: levelNameOf(idx), time };
+  }
+  if (!levels.length) return { label: null, time: null };
+  const last = levels[levels.length - 1]!;
+  return { label: levelNameOf(last.level_index), time: formatMs(last.time_ms) };
+}
+
+function multiSecondRow(side: "A" | "B"): SubRow {
+  const levels = completedLevelsOf(side);
+  if (multiActive(side)) {
+    if (!levels.length) return { label: null, time: null };
+    const last = levels[levels.length - 1]!;
+    return { label: levelNameOf(last.level_index), time: formatMs(last.time_ms) };
+  }
+  if (levels.length <= 1) return { label: null, time: null };
+  const prev = levels[levels.length - 2]!;
+  return { label: levelNameOf(prev.level_index), time: formatMs(prev.time_ms) };
+}
+
+function singleFirstRow(side: "A" | "B"): SubRow {
+  const attempts = attemptsOf(side);
+  if (singleActive(side)) {
+    const total = attemptTotal();
+    const maxIndex = attempts.length ? attempts[attempts.length - 1]!.index : -1;
+    const label =
+      total == null
+        ? null
+        : `${Math.min(maxIndex + 2, total)}/${total}`;
+    const time = liveSegTime(side);
+    return { label, time };
+  }
+  if (!attempts.length) return { label: null, time: null };
+  const last = attempts[attempts.length - 1]!;
+  return {
+    label: attemptLabelOf(last.index),
+    time: formatMs(last.time_ms ?? null),
+  };
+}
+
+function singleSecondRow(side: "A" | "B"): SubRow {
+  const attempts = attemptsOf(side);
+  if (singleActive(side)) {
+    if (!attempts.length) return { label: null, time: null };
+    const last = attempts[attempts.length - 1]!;
+    return {
+      label: attemptLabelOf(last.index),
+      time: formatMs(last.time_ms ?? null),
+    };
+  }
+  if (attempts.length <= 1) return { label: null, time: null };
+  const prev = attempts[attempts.length - 2]!;
+  return {
+    label: attemptLabelOf(prev.index),
+    time: formatMs(prev.time_ms ?? null),
+  };
+}
+
+function firstRow(side: "A" | "B"): SubRow {
+  return isMulti.value ? multiFirstRow(side) : singleFirstRow(side);
+}
+
+function secondRow(side: "A" | "B"): SubRow {
+  return isMulti.value ? multiSecondRow(side) : singleSecondRow(side);
+}
+
+const levelA = computed(() => firstRow("A").label);
+const levelB = computed(() => firstRow("B").label);
+const segA = computed(() => firstRow("A").time);
+const segB = computed(() => firstRow("B").time);
+const prevLevelA = computed(() => secondRow("A").label);
+const prevLevelB = computed(() => secondRow("B").label);
+const prevSegA = computed(() => secondRow("A").time);
+const prevSegB = computed(() => secondRow("B").time);
+
+const mainA = computed(() => formatMs(sideA.value.mainMs));
+const mainB = computed(() => formatMs(sideB.value.mainMs));
+
+// ---- 左下角当前选图角标卡（pick_announced → currentRound.pick 常驻展示） ----
+// mock 演示选图：图池 mock 的 CT 选图（带词条与重试，角标各要素齐备）
+const MOCK_PICK =
+  MOCK_MAPPOOL.categories.find((c) => c.name === CategoryKind.CT)?.picks[1] ??
+  MOCK_MAPPOOL.categories[0]!.picks[0]!;
+const MOCK_DRAFT: Record<string, unknown> = {
+  picks: [
+    {
+      by: "A",
+      code: MOCK_PICK.code,
+      tags: MOCK_PICK.tag ? [MOCK_PICK.tag] : [],
+      retry: MOCK_PICK.retry_count ?? undefined,
+    },
+  ],
+};
+
+// pick 方 / 携带词条 / 重试次数与图池场景同源：draft_state 广播 → useDraftStatus
+const draftStatus = useDraftStatus(
+  computed(() => (liveReady.value ? broadcast.value.draft : MOCK_DRAFT)),
+);
+const currentPick = computed(() =>
+  liveReady.value ? broadcast.value.currentRound?.pick ?? null : MOCK_PICK,
+);
+const pickKind = computed(() => categoryKindOf(currentPick.value?.category));
+const pickSide = computed(() => {
+  const p = currentPick.value;
+  return p ? (draftStatus.value.statusByCode.get(p.code)?.by ?? null) : null;
+});
+/** 词条仅 CT 选图展示（同图池卡口径 cardPickedTags） */
+const pickTags = computed(() => {
+  const p = currentPick.value;
+  if (!p || pickKind.value !== CategoryKind.CT) return [];
+  return draftStatus.value.pickedTagsByCode.get(p.code) ?? [];
+});
+const pickRetry = computed(() =>
+  currentPick.value ? retryOf(draftStatus.value, currentPick.value) : null,
+);
+
+/** 单关总重试次数；不可得时为 null */
+function attemptTotal(): number | null {
+  const total = pickRetry.value;
+  return total != null && total > 0 ? total : null;
+}
+
+/** 单关第 n 次（1 基）的“n/总次数”标签；总次数不可得时隐藏 */
+function attemptLabelOf(index: number): string | null {
+  const total = attemptTotal();
+  if (total == null) return null;
+  return `${Math.min(index + 1, total)}/${total}`;
+}
+
+// useDelayedRef 会立即读取副计时器；必须先初始化其依赖的 pickRetry。
+// ---- 计时显示延迟回放（useDelayedRef）：选手画面常有数秒延迟而计时近实时，
+//      把该席计时器整块（主计时 + 两行副计时）与偏差条各自回放 delay 秒对齐
+//      画面。delay 秒来自导播配置（控制台 0.5 步进调整，config_update 实时下发，
+//      见 useDirectorConfig）；0 = 实时直通，调大即刻回跳到 delay 秒前 ----
+const timerAV = useDelayedRef(
+  () => ({
+    main: mainA.value,
+    level: levelA.value,
+    seg: segA.value,
+    prevLevel: prevLevelA.value,
+    prevSeg: prevSegA.value,
+  }),
+  () => (config.value.decoupled || alignedA.active.value ? 0 : config.value.delayA * 1000),
+);
+const timerBV = useDelayedRef(
+  () => ({
+    main: mainB.value,
+    level: levelB.value,
+    seg: segB.value,
+    prevLevel: prevLevelB.value,
+    prevSeg: prevSegB.value,
+  }),
+  () => (config.value.decoupled || alignedB.active.value ? 0 : config.value.delayB * 1000),
+);
+const diffV = useDelayedRef(
+  () => diffMs.value,
+  () => (config.value.decoupled || (alignedA.active.value && alignedB.active.value) ? 0 : config.value.delayDiff * 1000),
+);
+
+// ---- 右下角 PB 角标卡（speedrun.com 数据与 categoryinfo 场景同源共享） ----
+// 复用 useCategoryInfo：模块级快照跨组件共享——舞台在 categoryinfo 场景拉过
+// 榜单则此处重挂载零加载回显；hook 只接真实数据，mock 预览传 null 不发请求。
+const { status: srStatus, rows: srRows, pbA: srPbA, pbB: srPbB } = useCategoryInfo(
+  computed(() => (liveReady.value ? broadcast.value.currentRound : null)),
+  computed(() => (liveReady.value ? director.speedrunA : null)),
+  computed(() => (liveReady.value ? director.speedrunB : null)),
+);
+
+/** mock 榜行（名称匹配选手着色，口径同 CategoryInfoScene 的 mockRows） */
+const MOCK_SR_ROWS = MOCK_LEADERBOARD.map((r) => ({
+  ...r,
+  highlight:
+    r.playerName === MOCK_SPEEDRUN_A
+      ? ("A" as const)
+      : r.playerName === MOCK_SPEEDRUN_B
+        ? ("B" as const)
+        : null,
+}));
+/** 世界纪录行 = 榜首（并列取 place=1；mock 取 mock 榜第一行）：成绩 + 玩家名 */
+const wrRow = computed(() => {
+  if (!liveReady.value) return MOCK_SR_ROWS[0] ?? null;
+  if (srStatus.value !== "ok") return null;
+  return srRows.value.find((r) => r.place === 1) ?? srRows.value[0] ?? null;
+});
+const wrSec = computed(() => wrRow.value?.timeSec ?? null);
+const wrName = computed(() => wrRow.value?.playerName ?? null);
+/** 选手 PB 三态透传（mock 用 mock 榜中该选手的行） */
+const pbACard = computed(() =>
+  liveReady.value ? srPbA.value : (MOCK_SR_ROWS.find((r) => r.highlight === "A") ?? null),
+);
+const pbBCard = computed(() =>
+  liveReady.value ? srPbB.value : (MOCK_SR_ROWS.find((r) => r.highlight === "B") ?? null),
+);
+const pbCardVisible = computed(() =>
+  liveReady.value
+    ? wrSec.value != null || pbACard.value !== undefined || pbBCard.value !== undefined
+    : true,
+);
+/** PB 行名称列 = 选手展示名（mock 用顶栏 mock 名） */
+const pbNameA = computed(() => (liveReady.value ? director.nameA : MOCK_TOPBAR.nameA));
+const pbNameB = computed(() => (liveReady.value ? director.nameB : MOCK_TOPBAR.nameB));
+
+
+// ---- 角标卡几何（左选图 / 右 PB）：分别锚定 A / B 计时器 ----
+// 选图卡右缘锚 A 计时器左侧留 12px、PB 卡左缘锚 B 计时器右侧留 12px，两卡
+// 顶缘锚各自计时器顶部、底缘贴画面底（高度由锚定推导）。计时器靠画面中轴
+// 对齐，主计时盒宽已由 PlayerTimer 的满量程 min-width（MM:SS.mmm）钉稳，仍
+// 随视口缩放改变字号（px 宽、顶部位置都变），须量测跟踪：观察 PlayerTimer
+// 内 .stack（主计时文本盒）与 .timer 根盒（与类名耦合，改其结构须同步此处）。
+const timersEl = ref<HTMLElement | null>(null);
+const diffZoneEl = ref<HTMLElement | null>(null);
+/** 量测得到的角标卡宽 / 高（px；null = 未测得，该项回退 CSS 兜底值） */
+const pickW = ref<number | null>(null);
+const pickH = ref<number | null>(null);
+const pbW = ref<number | null>(null);
+const pbH = ref<number | null>(null);
+/** WR/PB 背景板高（px）：偏差条底部 → 画面底（含偏差值数字的轨道范围） */
+const backH = ref<number | null>(null);
+let pickRo: ResizeObserver | null = null;
+
+function measureCornerBoxes(): void {
+  const timers = timersEl.value;
+  if (!timers) return;
+  const timerA = timers.querySelector<HTMLElement>(".timer.A");
+  const stackA = timers.querySelector<HTMLElement>(".timer.A .stack");
+  const timerB = timers.querySelector<HTMLElement>(".timer.B");
+  const stackB = timers.querySelector<HTMLElement>(".timer.B .stack");
+  if (!timerA || !stackA) return;
+  // 相对 .timers（铺满画面宽）量取，免受页面级偏移影响
+  const base = timers.getBoundingClientRect();
+  const w = Math.round(stackA.getBoundingClientRect().left - base.left - 12);
+  const h = Math.round(base.bottom - timerA.getBoundingClientRect().top);
+  if (w > 0) pickW.value = w;
+  if (h > 0) pickH.value = h;
+  // 背景板顶缘 = 偏差条底部（含偏差值数字随游标移动的轨道范围），量取后注入
+  const diff = diffZoneEl.value;
+  if (diff) {
+    const hb = Math.round(base.bottom - diff.getBoundingClientRect().bottom);
+    if (hb > 0) backH.value = hb;
+  }
+  if (!timerB || !stackB) return;
+  const w2 = Math.round(base.right - stackB.getBoundingClientRect().right - 12);
+  const h2 = Math.round(base.bottom - timerB.getBoundingClientRect().top);
+  if (w2 > 0) pbW.value = w2;
+  if (h2 > 0) pbH.value = h2;
+}
+
+/** 量测锚定注入的角标卡几何（未测得项不注入，走 CSS 兜底） */
+const pickStyle = computed(() => ({
+  ...(pickW.value != null ? { width: `${pickW.value}px` } : {}),
+  ...(pickH.value != null ? { height: `${pickH.value}px` } : {}),
+}));
+const pbStyle = computed(() => ({
+  ...(pbW.value != null ? { width: `${pbW.value}px` } : {}),
+  ...(pbH.value != null ? { height: `${pbH.value}px` } : {}),
+}));
+/** WR/PB 背景板几何：横向铺满（left/right 0），仅高度需量测注入（偏差条底部 →
+ *  画面底，含偏差值数字的轨道范围；未测得走 CSS 兜底） */
+const pbBackStyle = computed(() => ({
+  ...(backH.value != null ? { height: `${backH.value}px` } : {}),
+}));
+
+// 控制台 config_update 广播（WS）：实时并入本场景配置并落库
+// （store 已先落库一份，此处合并幂等；未挂载时由 store 的落库兜底）
+watch(
+  () => director.remoteConfig,
+  (c) => {
+    if (c) save(params.matchId, c);
+  },
+);
+
 onMounted(() => {
-  load(params.matchId, params);
-  // hosted（合并舞台）模式下 WS 由舞台根统一连，场景只读 store；否则自己连
-  if (hosted) {
-    liveReady.value = true;
-  } else if (params.token && params.matchId) {
+  load(params.matchId, hosted ? {} : params);
+  if (director.remoteConfig) save(params.matchId, director.remoteConfig);
+  // speedrun 数据走后端同源代理（需 JWT）；与 categoryinfo 场景同口径
+  setSpeedrunToken(params.token || null);
+  // hosted（合并舞台）模式下 WS 由舞台根统一连，场景只读 store（liveReady 初始即
+  // true）；否则自己连
+  if (!hosted && params.token && params.matchId) {
     director.connect(params.token, params.matchId);
-    // auth_ok 后 director store 会拉 meta；连上即视为 live，比分/进度条随 WS 实时刷新
+    // auth_ok 后 director store 会拉 meta；连上即视为 live，计时随 WS 实时刷新
     liveReady.value = true;
   }
+
+  // 角标卡锚定计时器：RO 跟踪文本盒与计时器盒尺寸变化；视口缩放在字号 clamp
+  // 平台区不改变盒尺寸，补 window resize 兜底复测
+  measureCornerBoxes();
+  pickRo = new ResizeObserver(() => measureCornerBoxes());
+  for (const el of timersEl.value?.querySelectorAll(
+    ".timer.A, .timer.A .stack, .timer.B, .timer.B .stack",
+  ) ?? []) {
+    pickRo.observe(el);
+  }
+  window.addEventListener("resize", measureCornerBoxes);
 });
 onUnmounted(() => {
+  pickRo?.disconnect();
+  window.removeEventListener("resize", measureCornerBoxes);
   if (!hosted) director.disconnect();
 });
 </script>
 
 <template>
-  <div class="scene scanlines">
+  <div class="scene">
     <SynthwaveBg v-if="!sharedBg" />
 
     <div v-if="!params.token" class="notice">
@@ -90,58 +594,132 @@ onUnmounted(() => {
 
     <template v-else>
       <div class="content">
-        <!-- 顶部：两侧选手 + 中间 logo/赛事名 -->
-        <header class="top">
-          <div class="side-name a">
-            <span class="nm">{{ nameA }}</span>
-            <ScoreBlocks :wins="winsA" :threshold="threshold" side="A" />
-          </div>
-
-          <div class="center-brand">
-            <img v-if="params.logoUrl" :src="params.logoUrl" class="logo" alt="logo" />
-            <span v-else class="brand-glyph">🌇</span>
-            <div class="brand-name neon-text">{{ matchName }}</div>
-            <div class="bo">BO{{ liveReady && director.boFormat ? director.boFormat : MOCK_MATCH.boFormat }}</div>
-          </div>
-
-          <div class="side-name b">
-            <ScoreBlocks :wins="winsB" :threshold="threshold" side="B" />
-            <span class="nm">{{ nameB }}</span>
-          </div>
+        <!-- 顶部信息栏：三分区（选手A / 赛事·比赛信息 / 选手B），mock 时传演示值；
+             hosted 模式下舞台常驻单实例顶栏（sharedTopBar），此处让位只留占位 -->
+        <header class="top-zone">
+          <TopBar v-if="!sharedTopBar" :mock="isMock ? MOCK_TOPBAR : undefined" />
         </header>
 
-        <!-- 计时差进度条 -->
-        <section class="tug-wrap">
-          <TugBar
-            :levels-a="levelsA"
-            :levels-b="levelsB"
-            :status-a="statusA"
-            :status-b="statusB"
-            :gap-ms="params.gapMs"
+        <!-- 双 4:3 选手画面：水平居中、无缝衔接、满屏宽。
+             对齐开且有 HLS 地址 → SeiStream（SEI 帧级对齐/共享 T）；否则 StreamFrame(MSE) -->
+        <section class="streams">
+          <SeiStream
+            v-if="seiA"
+            side="A"
+            :key="'A:' + director.matchId"
+            :url="config.hlsA"
+            :refresh-nonce="config.refreshA"
+            :enabled="seiA"
+            :hidden="config.hideA || waitingForAuthority"
+            bare
+          />
+          <StreamFrame
+            v-else
+            side="A"
+            :hls-url="config.hlsA"
+            :embed-url="config.embedA"
+            :token="params.token"
+            :hidden="config.hideA || waitingForAuthority"
+            :refresh-nonce="config.refreshA"
+            hide-url
+          />
+          <SeiStream
+            v-if="seiB"
+            side="B"
+            :key="'B:' + director.matchId"
+            :url="config.hlsB"
+            :refresh-nonce="config.refreshB"
+            :enabled="seiB"
+            :hidden="config.hideB || waitingForAuthority"
+            bare
+          />
+          <StreamFrame
+            v-else
+            side="B"
+            :hls-url="config.hlsB"
+            :embed-url="config.embedB"
+            :token="params.token"
+            :hidden="config.hideB || waitingForAuthority"
+            :refresh-nonce="config.refreshB"
+            hide-url
           />
         </section>
 
-        <!-- 双方直播 + 信息框 -->
-        <section class="players">
-          <div class="player-col">
-            <StreamFrame side="A" :name="nameA" :hls-url="config.hlsA" :rtmp-url="config.rtmpA" />
-            <PlayerInfoBox side="A" :name="nameA" :pb="config.pbA" :history="config.histA" />
-          </div>
-          <div class="player-col">
-            <StreamFrame side="B" :name="nameB" :hls-url="config.hlsB" :rtmp-url="config.rtmpB" />
-            <PlayerInfoBox side="B" :name="nameB" :pb="config.pbB" :history="config.histB" />
-          </div>
+        <!-- 多关偏差条（单关模式降为透明占位，不参与布局收缩）；diffV 为
+             按导播配置回放后的显示值（对齐画面延迟） -->
+        <section ref="diffZoneEl" class="diff-zone" :class="{ off: !isMulti }">
+          <DiffBar :diff-ms="diffV" :gap-ms="params.gapMs" />
         </section>
-      </div>
 
-      <button class="scene-gear" :title="t('scenes.edit.title')" @click="panelOpen = true">⚙</button>
+        <!-- WR/PB 背景板：同 neon-panel 样式（直角边），横向铺满画面、顶缘 =
+             偏差条底部（含偏差值数字随游标移动的轨道范围）、底贴画面边——垫在
+             全部计时器与角标卡内容之下（z-index:-1，.content 为层叠上下文；
+             定位元素默认画在静态计时文字之上，须显式垫底）；卡片内容排版锚定
+             不变 -->
+        <div v-if="pbCardVisible" class="pb-backdrop neon-panel" :style="pbBackStyle" />
+
+        <!-- 双方计时器：屏幕中轴对称，A 左 B 右，沉底；多关副计时两行（上行
+             当前关 + 实时单段，下行上一关 + 单段用时（淡紫））；单关第一行
+             为「当前次数/总次数」+ 当前尝试实时单段，第二行为「上一次次数/
+             总次数」+ 上一次尝试用时（跳过显示 N/A）。完成最后一关/最后一
+             次尝试后第一行定格在最终成绩，不再下推。timerA/V 为按导播配置
+             回放后的显示值（对齐各侧画面延迟） -->
+        <section ref="timersEl" class="timers">
+          <PlayerTimer
+            side="A"
+            :main="timerAV.main"
+            :level="timerAV.level"
+            :seg="timerAV.seg"
+            :prev-level="timerAV.prevLevel"
+            :prev-seg="timerAV.prevSeg"
+          />
+          <PlayerTimer
+            side="B"
+            :main="timerBV.main"
+            :level="timerBV.level"
+            :seg="timerBV.seg"
+            :prev-level="timerBV.prevLevel"
+            :prev-seg="timerBV.prevSeg"
+          />
+        </section>
+
+        <!-- 左下角当前选图角标卡：宣布选图后常驻（无选图不占位）；:key 换选图
+             重挂复位内部状态（右/顶缘锚定 A 计时器，见 measureCornerBoxes） -->
+        <div
+          v-if="currentPick"
+          :key="currentPick.code"
+          class="pick-corner"
+          :style="pickStyle"
+        >
+          <PickCornerCard
+            :pick="currentPick"
+            :kind="pickKind"
+            :side="pickSide"
+            :retry="pickRetry"
+            :tags="pickTags"
+          />
+        </div>
+
+        <!-- 右下角 PB 角标卡内容：当前项目 WR（金）+ 双方 PB（选手色，快者在
+             上）；数据与 categoryinfo 场景同源，全未拉到时不占位。排版锚定
+             关系不变（左缘锚定 B 计时器 +12px），透明背景浮于 .pb-backdrop 上 -->
+        <div v-if="pbCardVisible" class="pb-corner" :style="pbStyle">
+          <PbCornerCard
+            :wr-sec="wrSec"
+            :wr-name="wrName"
+            :pb-a="pbACard"
+            :pb-b="pbBCard"
+            :name-a="pbNameA"
+            :name-b="pbNameB"
+          />
+        </div>
+      </div>
 
       <div v-if="isMock" class="mock-badge">{{ t("scenes.mockBadge") }}</div>
 
       <DirectorConfigPanel
         v-model:visible="panelOpen"
         :model="config"
-        @saved="onSaved"
       />
     </template>
   </div>
@@ -158,82 +736,79 @@ onUnmounted(() => {
   height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 2vh;
-  padding: 2.5vh 3vw 3vh;
+  overflow: hidden;
 }
-/* 顶部 */
-.top {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  gap: 2vw;
-}
-.side-name {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-.side-name.a {
-  justify-content: flex-start;
-}
-.side-name.b {
-  justify-content: flex-end;
-}
-.nm {
-  font-size: clamp(20px, 2.6vw, 40px);
-  font-weight: 900;
-  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
-}
-.side-name.a .nm {
-  color: var(--syn-a);
-}
-.side-name.b .nm {
-  color: var(--syn-b);
-}
-.center-brand {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-}
-.logo {
-  width: clamp(48px, 6vw, 96px);
-  height: auto;
-  object-fit: contain;
-}
-.brand-glyph {
-  font-size: clamp(36px, 5vw, 72px);
-  line-height: 1;
-  filter: drop-shadow(0 0 12px rgba(255, 138, 61, 0.6));
-}
-.brand-name {
-  font-size: clamp(16px, 2vw, 30px);
-  font-weight: 800;
-  letter-spacing: 1px;
-  text-align: center;
-}
-.bo {
-  font-size: clamp(12px, 1.1vw, 16px);
-  color: var(--syn-text-dim);
-  letter-spacing: 1px;
-}
-/* 进度条 */
-.tug-wrap {
-  padding: 0 4vw;
-}
-/* 选手区 */
-.players {
+/* 顶部信息栏区：贴画面顶部，剩余空隙沉到下方吸收纵向误差 */
+.top-zone {
   flex: 1;
-  min-height: 0;
+  min-height: 5vh;
+  display: flex;
+  align-items: flex-start;
+}
+/* 双 4:3 画面：各占半宽无缝拼合（合计 8:3），满铺 1920px */
+.streams {
+  width: 100%;
+  aspect-ratio: 8 / 3;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 3vw;
-  align-items: start;
 }
-.player-col {
-  display: flex;
-  flex-direction: column;
-  gap: 1.2vh;
+/* 偏差条：满画面宽，上缘贴紧选手画面下缘；单关模式透明占位避免布局偏移 */
+.diff-zone {
+  padding: 0;
+  transition: opacity 0.3s ease;
+}
+.diff-zone.off {
+  opacity: 0;
+}
+/* 计时器：双列以画面水平中心为锚（A 列靠右、B 列靠左），行底对齐——两行副
+   计时贴画面底、行顶即主计时顶。区高 17.3vh = 计时内容 ~14.2vh + 顶部条带
+   ~3.1vh：偏差值挂在偏差条下方随游标左右移动（绝对定位不占布局高度），条带
+   给它留出行空间、其底部恰好贴主计时顶（0.2vh 偏移 + 1.1 行高 × 2.6vh 字号，
+   见 DiffBar .value）；上方组件（信息栏 / 画面 / 偏差条）整体上移让出条带 */
+.timers {
+  height: 17.3vh;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 4vw;
+  align-content: end;
+}
+/* 左下角选图角标卡：贴左缘与底缘（与偏差条同口径满贴边、无下边距），右缘
+   锚定 A 计时器左侧留 12px、顶缘锚定 A 计时器顶部（脚本 measureCornerBoxes
+   量测注入内联几何，宽高均为量测前兜底）；内部布局见 PickCornerCard */
+.pick-corner {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 20vw;
+  height: 10.5vh;
+  z-index: 5;
+  /* 尺寸容器：PickCornerCard 内以 cqh 单位随卡高折算标题字号（满高恰好三行） */
+  container-type: size;
+}
+/* WR/PB 背景板：横向铺满画面、底贴画面边，顶缘 = 偏差条底部（含偏差值数字
+   随游标移动的轨道范围；高度由脚本量测注入，CSS 兜底 = 计时区整高 17.3vh，
+   与 .timers 等高），直角边。z-index:-1 显式垫底——.content 是层叠上下文，
+   负 z 画在全部流内计时文字与 z≥1 角标卡之下（绝对定位元素默认会盖住静态
+   文本，DOM 顺序无效，必须显式负 z） */
+.pb-backdrop {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 17.3vh;
+  border-radius: 0;
+  z-index: -1;
+}
+/* 右下角 PB 角标卡内容：镜像选图卡——贴右缘与底缘，左缘锚定 B 计时器右侧留
+   12px、顶缘锚定 B 计时器顶部（排版锚定关系不变）；内部布局见 PbCornerCard */
+.pb-corner {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18vw;
+  height: 10.5vh;
+  z-index: 5;
+  container-type: size;
 }
 .notice {
   position: absolute;

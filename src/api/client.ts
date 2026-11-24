@@ -4,11 +4,15 @@
  */
 import { restBase } from "./config";
 import type {
+  StreamLinks,
+  StreamLinksPut,
   AccountCreate,
   AccountOut,
   AccountUpdate,
   BracketView,
   ChatMessage,
+  CustomTag,
+  CustomTagCreate,
   DisplayNameUpdate,
   FixtureAssignBody,
   FixtureCreateMatchBody,
@@ -37,12 +41,34 @@ import type {
 } from "./types";
 
 export class ApiError extends Error {
+  /** HTTP 状态码 */
   code: number;
-  constructor(code: number, message: string) {
+  /** 后端错误体的稳定字符串码（如登录的 ENDPOINT_FORBIDDEN），供按码分支/i18n；无则 undefined */
+  errorCode?: string;
+  constructor(code: number, message: string, errorCode?: string) {
     super(message);
     this.name = "ApiError";
     this.code = code;
+    this.errorCode = errorCode;
   }
+}
+
+/**
+ * 会话过期统一处理（带令牌的请求被 401 拒绝 / WS 鉴权失败且令牌确已过期）。
+ * 主应用入口注入「登出 + 跳登录页」；OBS 场景独立入口不注入 → 返回 false，
+ * 调用方维持原有兜底（mock 数据 / 遮罩提示），绝不让直播画面跳走。
+ */
+let sessionExpiredHandler: (() => void) | null = null;
+
+export function setSessionExpiredHandler(fn: (() => void) | null): void {
+  sessionExpiredHandler = fn;
+}
+
+/** 触发会话过期处理；返回 false 表示无人接管（调用方维持原有错误展示） */
+export function notifySessionExpired(): boolean {
+  if (!sessionExpiredHandler) return false;
+  sessionExpiredHandler();
+  return true;
 }
 
 function extractMsg(data: unknown, status: number, fallback: string): string {
@@ -55,9 +81,20 @@ function extractMsg(data: unknown, status: number, fallback: string): string {
       if (first && typeof first.msg === "string") return first.msg;
     }
     if (typeof d.detail === "string") return d.detail;
+    if (d.detail && typeof d.detail === "object" && "message" in d.detail && typeof d.detail.message === "string") return d.detail.message;
   }
   if (typeof data === "string" && data.length > 0) return data;
   return fallback || `HTTP ${status}`;
+}
+
+/** 取错误体的稳定字符串码（CodedHTTPException 输出 {"msg", "code"}）；缺失返回 undefined */
+function extractErrorCode(data: unknown): string | undefined {
+  if (data && typeof data === "object") {
+    const d = data as Record<string, unknown>;
+    const c = d.detail && typeof d.detail === "object" ? (d.detail as Record<string, unknown>).code : d.code;
+    if (typeof c === "string" && c.length > 0) return c;
+  }
+  return undefined;
 }
 
 async function request<T>(
@@ -83,7 +120,14 @@ async function request<T>(
     }
   }
   if (!res.ok) {
-    throw new ApiError(res.status, extractMsg(data, res.status, `HTTP ${res.status}`));
+    // 带令牌的请求被 401 拒绝 = 会话已死（过期/吊销）→ 统一登出跳登录；
+    // 登录接口本身不带令牌（口令错误也是 401），不受影响
+    if (res.status === 401 && token) notifySessionExpired();
+    throw new ApiError(
+      res.status,
+      extractMsg(data, res.status, `HTTP ${res.status}`),
+      extractErrorCode(data),
+    );
   }
   return data as T;
 }
@@ -115,12 +159,19 @@ async function uploadFile(
     }
   }
   if (!res.ok) {
+    if (res.status === 401) notifySessionExpired();
     throw new ApiError(res.status, extractMsg(data, res.status, `HTTP ${res.status}`));
   }
   return data as { key: string; url: string | null };
 }
 
 export const api = {
+  getStreamLinks(matchId: string, token: string): Promise<StreamLinks> {
+    return request(`/me/matches/${encodeURIComponent(matchId)}/stream-links`, { method: "GET", token });
+  },
+  putStreamLinks(matchId: string, body: StreamLinksPut, token: string): Promise<StreamLinks> {
+    return request(`/me/matches/${encodeURIComponent(matchId)}/stream-links`, { method: "PUT", token, body: JSON.stringify(body) });
+  },
   login(body: LoginRequest): Promise<TokenResponse> {
     return request<TokenResponse>("/auth/login", {
       method: "POST",
@@ -288,9 +339,36 @@ export const api = {
     );
   },
 
+  /** 归档已结束比赛（仅 ENDED；archived_at 置当前时间，返回更新后的比赛） */
+  archiveMatch(matchId: string, token: string): Promise<MatchOut> {
+    return request<MatchOut>(
+      `/admin/matches/${encodeURIComponent(matchId)}/archive`,
+      { method: "POST", token },
+    );
+  },
+
+  /** 取消归档（archived_at 置 null，返回更新后的比赛） */
+  unarchiveMatch(matchId: string, token: string): Promise<MatchOut> {
+    return request<MatchOut>(
+      `/admin/matches/${encodeURIComponent(matchId)}/unarchive`,
+      { method: "POST", token },
+    );
+  },
+
   /** 当前账号参与的赛事（作为选手/裁判/导播） */
   listMyTournaments(token: string): Promise<TournamentOut[]> {
     return request<TournamentOut[]>("/me/tournaments", { method: "GET", token });
+  },
+
+  /**
+   * 赛事详情（赛事成员可读）。与列表端点不同，默认赛事（孤立比赛容器）
+   * 不在 /me/tournaments 列表里，但参与过其名下比赛的账号可经本端点读取。
+   */
+  getMyTournament(tournamentId: string, token: string): Promise<TournamentOut> {
+    return request<TournamentOut>(
+      `/me/tournaments/${encodeURIComponent(tournamentId)}`,
+      { method: "GET", token },
+    );
   },
 
   /** 赛事对阵树（赛事成员可读；含已结束对阵的 score_a/score_b） */
@@ -343,6 +421,26 @@ export const api = {
 
   async deleteMappool(mappoolId: string, token: string): Promise<void> {
     await request<void>(`/admin/mappools/${encodeURIComponent(mappoolId)}`, {
+      method: "DELETE",
+      token,
+    });
+  },
+
+  // ---- 词条库（管理员）---------------------------------------------------
+  listCustomTags(token: string): Promise<CustomTag[]> {
+    return request<CustomTag[]>("/admin/ct-tags", { method: "GET", token });
+  },
+
+  createCustomTag(body: CustomTagCreate, token: string): Promise<CustomTag> {
+    return request<CustomTag>("/admin/ct-tags", {
+      method: "POST",
+      token,
+      body: JSON.stringify(body),
+    });
+  },
+
+  async deleteCustomTag(tagId: string, token: string): Promise<void> {
+    await request<void>(`/admin/ct-tags/${encodeURIComponent(tagId)}`, {
       method: "DELETE",
       token,
     });

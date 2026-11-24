@@ -1,0 +1,790 @@
+/** Per-document renderer. The server elects one publisher; other documents follow
+ * its relayed anchors. Only canvases inside this document share decoded frames. */
+import { reactive, ref, type Ref } from "vue";
+import type { LeaseSample } from "./frameLeaseClient";
+import { DirectorFrameRenderer, type DirectorSurfaceOptions } from "./directorFrameRenderer";
+import { PlaybackDriver } from "./playbackDriver";
+import { ExternalClock, type FrameAlignAnchor } from "./externalClock";
+import { commonFrames, type FrameEntry } from "./frameQueue";
+import { CATCHUP, planCatchup, recoveryGate, publisherTarget, type CatchupMode } from "./rateControl";
+import { FrameLockStream } from "./frameLock";
+import { createFrameSource } from "./transport";
+import { logAuth } from "./debugLog";
+import { emptyHealth, type StreamHealth } from "./types";
+
+export type Side = "A" | "B";
+
+/** 拉流失败 → 可读文案（fetch 对 ERR_CONNECTION_REFUSED 等一律抛 TypeError "Failed to fetch"，
+ * 据此给通用"连不上服务器"，命中具体信号再细分） */
+export function friendlyStreamError(e: unknown): string {
+  const m = e instanceof Error ? e.message : String(e);
+  if (/CORS|is not allowed|Access control|No 'Access-Control-Allow-Origin'/i.test(m)) {
+    return "跨域被拦（CORS）：检查流服务器 hlsAllowOrigins";
+  }
+  if (/404|Not Found/i.test(m)) return "流地址不存在（404）";
+  if (/abort/i.test(m)) return "拉流被中断";
+  if (/Failed to fetch|NetworkError|ECONN|connection/i.test(m)) {
+    return "无法连接到流服务器（地址写错 / 服务未启动 / 连接被拒）";
+  }
+  return `拉流失败：${m}`;
+}
+
+export class AlignEngine {
+  constructor(private candidateEnabled = true) {}
+
+  /** Only the authenticated console entry point enables publisher candidacy. */
+  setCandidateEnabled(enabled: boolean): void {
+    this.candidateEnabled = enabled;
+    if (!enabled) {
+      this.setPublisher(false);
+      this.candidateProbe = null; this.sync.candidate = "off";
+    }
+  }
+  get canCompete(): boolean { return this.candidateEnabled; }
+  readonly authorityReady = ref(false);
+  readonly pictureExpired = ref(false);
+  private lastPictureAt: Record<Side, number> = { A: -Infinity, B: -Infinity };
+  private localRecovery: { at: number; frames: Record<Side, number | null> } | null = null;
+  private delaySeconds = 15;
+  setDelaySeconds(seconds: number): void {
+    if (Number.isFinite(seconds) && seconds >= 0 && seconds <= 86400) this.delaySeconds = seconds;
+  }
+  /** No wall-clock fallback: every locally required stream must have continuous coverage. */
+  slowestFrontierUs(): number | null {
+    const sides = [...this.requiredSides];
+    if (!sides.length) return null;
+    const covers = sides.map(side => this.streams.get(side)?.coverage());
+    if (covers.some(c => !c || !Number.isFinite(c.to))) return null;
+    return Math.min(...covers.map(c => c!.to));
+  }
+  delayTargetUs(seconds: number): number | null {
+    const slow = this.slowestFrontierUs();
+    return slow == null || !Number.isFinite(seconds) || seconds < 0 || seconds > 86400
+      ? null : Math.round(slow - seconds * 1_000_000);
+  }
+  private manualTarget: number | null = null;
+  private resetPhase: "preparing" | "completed" | "failed" | null = null;
+  private resumeFloor: number | null = null;
+  private latestSeek: number | null = null;
+  private latestMissingAt: number | null = null;
+  readonly resetPresentedUs = ref<number | null>(null);
+  beginTimeline(target: number): void {
+    this.localRecovery = null;
+    this.cadenceTarget = null;
+    // Retain pixels and their actual presentation floor, never play backwards.
+    const shown = Object.values(this.sync.presentedRt).filter((x): x is number => x != null);
+    this.resumeFloor = shown.length ? Math.max(...shown) : this.tUs.value;
+    this.external = new ExternalClock(); this.authorityFloor = target;
+    this.manualTarget = target; this.resetPhase = "preparing";
+    this.resetPresentedUs.value = null; this.latestMissingAt = null;
+    this.pendingSeek = this.waitingT = this.latestSeek = null;
+    this.candidateProbe = null; this.stableMs = this.missingMs = 0;
+    this.sync.state = "frozen";
+    this.presented.A = this.presented.B = false;
+    this.sync.authorityUs = target; this.lastSeekAt = -Infinity;
+  }
+  finishTimeline(status: "preparing" | "completed" | "failed", target: number): void {
+    this.resetPhase = status;
+    this.manualTarget = status === "completed" ? null : target;
+    if (status === "completed") {
+      // Reset is a transaction, not a permanent publisher playback mode. Keep
+      // the confirmed picture/monotonic floor while releasing preparation state.
+      this.authorityFloor = Math.max(this.authorityFloor ?? 0, target, this.resumeFloor ?? 0,
+        ...Object.values(this.sync.presentedRt).map(t => t ?? 0));
+      this.pendingSeek = this.waitingT = null;
+      this.latestSeek = this.latestMissingAt = null;
+      this.stableMs = this.missingMs = 0;
+      this.catchupMode = "normal";
+      if (this.resetPresentedUs.value != null) this.takeoverSeek = false;
+    }
+  }
+
+  refreshAuthority(now: number): void {
+    this.authorityReady.value = this.publisher || this.external.hasFreshAuthority(now);
+    this.refreshPictureExpiry(now);
+  }
+
+  private refreshPictureExpiry(now: number): void {
+    const sides = this.requiredSides.size ? [...this.requiredSides] : [...this.streams.keys()];
+    this.pictureExpired.value = !sides.length || sides.some(side => now - this.lastPictureAt[side] > 10_000);
+  }
+
+  private recordPictureProgress(now: number, sides: Side[], frames: { rtUs: number }[]): void {
+    if (this.localRecovery && sides.every((side, index) =>
+      frames[index]!.rtUs > (this.localRecovery!.frames[side] ?? -Infinity))) this.localRecovery = null;
+    for (let i = 0; i < sides.length; i++) {
+      const side = sides[i]!;
+      // A/B can advance on different ticks. Repeated frames never renew a side.
+      if (frames[i]!.rtUs > (this.sync.presentedRt[side] ?? -Infinity)) this.lastPictureAt[side] = now;
+    }
+    this.refreshPictureExpiry(now);
+  }
+
+  private beginLocalRecovery(now: number): void {
+    if (this.tUs.value == null || this.resetPhase === "preparing") return;
+    this.localRecovery ??= { at: now, frames: { ...this.sync.presentedRt } };
+  }
+
+  localRecoveryPending(now: number): boolean {
+    return this.localRecovery != null && now - this.localRecovery.at < CATCHUP.localRecoveryMs;
+  }
+
+  private streams = new Map<Side, FrameLockStream>();
+  private paintedCanvases = reactive(new Set<HTMLCanvasElement>());
+  hasCanvasImage(canvas: HTMLCanvasElement | null): boolean {
+    return canvas != null && this.paintedCanvases.has(canvas);
+  }
+  private directorRenderer = new DirectorFrameRenderer();
+  private surfaceOptions = new WeakMap<HTMLCanvasElement, DirectorSurfaceOptions>();
+  private canvases = new Map<Side, HTMLCanvasElement[]>();
+  private catchupMode: CatchupMode = "normal";
+  private pendingSeek: number | null = null;
+  private waitingT: number | null = null;
+  /** Uncommitted publisher position retained only across ordinary frame intervals. */
+  private cadenceTarget: number | null = null;
+  private stableMs = 0;
+  private missingMs = 0;
+  private takeoverSeek = false;
+  private candidateProbe: { target: number; sides: string; at: number } | null = null;
+  private lastSeekAt = -Infinity;
+  private driver = new PlaybackDriver();
+  private clockPulse: (() => void) | null = null;
+  setClockPulse(pulse: (() => void) | null): void { this.clockPulse = pulse; }
+  private last = 0;
+  private running = false;
+  private healthTimer: ReturnType<typeof setInterval> | null = null;
+
+  private external = new ExternalClock();
+  private publisher = false;
+  private authorityFloor: number | null = null;
+  private requiredSides = new Set<Side>();
+  private sourceUrls = new Map<Side, string>();
+  private streamGenerations = new Map<Side, number>();
+  readonly enabled = ref(false);
+  readonly sync = reactive({ state: "waiting" as "waiting" | "playing" | "frozen" | "stale",
+    role: "follower" as "publisher" | "follower",
+    catchup: "wait" as CatchupMode, authorityUs: null as number | null,
+    activeSides: [] as Side[], waitingSides: [] as Side[],
+    candidate: "off" as "off" | "warming" | "ready",
+    reason: "startup", seekCount: 0, lastSeekReason: "", lastJumpUs: 0,
+    targetUs: null as number | null, pairErrorUs: null as number | null,
+    presentedRt: { A: null, B: null } as Record<Side, number | null>,
+    targetErrorUs: { A: null, B: null } as Record<Side, number | null> });
+
+  /** 虚拟对齐时间戳 T（epoch 微秒）；未就绪 null */
+  readonly tUs: Ref<number | null> = ref(null);
+  /** 各侧解码能力（响应式，供 UI 展示解码状态） */
+  readonly modes = reactive<Record<Side, "aligned" | "off">>({ A: "off", B: "off" });
+  /** 各侧最近拉流错误（可读文案；有内容后清空）。供导播界面直接提示，不必翻 console */
+  readonly streamError = reactive<Record<Side, string | null>>({ A: null, B: null });
+  /** 各侧连通性/健康指标（对齐 SEIInjector 冒烟工具；~2.5Hz 刷新） */
+  readonly health = reactive<Record<Side, StreamHealth>>({ A: emptyHealth(), B: emptyHealth() });
+  /** 各侧是否已真正上屏过一帧（攒够缓冲的判据；供 A/B 画面提示"攒缓冲中/已就绪"） */
+  readonly presented = reactive<Record<Side, boolean>>({ A: false, B: false });
+  /** 全局播放诊断：当前 T 播放倍速（×>1 → 在追/快进）与 T 落后最慢前沿的秒数（追 Xs） */
+  readonly playback = reactive({ speed: 1, behindS: 0 });
+  /** 主循环（rAF）是否正常推进——死循环 = 画面卡住、队列不清理（追在涨但画面停） */
+  readonly loopAlive = ref(true);
+  readonly loopErr = ref<string | null>(null);
+  private lastTickTime = performance.now();
+
+  get ready(): boolean {
+    return this.tUs.value != null;
+  }
+
+  /** Called only after validating the backend connection-specific role assignment. */
+  setPublisher(selected: boolean): void {
+    selected = selected && this.candidateEnabled;
+    if (this.publisher !== selected) {
+      this.localRecovery = null;
+      this.cadenceTarget = null;
+      if (selected && this.manualTarget != null && this.resetPhase !== "preparing") {
+        // A new owner inherits a time floor, never a previous owner's reset mode.
+        this.finishTimeline("completed", this.manualTarget);
+      }
+      this.pendingSeek = null; this.waitingT = null; this.stableMs = 0; this.catchupMode = "normal";
+      if (selected && this.candidateProbe != null) {
+        // Private preparation may have moved the decoder beyond the public T.
+        // Rebuild immediately on takeover, not after the ordinary missing-frame timeout.
+        this.takeoverSeek = true; this.lastSeekAt = -Infinity;
+        this.candidateProbe = null;
+      }
+    }
+    if (!selected) this.takeoverSeek = false;
+    this.publisher = selected;
+    this.sync.role = selected ? "publisher" : "follower";
+    this.refreshAuthority(performance.now());
+  }
+  resetClockConnection(): void {
+    this.localRecovery = null;
+    this.cadenceTarget = null;
+    this.manualTarget = null; this.resetPhase = null; this.resumeFloor = null; this.latestSeek = null; this.latestMissingAt = null;
+    this.resetPresentedUs.value = null;
+    this.takeoverSeek = false;
+    this.publisher = false; this.sync.role = "follower";
+    this.external = new ExternalClock();
+    this.candidateProbe = null; this.sync.candidate = "off";
+    this.authorityFloor = this.tUs.value;
+    this.pendingSeek = null; this.waitingT = null; this.stableMs = 0;
+    this.sync.authorityUs = null;
+    this.authorityReady.value = false;
+    this.sync.state = "waiting";
+    this.presented.A = this.presented.B = false;
+    this.playback.speed = 0;
+  }
+
+  setExternalTUs(us: number | null, meta: Partial<FrameAlignAnchor> = {}): boolean {
+    if (us == null) return false;
+    const validSides = (v: unknown): v is Side[] => Array.isArray(v) &&
+      v.length <= 2 && v.every(s => s === "A" || s === "B") && new Set(v).size === v.length;
+    if ((meta.active_sides != null && !validSides(meta.active_sides)) ||
+        (meta.waiting_sides != null && !validSides(meta.waiting_sides)) ||
+        meta.waiting_sides?.some(s => meta.active_sides?.includes(s))) return false;
+    const revision = this.external.revision;
+    const accepted = this.external.accept({ ...meta, t_us: us }, performance.now());
+    this.refreshAuthority(performance.now());
+    if (accepted) {
+      if (this.candidateProbe != null && this.external.hasFreshAuthority(performance.now())) {
+        this.candidateProbe = null; this.sync.candidate = "off";
+        this.pendingSeek = null; this.waitingT = null;
+        this.takeoverSeek = true; this.lastSeekAt = -Infinity;
+      }
+      this.authorityFloor = Math.max(this.authorityFloor ?? us, us);
+    }
+    // The publisher receives its own server freeze/keepalive, not a new decoder
+    // target. Only followers rebuild when their external authority changes.
+    if (accepted && !this.publisher && revision !== this.external.revision) {
+      this.pendingSeek = null; this.waitingT = null; this.stableMs = 0;
+      this.missingMs = CATCHUP.stallSeekMs; this.catchupMode = "normal";
+    }
+    return accepted;
+  }
+  selectAuthority(src: string | null, epoch?: number): void {
+    this.external.selectSource(src, epoch);
+    if (src == null) {
+      this.setPublisher(false); this.sync.state = "waiting"; this.sync.authorityUs = null;
+      this.playback.speed = 0; this.presented.A = this.presented.B = false;
+    }
+    this.refreshAuthority(performance.now());
+  }
+  setAuthorityFloor(floor: number | null): void {
+    if (floor != null) this.authorityFloor = Math.max(this.authorityFloor ?? 0, floor);
+  }
+  /** Private cold-start probe: decode a shared safe point without publishing or
+   * advancing presentation T. Once elected, normal common presentation owns T. */
+  leaseSample(now: number): LeaseSample {
+    this.refreshAuthority(now);
+    if (!this.candidateEnabled) {
+      // Defensive ineligible sample: decoding does not confer election rights.
+      // Receiver connections neither send leases nor seek a private candidate T.
+      return { capability: false, media_ready: false, decode_ready: false,
+        progress_t_us: Math.floor(this.tUs.value ?? 0), active_sides: [],
+        waiting_sides: ["A", "B"], state: "media_wait" };
+    }
+    const required = [...this.requiredSides];
+    const capability = this.enabled.value && required.some(s => this.streams.has(s));
+    let active = this.sync.activeSides.filter(s => required.includes(s));
+    let media = false, decoded = false;
+    const progress = Math.floor(this.tUs.value ?? 0);
+    if (this.publisher && this.resetPhase === "preparing" && this.resetPresentedUs.value == null) {
+      return { capability, media_ready: false, decode_ready: false, progress_t_us: progress,
+        active_sides: [], waiting_sides: ["A", "B"], state: "media_wait" };
+    }
+    // First presentation may be pending even with a valid authority. Never let
+    // lease sampling seek the same decoder away from normal follower startup.
+    // A late heartbeat must not move the live follower decoder to a private
+    // takeover target. The backend clears the selected source on revocation;
+    // only then may candidate preparation seek away from public T.
+    const preparing = !this.publisher && !this.external.hasAuthority;
+    if (preparing) {
+      active = required.filter(s => {
+        const c = this.streams.get(s)?.coverage();
+        return c != null && c.to - c.from >= this.delaySeconds * 1_000_000;
+      });
+      const streams = active.map(s => this.streams.get(s)!);
+      const covers = streams.map(s => s.coverage()!);
+      const from = Math.max(...covers.map(c => c.from), this.authorityFloor ?? 0);
+      const to = Math.min(...covers.map(c => c.to)) - this.delaySeconds * 1_000_000;
+      const probe = this.candidateProbe;
+      let target = probe?.target ?? to;
+      if (target < from || target > to || probe?.sides !== active.join()) target = Math.max(from, to);
+      media = streams.length > 0 && target >= from && target <= to && streams.every(s => s.canSeek(target));
+      if (media) {
+        if (!probe || probe.target !== target || probe.sides !== active.join() || (now - probe.at >= CATCHUP.retryMs && !commonFrames(streams.map(s => s.queue), target, CATCHUP.maxFrameErrorUs))) {
+          for (const s of streams) s.seek(target);
+          this.candidateProbe = { target, sides: active.join(), at: now };
+        }
+        for (const s of streams) s.advance(target);
+        decoded = commonFrames(streams.map(s => s.queue), target, CATCHUP.maxFrameErrorUs) != null;
+      }
+    } else if (this.tUs.value != null && active.length) {
+      this.candidateProbe = null;
+      const target = this.tUs.value;
+      media = active.every(side => {
+        const c = this.streams.get(side)?.coverage();
+        return c != null && target >= c.from && target <= c.to;
+      });
+      decoded = media && commonFrames(active.map(s => this.streams.get(s)!.queue), target,
+        CATCHUP.maxFrameErrorUs) != null;
+    }
+    this.sync.candidate = preparing && capability ? decoded ? "ready" : "warming" : "off";
+    const waiting = (["A", "B"] as Side[]).filter(s => !active.includes(s));
+    const holdingSignal = !preparing && this.tUs.value != null && this.sync.reason === "signal_wait";
+    return { capability, media_ready: media, decode_ready: decoded, progress_t_us: progress,
+      active_sides: active, waiting_sides: waiting,
+      state: media && decoded && !holdingSignal ? "running" : "media_wait" };
+  }
+  setRequiredSides(sides: Side[]): void {
+    this.localRecovery = null;
+    this.cadenceTarget = null;
+    this.requiredSides = new Set(sides);
+    this.enabled.value = sides.length > 0;
+  }
+
+  /* ---- 流管理（每文档每侧唯一流，引用计数归零才停） ---- */
+  private refs = new Map<Side, Set<symbol>>();
+  startStream(side: Side, url: string, kind: "hls" | "annexb" = "hls"): () => void {
+    if (this.sourceUrls.get(side) !== url && this.streams.has(side)) {
+      this.streams.get(side)!.stop();
+      this.streams.delete(side);
+      this.pendingSeek = null; this.waitingT = null; this.catchupMode = "normal";
+    }
+    this.enabled.value = true;
+    if (!this.streams.has(side)) {
+      const generation = (this.streamGenerations.get(side) ?? 0) + 1;
+      this.streamGenerations.set(side, generation);
+      this.sourceUrls.set(side, url);
+      const source = createFrameSource(kind, { url });
+      const s = new FrameLockStream(source, {
+        onError: (e) => {
+          if (this.streamGenerations.get(side) !== generation) return;
+          console.warn(`[align ${side}]`, e);
+          // 仅"尚无内容"时的拉流失败值得提示"拉不到"；已有内容后的偶发报错不盖画面
+          if (!s.hasContent) this.streamError[side] = friendlyStreamError(e);
+        },
+        onModeChange: (m) => {
+          if (this.streamGenerations.get(side) !== generation) return;
+          this.modes[side] = m;
+          if (this.streamError[side]) this.streamError[side] = null;
+        },
+      });
+      this.candidateProbe = null;
+      this.streams.set(side, s);
+      this.modes[side] = s.mode;
+      this.resetPresented(side);
+      s.start();
+    }
+    const token = Symbol(side);
+    const refs = this.refs.get(side) ?? new Set<symbol>();
+    refs.add(token);
+    this.refs.set(side, refs);
+    return () => this.stopStream(side, token);
+  }
+  private stopStream(side: Side, token: symbol): void {
+    const refs = this.refs.get(side);
+    if (!refs?.delete(token)) return; // old session/component cannot release a new lease
+    if (refs.size === 0) {
+      this.refs.delete(side);
+      this.streams.get(side)?.stop();
+      this.streams.delete(side);
+      this.sourceUrls.delete(side);
+      this.streamGenerations.set(side, (this.streamGenerations.get(side) ?? 0) + 1);
+      this.modes[side] = "off";
+      this.presented[side] = false;
+      this.sync.presentedRt[side] = null;
+    }
+  }
+  private refreshNonces = new Map<Side, number>();
+  restartStream(side: Side, nonce?: number): void {
+    const url = this.sourceUrls.get(side);
+    if (!url || (nonce != null && this.refreshNonces.get(side) === nonce)) return;
+    if (nonce != null) this.refreshNonces.set(side, nonce);
+    this.streams.get(side)?.stop();
+    this.streams.delete(side);
+    this.pendingSeek = null; this.waitingT = null; this.catchupMode = "normal"; // explicit operator recovery, not automatic timeline jump
+    const release = this.startStream(side, url);
+    release();
+  }
+  resetSession(): void {
+    this.localRecovery = null;
+    this.cadenceTarget = null;
+    for (const stream of this.streams.values()) stream.stop();
+    this.streams.clear(); this.refs.clear(); this.sourceUrls.clear(); this.refreshNonces.clear();
+    this.directorRenderer.clear();
+    this.lastPictureAt.A = this.lastPictureAt.B = -Infinity; this.pictureExpired.value = true;
+    this.paintedCanvases.clear(); this.candidateProbe = null; this.sync.candidate = "off";
+    this.manualTarget = null; this.resetPhase = null; this.resumeFloor = null; this.latestSeek = null; this.latestMissingAt = null;
+    this.resetPresentedUs.value = null;
+    this.takeoverSeek = false;
+    this.publisher = false; this.sync.role = "follower"; this.authorityFloor = null;
+    this.external = new ExternalClock(); this.pendingSeek = null; this.waitingT = null; this.catchupMode = "normal";
+    this.tUs.value = null; this.sync.state = "waiting";
+    this.authorityReady.value = false;
+    this.sync.reason = "startup"; this.sync.seekCount = 0;
+    this.sync.lastSeekReason = ""; this.sync.lastJumpUs = 0;
+    this.stableMs = this.missingMs = 0;
+    this.lastSeekAt = -Infinity;
+    this.sync.activeSides = []; this.sync.waitingSides = [];
+    this.sync.authorityUs = this.sync.targetUs = null; this.sync.catchup = "wait";
+    this.modes.A = this.modes.B = "off";
+    this.presented.A = this.presented.B = false;
+    this.sync.presentedRt.A = this.sync.presentedRt.B = null;
+  }
+
+  modeOf(side: Side): "aligned" | "off" {
+    return this.streams.get(side)?.mode ?? "off";
+  }
+  /** Restart decoding while retaining the last pixels and their time floor. */
+  private resetPresented(side: Side): void {
+    this.localRecovery = null;
+    this.cadenceTarget = null;
+    for (const canvas of this.canvases.get(side) ?? []) {
+      this.directorRenderer.forget(canvas);
+    }
+    this.presented[side] = false;
+    this.sync.targetErrorUs[side] = null;
+  }
+  canAutoSeek(targetUs: number): boolean {
+    const sides = [...this.requiredSides];
+    return sides.length > 0 && sides.every(side => {
+      const stream = this.streams.get(side);
+      const coverage = stream?.coverage();
+      return !!coverage && targetUs >= coverage.from && targetUs <= coverage.to && !!stream?.canSeek(targetUs);
+    });
+  }
+  /** 已注册展示 canvas 数（供监控统计） */
+  registerCanvas(side: Side, canvas: HTMLCanvasElement, options?: DirectorSurfaceOptions): () => void {
+    if (options) this.surfaceOptions.set(canvas, options);
+    const arr = this.canvases.get(side) ?? [];
+    arr.push(canvas);
+    this.canvases.set(side, arr);
+    return () => this.unregisterCanvas(side, canvas);
+  }
+  private unregisterCanvas(side: Side, canvas: HTMLCanvasElement): void {
+    this.surfaceOptions.delete(canvas); this.directorRenderer.forget(canvas);
+    this.paintedCanvases.delete(canvas);
+    const arr = this.canvases.get(side);
+    if (!arr) return;
+    const i = arr.indexOf(canvas);
+    if (i >= 0) arr.splice(i, 1);
+    if (arr.length === 0) { this.canvases.delete(side); this.directorRenderer.release(side); }
+  }
+  /* ---- 主循环 ---- */
+  private refreshHealth(): void {
+    for (const side of ["A", "B"] as Side[]) {
+      const s = this.streams.get(side);
+      this.health[side] = s ? s.stats() : emptyHealth();
+    }
+    // 主循环存活看门狗：2s 无 tick → 判定循环卡死（画面会卡住但拉流/统计还在走）
+    if (performance.now() - this.lastTickTime > 2000) {
+      this.loopAlive.value = false;
+    }
+  }
+
+  start(): void {
+    if (this.running) return;
+    this.running = true;
+    this.last = performance.now();
+    this.refreshHealth();
+    this.healthTimer = setInterval(() => this.refreshHealth(), 400);
+    this.driver.start((now: number) => {
+      if (!this.running) return;
+      // 主循环无论单帧是否抛错都继续（此前一旦某帧绘制异常就会掐断 rAF → 画面永久卡死）
+      try {
+        this.tickLoop(now);
+        this.clockPulse?.(); // Same driver as T; no dependence on a throttled heartbeat timer.
+      } catch (e) {
+        console.error("[align loop]", e);
+        this.loopErr.value = e instanceof Error ? e.message : String(e);
+      }
+      this.loopAlive.value = true;
+      this.lastTickTime = now;
+    });
+  }
+
+  private tickLoop(now: number): void {
+    this.refreshAuthority(now);
+    const cadenceTarget = this.sync.state === "playing" ? this.cadenceTarget : null;
+    this.cadenceTarget = null;
+    const elapsed = Math.max(0, Math.min(now - this.last, 100));
+    this.last = now;
+    const sides = this.requiredSides.size ? [...this.requiredSides] : [...this.streams.keys()];
+    // Every document owns its A/B readiness; another page cannot drop a side.
+    this.sync.activeSides = [...sides]; this.sync.waitingSides = [];
+    const streams = sides.map(side => this.streams.get(side));
+    const coverage = streams.map(stream => stream?.coverage() ?? null);
+    const freeze = (state: "waiting" | "frozen" | "stale", keepRecovery = false, reason = state as string) => {
+      if (this.sync.reason !== reason) logAuth("freeze", `reason=${reason} T=${this.tUs.value} missingMs=${this.missingMs}`);
+      this.sync.reason = reason;
+      if (!keepRecovery) this.stableMs = 0;
+      this.sync.state = state;
+      this.playback.speed = 0;
+      for (const side of sides) this.presented[side] = false;
+    };
+    if (!sides.length) { freeze("waiting", false, "signal_wait"); return; }
+    if (coverage.some(c => !c)) { freeze("waiting", false, "coverage"); return; }
+    const frontiers = coverage.map(c => c!.to);
+    const slow = Math.min(...frontiers);
+    const preparingReset = this.publisher && this.resetPhase === "preparing";
+    const strictTarget = !this.publisher || preparingReset;
+    const required = slow;
+    const earliest = Math.max(...coverage.map(c => c!.from));
+    const pictureFloor = Math.max(...sides.map(side => this.sync.presentedRt[side] ?? -Infinity));
+    // After a freeze, nearest-frame quantization can leave the actual picture
+    // ahead of committed T. Resume candidates must pass that picture; otherwise
+    // the floor gate prevents both decoder advancement and recovery forever.
+    const resuming = this.sync.state !== "playing" || this.missingMs > 0 || this.takeoverSeek;
+    const resumeFloor = Math.max(this.resumeFloor ?? -Infinity, resuming ? pictureFloor : -Infinity);
+    const resumeAfter = Number.isFinite(resumeFloor) ? resumeFloor + 1 : null;
+    const localTarget = preparingReset
+      ? this.manualTarget
+      : this.publisher ? publisherTarget(earliest, slow,
+      Math.max(this.authorityFloor ?? 0, this.tUs.value ?? 0, resumeAfter ?? 0), this.delaySeconds, this.tUs.value == null) : null;
+    const external = this.publisher
+      ? localTarget == null ? null : { t: localTarget, rate: 1, stale: false }
+      : this.external.read(now);
+    if (!external) { freeze("waiting", false, "authority_or_safe_target"); return; }
+    this.sync.authorityUs = external.t;
+    if (external.stale) { freeze("stale", false, "authority_stale"); return; }
+    if (this.resetPhase === "failed" && this.publisher) { freeze("frozen", false, "reset_failed"); return; }
+    if (strictTarget) {
+      this.presentLatest(now, elapsed, external, sides, earliest, required, freeze);
+      return;
+    }
+    if (earliest > required) { freeze("waiting", false, "buffer_short"); return; }
+    // A pinned target at/before a retained picture can never pass presentation.
+    // Release only the uncommitted target; pixels and committed T stay intact.
+    if (this.pendingSeek != null && this.pendingSeek <= pictureFloor) this.pendingSeek = null;
+    if (this.waitingT != null && this.waitingT <= pictureFloor) this.waitingT = null;
+    const plan = planCatchup({ current: this.tUs.value == null ? null : Math.max(cadenceTarget ?? this.tUs.value, resumeAfter ?? -Infinity), authority: external.t,
+      from: earliest, safeTo: required, elapsedMs: elapsed,
+      reserveUs: Math.min(CATCHUP.publisherReserveUs, this.delaySeconds * 1_000_000),
+      mode: this.catchupMode, recovering: (this.takeoverSeek || this.missingMs >= CATCHUP.stallSeekMs) && now - this.lastSeekAt >= CATCHUP.retryMs });
+    if (this.pendingSeek != null && (this.pendingSeek < earliest || this.pendingSeek > required ||
+        (this.missingMs >= CATCHUP.stallSeekMs && now - this.lastSeekAt >= CATCHUP.retryMs))) {
+      this.pendingSeek = null; this.waitingT = null;
+    }
+    if (this.pendingSeek == null && plan.mode === "seek" && plan.t != null) {
+      if (!streams.every(stream => stream!.canSeek(plan.t!))) { freeze("waiting", false, "no_keyframe"); return; }
+      // Preflight both GOPs before invalidating either decoder. Commit T only after both decode.
+      this.lastSeekAt = now;
+      this.beginLocalRecovery(now);
+      this.sync.seekCount++;
+      this.sync.lastSeekReason = this.tUs.value == null ? "startup" : this.tUs.value < earliest
+        ? "coverage_gap" : this.missingMs >= CATCHUP.stallSeekMs ? "decode_stall" : "clock_drift";
+      this.sync.lastJumpUs = this.tUs.value == null ? 0 : plan.t - this.tUs.value;
+      logAuth("seek", `reason=${this.sync.lastSeekReason} jumpUs=${this.sync.lastJumpUs} missingMs=${this.missingMs}`);
+      for (const stream of streams) stream!.seek(plan.t);
+      this.takeoverSeek = false;
+      this.pendingSeek = plan.t;
+      this.stableMs = 0;
+      this.missingMs = 0;
+    }
+    if (this.waitingT != null && (this.waitingT < earliest || this.waitingT > required)) this.waitingT = null;
+    const T = this.pendingSeek ?? this.waitingT ?? plan.t;
+    this.sync.catchup = this.pendingSeek != null ? "seek" : plan.mode;
+    this.sync.targetUs = T;
+    if (T == null || (this.pendingSeek == null && plan.mode === "wait") || T > external.t ||
+        T < earliest || T > required || (this.tUs.value != null && T < this.tUs.value)) {
+      freeze("frozen"); return;
+    }
+    if (sides.some(s => T <= (this.sync.presentedRt[s] ?? -Infinity))) {
+      if (this.pendingSeek == null && this.waitingT == null && this.missingMs === 0 &&
+          this.sync.state === "playing" && sides.every(s => this.presented[s])) {
+        // Joint nearest-frame selection may lead T by a fraction of a frame.
+        // Keep accumulating the shared target until it passes that picture; do
+        // not discard elapsed time or advertise an authority freeze each tick.
+        // Committed T and lastPictureAt still describe the retained picture.
+        this.cadenceTarget = T;
+        this.sync.reason = "frame_interval";
+        this.playback.speed = plan.rate;
+        return;
+      }
+      freeze("frozen", false, "authority_behind_picture"); return;
+    }
+    // A held T must still decode admissible future candidates; the ordinary
+    // 250ms horizon can otherwise wait forever on the next available picture.
+    for (const stream of streams) stream!.advance(T, this.missingMs > 0 ? CATCHUP.maxFrameErrorUs : 250_000);
+    // The 3s tolerance accommodates source clock offsets, not seconds of
+    // repeated decoder output. Give mixed frame rates a short reuse grace;
+    // then require progress on that side before advancing the shared timeline.
+    const progressFloors = sides.map(side => {
+      const previous = this.sync.presentedRt[side];
+      return previous == null ? null : previous +
+        (now - this.lastPictureAt[side] >= CATCHUP.transientMissMs ? 1 : 0);
+    });
+    const frames = commonFrames(streams.map(s => s!.queue), T, CATCHUP.maxFrameErrorUs,
+      progressFloors) ?? [];
+    const pairError = frames.length ? Math.max(...frames.map(f => f.rtUs)) - Math.min(...frames.map(f => f.rtUs)) : null;
+    if (frames.length !== sides.length || (pairError ?? Infinity) > CATCHUP.maxFrameErrorUs) {
+      this.waitingT ??= T;
+      this.missingMs += elapsed; this.stableMs = 0; this.catchupMode = "normal";
+      const missing = sides.filter((_, i) => !streams[i]!.queue.nearest(T, CATCHUP.maxFrameErrorUs));
+      const stalled = sides.filter((side, i) => progressFloors[i] != null &&
+        progressFloors[i]! > (this.sync.presentedRt[side] ?? -Infinity) &&
+        !!streams[i]!.queue.nearest(T, CATCHUP.maxFrameErrorUs) &&
+        !streams[i]!.queue.candidates(T, CATCHUP.maxFrameErrorUs, progressFloors[i]!).length);
+      freeze("frozen", false, stalled.length ? `decoder_progress_wait:${stalled.join("+")}`
+        : missing.length ? `missing_frame:${missing.join("+")}` : "pair_error"); return;
+    }
+    if (this.pendingSeek != null || this.missingMs > 0) {
+      const gate = recoveryGate(this.stableMs, true, elapsed, this.pendingSeek == null ? this.missingMs : Infinity);
+      this.stableMs = gate.stableMs;
+      if (!gate.ready) { freeze("frozen", true, "recovery_hysteresis"); return; }
+    }
+    let commit: () => void;
+    try {
+      commit = this.preparePresentation(sides, frames);
+    } catch {
+      this.waitingT ??= T;
+      this.missingMs += elapsed; this.stableMs = 0; this.catchupMode = "normal";
+      freeze("frozen"); return;
+    }
+    commit();
+    const advanced = this.tUs.value == null || T > this.tUs.value;
+    this.recordPictureProgress(now, sides, frames);
+    this.tUs.value = T; // committed presentation time; overlays must never use targetUs
+    this.sync.state = "playing";
+    this.sync.reason = "playing";
+    this.sync.pairErrorUs = pairError;
+    this.playback.speed = this.pendingSeek != null || !advanced ? 0 : plan.rate;
+    this.catchupMode = plan.mode === "soft" ? "soft" : "normal";
+    this.pendingSeek = null; this.waitingT = null; this.missingMs = 0; this.stableMs = 0;
+    this.resumeFloor = null;
+    this.playback.behindS = (required - T) / 1e6;
+    for (let i = 0; i < sides.length; i++) {
+      const side = sides[i]!;
+      this.sync.presentedRt[side] = frames[i]!.rtUs;
+      this.sync.targetErrorUs[side] = frames[i]!.rtUs - T;
+      this.presented[side] = true;
+      this.streamError[side] = null;
+    }
+    logAuth("present", `T=${T} pairErrorUs=${pairError} A=${this.sync.presentedRt.A} B=${this.sync.presentedRt.B}`);
+  }
+  private presentLatest(now: number, elapsed: number, external: { t: number; rate: number; stale: boolean }, sides: Side[], earliest: number, latest: number,
+    freeze: (state: "waiting" | "frozen" | "stale", keep?: boolean, reason?: string) => void): void {
+    if (this.publisher && this.resetPhase === "preparing" && this.resetPresentedUs.value != null) return;
+    const floor = Math.max(this.resumeFloor ?? 0, ...sides.map(s => this.sync.presentedRt[s] ?? 0));
+    const T = external.t;
+    this.sync.targetUs = T;
+    const holdFrameInterval = (): boolean => {
+      // A follower may sample authority more often than one side produces a
+      // picture. Retain readiness briefly, without committing T or renewing age.
+      if (this.publisher || external.rate <= 0 || this.sync.state !== "playing" ||
+          this.resumeFloor != null || !sides.every(side => this.presented[side] &&
+            now - this.lastPictureAt[side] < CATCHUP.transientMissMs &&
+            Math.abs(T - (this.sync.presentedRt[side] ?? -Infinity)) <= 100_000)) return false;
+      // Missing queues are real starvation, not ordinary frame repetition.
+      if (!commonFrames(sides.map(side => this.streams.get(side)!.queue), T,
+          CATCHUP.maxFrameErrorUs, sides.map(side => this.sync.presentedRt[side]))) return false;
+      this.sync.reason = "frame_interval"; this.playback.speed = external.rate;
+      return true;
+    };
+    if (T <= floor || (external.rate === 0 && !(this.publisher && this.resetPhase === "preparing"))) {
+      if (holdFrameInterval()) return;
+      freeze("frozen", false, "authority_behind_or_paused"); return;
+    }
+    // Readiness is bounded against the newest T, not an earlier pending seek.
+    if (T < earliest - 3_000_000 || T > latest + 3_000_000) {
+      freeze("frozen", false, "target_unavailable"); return;
+    }
+    const streams = sides.map(s => this.streams.get(s)!);
+    const seekT = Math.max(earliest, Math.min(T, latest));
+    const floors = sides.map(s => Math.max((this.sync.presentedRt[s] ?? -Infinity) + 1,
+      this.publisher && this.resetPhase === "preparing" ? this.manualTarget! : -Infinity));
+    for (const s of streams) s.advance(seekT, this.latestMissingAt != null ? CATCHUP.maxFrameErrorUs : 250_000);
+    let frames = commonFrames(streams.map(s => s.queue), T, 3_000_000, floors);
+    const fresh = frames?.every((f, i) => f.rtUs > (this.sync.presentedRt[sides[i]!] ?? -Infinity));
+    if (!fresh && holdFrameInterval()) return;
+    if (!fresh) this.latestMissingAt ??= now;
+    if (!fresh && (this.latestSeek == null || (Math.abs(T - this.latestSeek) > 3_000_000 && Math.abs(T - (this.tUs.value ?? this.latestSeek)) > 3_000_000) || (now - this.latestMissingAt! >= 250 && now - this.lastSeekAt >= 1000))) {
+      if (!streams.every(s => s.canSeek(seekT))) { freeze("waiting", false, "no_keyframe"); return; }
+      for (const s of streams) s.seek(seekT);
+      this.beginLocalRecovery(now);
+      this.latestSeek = T; this.lastSeekAt = now; this.sync.seekCount++;
+      this.sync.lastSeekReason = "latest_target";
+    }
+    for (const s of streams) s.advance(seekT, this.latestMissingAt != null ? CATCHUP.maxFrameErrorUs : 250_000);
+    frames = commonFrames(streams.map(s => s.queue), T, 3_000_000, floors);
+    if (!frames || frames.some((f, i) => f.rtUs <= (this.sync.presentedRt[sides[i]!] ?? -Infinity))) {
+      freeze("frozen", false, "missing_common_frame"); return;
+    }
+    // Reset acknowledgement has a narrower server contract: actual common frame
+    // in [requested T, requested T + 1s], never pretend an earlier frame is ready.
+    const actual = Math.max(...frames.map(f => f.rtUs));
+    if (this.publisher && this.resetPhase === "preparing" &&
+        frames.some(f => f.rtUs < this.manualTarget! || f.rtUs > this.manualTarget! + 1_000_000)) {
+      freeze("frozen", false, "reset_target_frame"); return;
+    }
+    let commit: () => void;
+    try {
+      commit = this.preparePresentation(sides, frames);
+    } catch {
+      this.waitingT ??= T;
+      this.missingMs += elapsed; this.stableMs = 0; this.catchupMode = "normal";
+      freeze("frozen"); return;
+    }
+    commit();
+    this.tUs.value = this.publisher && this.resetPhase === "preparing" ? actual : T;
+    this.recordPictureProgress(now, sides, frames); this.latestMissingAt = null;
+    this.resumeFloor = null; this.sync.state = "playing"; this.sync.reason = "playing";
+    this.playback.speed = 1; this.sync.catchup = "normal";
+    this.sync.pairErrorUs = Math.max(...frames.map(f => f.rtUs)) - Math.min(...frames.map(f => f.rtUs));
+    for (let i = 0; i < sides.length; i++) {
+      const side = sides[i]!;
+      this.sync.presentedRt[side] = frames[i]!.rtUs;
+      this.sync.targetErrorUs[side] = frames[i]!.rtUs - T;
+      this.presented[side] = true;
+    }
+    if (this.publisher && this.resetPhase === "preparing") this.resetPresentedUs.value = actual;
+  }
+  private preparePresentation(sides: Side[], frames: FrameEntry[]): () => void {
+    // Stage all draws before touching any visible canvas. A missing/closed frame cannot
+    // advance one side alone. JS canvas commits run in the same task, before browser paint.
+    const directorCommits: (() => HTMLCanvasElement[])[] = [];
+    const prepared: { canvas: HTMLCanvasElement; buffer: HTMLCanvasElement }[] = [];
+    for (let index = 0; index < sides.length; index++) {
+      const side = sides[index]!;
+      const optimized = (this.canvases.get(side) ?? []).filter(canvas => this.surfaceOptions.has(canvas));
+      if (optimized.length) directorCommits.push(this.directorRenderer.prepare(side,
+        frames[index]!.handle as globalThis.VideoFrame, this.streamGenerations.get(side) ?? 0,
+        optimized.map(canvas => ({ canvas, options: this.surfaceOptions.get(canvas)! }))));
+      for (const canvas of this.canvases.get(side) ?? []) {
+        if (this.surfaceOptions.has(canvas)) continue;
+        const buffer = this.drawBuffer(canvas, frames[index]!.handle as globalThis.VideoFrame);
+        prepared.push({ canvas, buffer });
+      }
+    }
+    return () => {
+      for (const { canvas, buffer } of prepared) {
+        if (canvas.width !== buffer.width) canvas.width = buffer.width;
+        if (canvas.height !== buffer.height) canvas.height = buffer.height;
+        canvas.getContext("2d")!.drawImage(buffer, 0, 0);
+        this.paintedCanvases.add(canvas);
+      }
+      for (const commit of directorCommits) for (const canvas of commit()) this.paintedCanvases.add(canvas);
+    };
+  }
+  private buffers = new WeakMap<HTMLCanvasElement, HTMLCanvasElement>();
+  private drawBuffer(canvas: HTMLCanvasElement, frame: globalThis.VideoFrame): HTMLCanvasElement {
+    let buffer = this.buffers.get(canvas);
+    if (!buffer) { buffer = document.createElement("canvas"); this.buffers.set(canvas, buffer); }
+    if (!frame.displayWidth || !frame.displayHeight || !canvas.getContext("2d")) throw new Error("Invalid presentation surface");
+    if (buffer.width !== frame.displayWidth) buffer.width = frame.displayWidth;
+    if (buffer.height !== frame.displayHeight) buffer.height = frame.displayHeight;
+    const ctx = buffer.getContext("2d");
+    if (!ctx) throw new Error("Canvas unavailable");
+    ctx.drawImage(frame, 0, 0);
+    return buffer;
+  }
+  stop(): void {
+    this.running = false;
+    this.driver.stop();
+    if (this.healthTimer) clearInterval(this.healthTimer);
+    this.healthTimer = null;
+  }
+}
+
+/** Document-local singleton; separate pages follow WS anchors independently. */
+// Scene and preview documents start as receivers. Console connect opts in.
+export const alignEngine = new AlignEngine(false);

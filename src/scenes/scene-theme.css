@@ -1,18 +1,31 @@
 /**
  * 导播场景页共享主题（合成器浪潮 / synthwave）。
  *
- * 与 overlay.html 一样，场景页是独立入口：**不**引主应用 global.css，配色全在此
- * 固定（不随主题深浅切换）。每个场景的 main.ts import 一次即可复用令牌与工具类。
+ * 与 categoryinfo.html 等场景页一样，场景页是独立入口：**不**引主应用 global.css，
+ * 配色全在此固定（不随主题深浅切换）。每个场景的 main.ts import 一次即可复用
+ * 令牌与工具类。
+ *
+ * 字体走 npm 依赖（@fontsource-variable/*）：Noto Sans SC（中英统一，含拉丁
+ * 字形）+ JetBrains Mono（计时器等宽数字），保证 OBS 浏览器源（CEF）与任何
+ * 系统/机器渲染一致。字体文件在 node_modules，构建时 Vite 自动拷入 dist，
+ * git 仓库不维护字体二进制。
  *
  * 配色约定（与全局 A/B 一致）：
  *   A（蓝）= #3d8bff   B（红）= #ff6b4a   胜方金 = #ffd166
  *   合成器浪潮：紫 #2d0b4e、品红 #ff2e88、青 #22e3ff、橙 #ff8a3d
  */
 
+@import "@fontsource-variable/noto-sans-sc";
+@import "@fontsource-variable/jetbrains-mono";
+
 :root {
-  /* 对阵色（与 global.css 同值，固定常量） */
+  /* 对阵色（与 global.css 同值，固定常量；运行时可由「场景配置」覆盖） */
   --syn-a: #3d8bff;
   --syn-b: #ff6b4a;
+  --syn-a-glow: rgba(61, 139, 255, 0.55);
+  --syn-b-glow: rgba(255, 107, 74, 0.55);
+  --syn-a-glow-soft: rgba(61, 139, 255, 0.25);
+  --syn-b-glow-soft: rgba(255, 107, 74, 0.25);
   --syn-win: #ffd166;
 
   /* 合成器浪潮主色 */
@@ -32,13 +45,14 @@
 
   --syn-bg: #0a0118;
 
-  font-family: "Inter", "PingFang SC", system-ui, -apple-system, sans-serif;
+  font-family: "Noto Sans SC Variable", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
 }
 
 /* 场景根：占满视口、固定深紫底、内容层在上 */
 html,
 body,
 #bracket-app,
+#categoryinfo-app,
 #mappool-app,
 #match-app {
   margin: 0;
@@ -61,6 +75,16 @@ body,
     0 0 6px var(--syn-magenta),
     0 0 14px rgba(255, 46, 136, 0.55);
 }
+.neon-text-cyan {
+  color: var(--syn-text);
+  text-shadow:
+    0 0 6px var(--syn-cyan),
+    0 0 14px rgba(34, 227, 255, 0.55);
+}
+.neon-text-dim {
+  color: var(--syn-text-dim);
+  text-shadow: none;
+}
 
 /* 霓虹面板：半透紫底 + 青色辉光描边 */
 .neon-panel {
@@ -71,21 +95,6 @@ body,
   box-shadow:
     0 0 0 1px rgba(34, 227, 255, 0.08),
     0 8px 32px rgba(0, 0, 0, 0.4);
-}
-
-/* 全屏扫描线覆盖（贴在最上层，不挡交互） */
-.scanlines::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  pointer-events: none;
-  background: repeating-linear-gradient(
-    0deg,
-    rgba(0, 0, 0, 0.16) 0 1px,
-    transparent 1px 3px
-  );
-  mix-blend-mode: multiply;
 }
 
 /* mock 角标：右上角提示当前为假数据 */
@@ -102,31 +111,4 @@ body,
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.5px;
-}
-
-/* 齿轮按钮（唤出导播配置面板） */
-.scene-gear {
-  position: fixed;
-  top: 12px;
-  left: 14px;
-  z-index: 60;
-  width: 36px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: var(--syn-panel);
-  border: 1px solid var(--syn-border);
-  color: var(--syn-text-dim);
-  font-size: 18px;
-  cursor: pointer;
-  transition: color 0.2s, border-color 0.2s, transform 0.4s;
-}
-.scene-gear:hover {
-  color: var(--syn-cyan);
-  border-color: var(--syn-border-bright);
-}
-.scene-gear:hover {
-  transform: rotate(60deg);
 }

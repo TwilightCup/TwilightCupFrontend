@@ -18,6 +18,7 @@ import {
   type Pick,
 } from "@/api/types";
 import { t as tr } from "@/locales";
+import { officialLevelBg, officialLevelIdOf } from "@/utils/officialLevels";
 
 /** 把类别名（如 "ml"/"ML "）归一为固定 kind；无法识别返回 null（视作普通分组，不参与 ban/pick 规则）。 */
 export function categoryKindOf(name?: string | null): CK | null {
@@ -32,6 +33,119 @@ export const CT_TAG_BASE: string[] = [...CT_TAGS];
 /** 单关 CT 选图可选的词条集合（基础 + Achievement）。 */
 export function ctTagsFor(single: boolean): string[] {
   return single ? [...CT_TAG_BASE, CT_TAG_ACHIEVEMENT] : [...CT_TAG_BASE];
+}
+
+// ── 选图固有词条（图池编辑器「Glitchless」单选，写入持久化的 Pick.tag）──────────
+/** 「Glitchless」固有词条原文（与 speedrun.com 子分类值名一致）。 */
+export const GLITCHLESS_TAG = "Glitchless";
+/** 支持「Glitchless」固有词条的类别（文档：ML/IL/CP/TB；CT/EX 走裁判词条机制）。 */
+export const GLITCHLESS_CATEGORIES: readonly CK[] = [
+  CategoryKind.ML,
+  CategoryKind.IL,
+  CategoryKind.CP,
+  CategoryKind.TB,
+];
+
+/** 该类别是否支持「Glitchless」固有词条。 */
+export function supportsGlitchless(kind: CK | null | undefined): boolean {
+  return !!kind && GLITCHLESS_CATEGORIES.includes(kind);
+}
+
+/** Pick.tag 的逗号分隔 token（去空白、去重保序；兼容遗留自由文本）。 */
+export function pickTagTokens(pick: Pick): string[] {
+  const raw = pick.tag;
+  if (!raw) return [];
+  const out: string[] = [];
+  for (const part of raw.split(",")) {
+    const t = part.trim();
+    if (t && !out.includes(t)) out.push(t);
+  }
+  return out;
+}
+
+/** 选图固有词条（仅 ML/IL/CP/TB 且 tag 含 Glitchless 时返回 ["Glitchless"]）。 */
+export function inherentPickTags(pick: Pick): string[] {
+  if (!supportsGlitchless(categoryKindOf(pick.category))) return [];
+  return pickTagTokens(pick).filter((t) => t === GLITCHLESS_TAG);
+}
+
+/** 设置 / 清除选图固有 Glitchless 标签，保留 tag 中其它 token（空则写 null）。 */
+export function setGlitchlessTag(pick: Pick, on: boolean): void {
+  const tokens = pickTagTokens(pick).filter((t) => t !== GLITCHLESS_TAG);
+  if (on) tokens.push(GLITCHLESS_TAG);
+  pick.tag = tokens.length > 0 ? tokens.join(",") : null;
+}
+
+/** 把选图固有词条并入待提交词条数组（保留原顺序、去重）。 */
+export function mergeInherentTags(tags: string[], pick: Pick): string[] {
+  const out = [...tags];
+  for (const t of inherentPickTags(pick)) {
+    if (!out.includes(t)) out.push(t);
+  }
+  return out;
+}
+
+/**
+ * 选图默认背景图：无自定义展示图（logo_url）时按名称回退官方关卡背景。
+ * 名称解析（容忍「Carry 12」「Dark% CP」这类带重试/模式后缀的写法，取整串与首词分别匹配）：
+ * - 「Any%」→ Ice（全游戏流程，以 Ice 作视觉代表）；
+ * - 「X%」→ X 对应关卡（X 为官方展示名，如 Dark → Halloween）；
+ * - 单关「X …」→ X 对应关卡背景（如 Red Rock → RedRock）。
+ * 未命中（自定义名 / 非官方关）→ null，卡片回退类别色底。
+ */
+export function pickDefaultBg(pick: Pick): string | null {
+  const name = pick.name.trim();
+  if (!name) return null;
+  const first = name.split(/\s+/)[0]!;
+  for (const cand of [name, first]) {
+    const key = cand.endsWith("%") ? cand.slice(0, -1) : cand;
+    if (!key) continue;
+    if (key === "Any") return officialLevelBg("Ice");
+    const id = officialLevelIdOf(key);
+    if (id) {
+      const bg = officialLevelBg(id);
+      if (bg) return bg;
+    }
+  }
+  return null;
+}
+
+/** 类别 → 选图卡左侧类别色块底色（高对比亮色；图池 MapCard 与比赛详情选图角标共用）。 */
+export function categoryTagBg(kind: string | null | undefined): string {
+  switch (kind) {
+    case CategoryKind.ML:
+      return "#2f6fe0";
+    case CategoryKind.IL:
+      return "#1f9d61";
+    case CategoryKind.CP:
+      return "#d98324";
+    case CategoryKind.CT:
+      return "#d13a55";
+    case CategoryKind.EX:
+      return "#7a4fd6";
+    case CategoryKind.TB:
+      return "#ffd166";
+    default:
+      return "#4a4460";
+  }
+}
+
+/** 类别 → 选图卡无背景图时的占位底色（暗色系）。 */
+export function categoryBgFallback(kind: string | null | undefined): string {
+  switch (kind) {
+    case CategoryKind.ML:
+      return "#1b3a6b";
+    case CategoryKind.IL:
+      return "#1d4d36";
+    case CategoryKind.CP:
+      return "#5a3a12";
+    case CategoryKind.CT:
+      return "#5a1620";
+    case CategoryKind.TB:
+      return "#4a0f2a";
+    default:
+      return "#33313f";
+  }
 }
 
 /** 解码 `Pick.tag` 为 CT 词条数组（仅保留已知枚举值；兼容旧自由文本→空数组）。 */
@@ -69,6 +183,7 @@ export function normalizeMappool(m: Mappool): Mappool {
     return {
       name: c.name,
       picks: c.picks.map((p) => normalizePick(p, kind)),
+      ct_tags: c.ct_tags,
     };
   });
   cats.sort((a, b) => {

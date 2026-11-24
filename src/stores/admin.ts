@@ -19,6 +19,8 @@ import type {
   AccountOut,
   AccountUpdate,
   BracketView,
+  CustomTag,
+  CustomTagCreate,
   FixtureAssignBody,
   FixtureCreateMatchBody,
   FixtureOut,
@@ -54,6 +56,10 @@ export const useAdminStore = defineStore("admin", () => {
   const levels = ref<Level[]>([]);
   const levelsLoading = ref(false);
   const levelsLoaded = ref(false);
+
+  const customTags = ref<CustomTag[]>([]);
+  const customTagsLoading = ref(false);
+  const customTagsLoaded = ref(false);
 
   const tournaments = ref<TournamentOut[]>([]);
   const tournamentsLoading = ref(false);
@@ -302,6 +308,48 @@ export const useAdminStore = defineStore("admin", () => {
       return true;
     } catch (e) {
       ElMessage.error(msgOf(e, tr("toast.deleteLevelFail")));
+      return false;
+    }
+  }
+
+  // ---- 词条库（「词条管理」页） ------------------------------------------
+
+  async function loadCustomTags(force = false): Promise<void> {
+    if (!auth.token) return;
+    if (customTagsLoaded.value && !force) return;
+    customTagsLoading.value = true;
+    try {
+      customTags.value = await api.listCustomTags(auth.token);
+      customTagsLoaded.value = true;
+    } catch (e) {
+      ElMessage.error(msgOf(e, tr("toast.loadCustomTagsFail")));
+    } finally {
+      customTagsLoading.value = false;
+    }
+  }
+
+  async function createCustomTag(body: CustomTagCreate): Promise<CustomTag | null> {
+    if (!auth.token) return null;
+    try {
+      const tag = await api.createCustomTag(body, auth.token);
+      customTags.value = [tag, ...customTags.value];
+      ElMessage.success(tr("toast.createCustomTagOk", { name: tag.name }));
+      return tag;
+    } catch (e) {
+      ElMessage.error(msgOf(e, tr("toast.createCustomTagFail")));
+      return null;
+    }
+  }
+
+  async function deleteCustomTag(id: string): Promise<boolean> {
+    if (!auth.token) return false;
+    try {
+      await api.deleteCustomTag(id, auth.token);
+      customTags.value = customTags.value.filter((x) => x.id !== id);
+      ElMessage.success(tr("toast.deleteCustomTagOk"));
+      return true;
+    } catch (e) {
+      ElMessage.error(msgOf(e, tr("toast.deleteCustomTagFail")));
       return false;
     }
   }
@@ -578,6 +626,58 @@ export const useAdminStore = defineStore("admin", () => {
     }
   }
 
+  /** 归档已结束比赛（archived_at 置时间；纯列表整理，不影响状态机/选手占用） */
+  async function archiveMatch(matchId: string): Promise<boolean> {
+    const token = auth.token;
+    if (!token) return false;
+    try {
+      const m = await api.archiveMatch(matchId, token);
+      // 仅回填 archived_at（归档只改这一个字段，本地行其余数据保持不变）
+      matches.value = matches.value.map((x) => (x.id === matchId ? { ...x, archived_at: m.archived_at } : x));
+      ElMessage.success(tr("toast.archiveMatchOk"));
+      return true;
+    } catch (e) {
+      ElMessage.error(msgOf(e, tr("toast.archiveMatchFail")));
+      return false;
+    }
+  }
+
+  /** 取消归档（archived_at 置 null，比赛回到普通已结束状态） */
+  async function unarchiveMatch(matchId: string): Promise<boolean> {
+    const token = auth.token;
+    if (!token) return false;
+    try {
+      const m = await api.unarchiveMatch(matchId, token);
+      // 同 archiveMatch：仅回填 archived_at（此处为 null）
+      matches.value = matches.value.map((x) => (x.id === matchId ? { ...x, archived_at: m.archived_at } : x));
+      ElMessage.success(tr("toast.unarchiveMatchOk"));
+      return true;
+    } catch (e) {
+      ElMessage.error(msgOf(e, tr("toast.unarchiveMatchFail")));
+      return false;
+    }
+  }
+
+  /** 批量归档（顺序请求避免并发写竞争；逐条回填，汇总成功/失败数） */
+  async function archiveMatches(matchIds: string[]): Promise<{ ok: number; fail: number }> {
+    const token = auth.token;
+    const result = { ok: 0, fail: 0 };
+    if (!token) return result;
+    for (const id of matchIds) {
+      try {
+        const m = await api.archiveMatch(id, token);
+        matches.value = matches.value.map((x) => (x.id === id ? { ...x, archived_at: m.archived_at } : x));
+        result.ok += 1;
+      } catch {
+        // 单条失败（如已被其他管理员归档）不中断批次，最后汇总提示
+        result.fail += 1;
+      }
+    }
+    if (result.ok > 0) ElMessage.success(tr("toast.archiveMatchesOk", { n: result.ok }));
+    if (result.fail > 0) ElMessage.error(tr("toast.archiveMatchesFail", { n: result.fail }));
+    return result;
+  }
+
   return {
     accounts,
     accountsLoading,
@@ -590,6 +690,9 @@ export const useAdminStore = defineStore("admin", () => {
     levels,
     levelsLoading,
     levelsLoaded,
+    customTags,
+    customTagsLoading,
+    customTagsLoaded,
     tournaments,
     tournamentsLoading,
     tournamentsLoaded,
@@ -613,6 +716,9 @@ export const useAdminStore = defineStore("admin", () => {
     createLevel,
     updateLevel,
     deleteLevel,
+    loadCustomTags,
+    createCustomTag,
+    deleteCustomTag,
     loadTournaments,
     loadTournament,
     createTournament,
@@ -630,5 +736,8 @@ export const useAdminStore = defineStore("admin", () => {
     assignOfficials,
     createMatchForFixture,
     forceEndMatch,
+    archiveMatch,
+    archiveMatches,
+    unarchiveMatch,
   };
 });

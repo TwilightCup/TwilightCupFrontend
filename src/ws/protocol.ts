@@ -3,6 +3,7 @@
  * 与后端 src/twilightcupbackend/protocol.py 对齐。
  */
 import type {
+  StreamLinks,
   Attempt,
   LevelTime,
   MatchPhase,
@@ -87,11 +88,52 @@ export interface ClientReconnectResync {
   type: "reconnect_resync";
   round_id: string;
 }
+/** 选手端 UTC 时间戳周期上报（连接后按固定间隔发送；utc_ms 为 Unix UTC 毫秒） */
+export interface ClientUtcTimestamp {
+  type: "utc_timestamp";
+  utc_ms: number;
+}
+/** 选手端预载状态上报（仅选手席位，PREP 阶段有意义；SINGLE 合集报 "na"） */
+export interface ClientPreloadReport {
+  type: "preload_report";
+  status: "in_progress" | "done" | "failed" | "na";
+  /** 失败原因等，仅日志/告警用 */
+  detail?: string | null;
+}
 
 /** 裁判上报完整 ban/pick 草稿状态（后端转发给导播；state 为任意 JSON） */
 export interface ClientDraftSync {
   type: "draft_sync";
   state: Record<string, unknown>;
+}
+
+/**
+ * 导播控制台发往同账号其他导播连接（OBS 舞台）的指令。
+ * 后端收到后广播给同 match + 同 account_id 的其他 DIRECTOR 连接。
+ */
+export interface ClientDirectorCommand {
+  type: "director_command";
+  /** 指令类别 */
+  action:
+    | "switch_scene"
+    | "soon_start"
+    | "soon_pause"
+    | "soon_reset"
+    | "soon_set_target"
+    | "config_update"
+    | "frame_align"
+    | "frame_align_reset"
+    | "frame_align_reset_ack"
+    | "frame_align_status";
+  /** 指令载荷（按 action 不同含义） */
+  payload: Record<string, unknown>;
+  // switch_scene:   { scene: "soon" }
+  // soon_start:     {}
+  // soon_pause:     {}
+  // soon_reset:     {}
+  // soon_set_target: { target_ms: 300000 }
+  // config_update:  { config: { hlsA, hlsB, embedA, embedB } }
+  //                 （直播画面配置实时下发，四键可部分缺失；服务端原样透传）
 }
 
 export type ClientMessage =
@@ -110,7 +152,10 @@ export type ClientMessage =
   | ClientProjectComplete
   | ClientForfeitSignal
   | ClientReconnectResync
-  | ClientDraftSync;
+  | ClientUtcTimestamp
+  | ClientPreloadReport
+  | ClientDraftSync
+  | ClientDirectorCommand;
 
 export const send = {
   chat: (text: string): ClientChat => ({ type: "chat", text }),
@@ -180,10 +225,23 @@ export const send = {
     type: "reconnect_resync",
     round_id,
   }),
+  utcTimestamp: (utcMs: number): ClientUtcTimestamp => ({
+    type: "utc_timestamp",
+    utc_ms: utcMs,
+  }),
   // ---- 裁判端 ban/pick 草稿上报（转发给导播）----
   draftSync: (state: Record<string, unknown>): ClientDraftSync => ({
     type: "draft_sync",
     state,
+  }),
+  // ---- 导播控制台 → 舞台指令（WS 广播给同账号其他导播连接）----
+  directorCommand: (
+    action: ClientDirectorCommand["action"],
+    payload: Record<string, unknown> = {},
+  ): ClientDirectorCommand => ({
+    type: "director_command",
+    action,
+    payload,
   }),
 };
 
@@ -193,6 +251,13 @@ export const send = {
 
 export interface SrvAuthOk {
   type: "auth_ok";
+  connection_id?: string;
+  align_role?: "publisher" | "follower";
+  align_authority_src?: string | null;
+  align_lease_required?: boolean;
+  timeline_version?: number;
+  authority_epoch?: number;
+
   account_id: string;
   display_name: string;
   seat: SeatName;
@@ -207,6 +272,16 @@ export interface SrvAuthError {
   type: "auth_error";
   msg: string;
 }
+/**
+ * 本连接被同身份（账号+座位+比赛）且带 exclusive=1 的新连接顶掉：
+ * 先于 close(4001) 送达；被顶掉 ≠ 鉴权失败（token 仍有效），应停止自动重连
+ * 并提示「已在其他窗口打开」。与后端 connection_manager.DISPLACED_* 对齐。
+ */
+export interface SrvDisplaced {
+  type: "displaced";
+  /** 目前仅 "superseded_by_new_connection" */
+  reason: string;
+}
 export interface SrvChat {
   type: "chat";
   sender_id?: string | null;
@@ -219,12 +294,20 @@ export interface SrvSystem {
   type: "system";
   text: string;
   kind: string;
+  /** 展示前缀：全场广播恒为 "Twilight"（定向 error 回执无此字段，沿用 System） */
+  sender?: "Twilight" | "System";
   ts: string;
 }
 export interface SrvReadyState {
   type: "ready_state";
   a_ready: boolean;
   b_ready: boolean;
+}
+/** 双方预载状态广播（上报/重置时；absent = 从未上报） */
+export interface SrvPreloadState {
+  type: "preload_state";
+  a_status: "absent" | "in_progress" | "done" | "failed" | "na";
+  b_status: "absent" | "in_progress" | "done" | "failed" | "na";
 }
 /** 座席连接状态变化（选手/裁判连入或断开时广播；后端可选实现，见 docs/backend-seat-presence.md） */
 export interface SrvSeatState {
@@ -245,6 +328,13 @@ export interface SrvCountdownTick {
 export interface SrvCountdownAbort {
   type: "countdown_abort";
   reason: string;
+}
+/** 选图确定即提前下发的合集预览（round_start 仍是唯一权威；与 round_start 的 pick/collection 同构） */
+export interface SrvPickAnnounced {
+  type: "pick_announced";
+  pick_code: string;
+  pick: Pick;
+  collection: { raw: Record<string, unknown> };
 }
 export interface SrvRoundStart {
   type: "round_start";
@@ -276,6 +366,67 @@ export interface SrvLevelTimeUpdate {
   total_ms?: number | null;
   /** 完成时刻活跃的无效原因（缺省/空 = 有效；"!" 前缀 = 不可原谅）。 */
   invalid_reasons?: string[] | null;
+}
+/**
+ * subsegment 实时时间差广播（双方选手 + 裁判 + 所有导播连接；仅 MULTI 回合进行中）。
+ * 机制：选手端每秒采样（TwilightTimer 时间线，与计分同源）建虚拟检测平面，
+ * 对方穿越时上报命中，服务端广播 gap_ms = hit_ms − sample_ms：
+ * >0 = 穿越方（hit_seat）落后，可为负。数据为回合级内存态——回合结束服务端
+ * 即清空，断线期间不补发；消息无时间戳，前端用本地接收时间做陈旧度判断。
+ * 原始采样流（subsegment_sample）仅中转给对方选手，不下发前端。
+ * 详见 ignored/需求-subsegment实时时间差追踪与前端接入.md。
+ */
+export interface SrvSubsegmentGap {
+  type: "subsegment_gap";
+  round_id: string;
+  /** 合集内关卡序号（0 起，双方一致；与 seq 一起定位唯一平面） */
+  level_index: number;
+  /** 采样方在该关内的采样序号（0 起，约每秒 +1） */
+  seq: number;
+  /** 采样归属方（平面是谁放的） */
+  seat: SeatName;
+  /** 采样方计时器时间线上到达该点的时刻（毫秒） */
+  sample_ms: number;
+  /** 穿越方（谁碰到了这个平面） */
+  hit_seat: SeatName;
+  /** 穿越方计时器时间线上到达该点的时刻（毫秒） */
+  hit_ms: number;
+  /** hit_ms − sample_ms：>0 = 穿越方落后 */
+  gap_ms: number;
+}
+/**
+ * 选手实时计时中转（每秒一条；仅裁判与全体导播收到，选手双方互不感知）。
+ * 内容取自选手端真实计时器（TwilightTimer，与官方计分同源）当前读数：
+ * total_ms = 回合累计（已完成关之和 + 当前关进行中），segment_ms = 当前分段
+ * 进行时长（自该关加载沿起算）。回合活跃期间持续（含加载 / 出生阶段），
+ * 回合中裁判/导播连入时握手补发双方最近一条；回合结束服务端即清空。
+ * 消息无时间戳，陈旧度用本地接收时间判断。原始上报（C→S live_time）
+ * 仅选手发送，前端不构造。
+ * 详见 ignored/需求-live_time实时计时中转.md。
+ */
+export interface SrvLiveTime {
+  type: "live_time";
+  seat: SeatName;
+  round_id: string;
+  /** 该选手当前所在合集关卡（0 基，双方索引一致） */
+  level_index: number;
+  /** 回合累计毫秒 */
+  total_ms: number;
+  /** 当前分段进行时长（毫秒） */
+  segment_ms: number;
+  /** 现实/墙钟累计（毫秒）；选手端提供方支持 Real Time 时携带，可能为 null */
+  real_time_ms?: number | null;
+}
+/**
+ * 选手 UTC 时间戳中转（连接后按固定间隔；仅裁判与全体导播收到，选手互不感知）。
+ * 服务端按席暂存最近一条，裁判/导播连入时握手补发双方；用于时钟偏移/同步显示。
+ * 原始上报（C→S utc_timestamp）仅选手发送，裁判/导播前端只消费。
+ */
+export interface SrvUtcTimestamp {
+  type: "utc_timestamp";
+  seat: SeatName;
+  /** Unix UTC 毫秒时间戳 */
+  utc_ms: number;
 }
 export interface SrvRoundResult {
   type: "round_result";
@@ -314,26 +465,52 @@ export interface SrvDraftState {
   type: "draft_state";
   state: Record<string, unknown>;
 }
+
+/**
+ * 服务端广播给同账号其他导播连接的指令（原样转发 ClientDirectorCommand 的 action+payload）。
+ * 导播控制台发 director_command → 后端广播 SrvDirectorCmd 给同 match 同 account_id 的其他 DIRECTOR 连接。
+ *
+ * 另含服务端主动下发的 state_sync（连接回放）：DIRECTOR 连接 auth_ok 后若有
+ * 状态暂存，补发最近的场景/倒计时/配置，payload：
+ *   { scene: string | null,
+ *     soon: { target_ms, started_at, paused_at, now_ms }（服务器毫秒时间戳，
+ *            now_ms 供前端做时钟偏移校正；started_at 已扣暂停时长），
+ *     config: { hlsA, hlsB, embedA, embedB } }
+ */
+export interface SrvDirectorCmd {
+  type: "director_cmd";
+  action: string;
+  payload: Record<string, unknown>;
+}
 export interface SrvError {
   type: "error";
   code: number;
   msg: string;
 }
 
+export interface SrvStreamLinksUpdate { type: "stream_links_update"; payload: StreamLinks; }
+
 export type ServerMessage =
+  | SrvStreamLinksUpdate
   | SrvAuthOk
   | SrvAuthError
+  | SrvDisplaced
   | SrvChat
   | SrvSystem
   | SrvReadyState
+  | SrvPreloadState
   | SrvSeatState
   | SrvPhaseChange
   | SrvCountdownTick
   | SrvCountdownAbort
+  | SrvPickAnnounced
   | SrvRoundStart
   | SrvRoundStartedBroadcast
   | SrvPlayerStatus
   | SrvLevelTimeUpdate
+  | SrvSubsegmentGap
+  | SrvLiveTime
+  | SrvUtcTimestamp
   | SrvRoundResult
   | SrvCumulativeScore
   | SrvMatchEnd
@@ -341,4 +518,5 @@ export type ServerMessage =
   | SrvCounterAlert
   | SrvVerdictEdit
   | SrvDraftState
+  | SrvDirectorCmd
   | SrvError;

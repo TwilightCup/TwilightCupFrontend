@@ -1,20 +1,45 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { useI18n } from "vue-i18n";
 import { useAuthStore } from "@/stores/auth";
 import { useDirectorStore } from "@/stores/director";
+import { useStreamLinksStore, pickStreamLinks } from "@/stores/streamLinks";
+import { StreamLinkDraft } from "@/utils/streamLinkDraft";
 import RoleSwitcher from "@/components/RoleSwitcher.vue";
 import AccountMenu from "@/components/AccountMenu.vue";
+import ColorField from "@/components/ColorField.vue";
+import DirectorSpeedrunInfo from "@/components/DirectorSpeedrunInfo.vue";
+import VictoryResult from "@/scenes/victory/VictoryResult.vue";
+import StreamFrame from "@/scenes/match/StreamFrame.vue";
+import SeiStream from "@/scenes/match/SeiStream.vue";
+import { usePanelVisibility } from "@/scenes/composables/usePanelVisibility";
+import { PlaybackRecovery } from "@/scenes/align/playbackRecovery";
+import { alignEngine } from "@/scenes/align/useFrameAlign";
 import AuthFailMask from "@/components/AuthFailMask.vue";
-import { AttemptStatus, PlayerStatus } from "@/api/types";
-import { formatMs, phaseInfo } from "@/utils/format";
+import { requestSpeedrunRefresh } from "@/api/speedrun";
+import { AttemptStatus, MatchPhase } from "@/api/types";
+import { formatMs, formatUtcTime, phaseInfo, playerStatusInfo, preloadTagInfo, shortTime } from "@/utils/format";
 import {
-  getCurrentScene,
-  setCurrentScene,
+  DEFAULT_SCENE,
+  isSceneKey,
+  readStoredScene,
+  writeStoredScene,
   type SceneKey,
 } from "@/scenes/stage/useStageScene";
+import {
+  DEFAULT_THEME_A,
+  DEFAULT_THEME_B,
+  useDirectorConfig,
+  type DirectorConfig,
+} from "@/scenes/composables/useDirectorConfig";
+import {
+  DEFAULT_SCENE_BACKGROUND,
+  SCENE_BACKGROUND_OPTIONS,
+  normalizeSceneBackground,
+  type SceneBackgroundKey,
+} from "@/scenes/composables/useSceneBackgrounds";
 
 const { t } = useI18n();
 const auth = useAuthStore();
@@ -23,12 +48,18 @@ const route = useRoute();
 const router = useRouter();
 
 const phaseLabel = computed(() => phaseInfo(director.phase).label);
+/** 已结束比赛：导播控制台只读；除场景切换（纯展示控制）外，配置编辑/倒计时等舞台操控均锁定。 */
+const readOnly = computed(() => director.matchEnded);
 
-function statusOf(side: "A" | "B"): { label: string; done: boolean; dead: boolean } {
-  const s = director.playerOf(side).status;
-  if (s === PlayerStatus.COMPLETED) return { label: t("playerStatus.completed"), done: true, dead: false };
-  if (s === PlayerStatus.FORFEITED) return { label: t("playerStatus.forfeited"), done: false, dead: true };
-  return { label: t("matchStatus.running"), done: false, dead: false };
+/** 选手状态标签（离线优先，口径同裁判端 PlayerStatusCard）：离线时状态标签让位为「未连接」 */
+function sideStatusInfo(side: "A" | "B"): ReturnType<typeof playerStatusInfo> {
+  const online = side === "A" ? director.aOnline : director.bOnline;
+  if (!online) return { label: t("playerStatus.offline"), type: "info" };
+  return playerStatusInfo(director.playerOf(side).status);
+}
+
+function sideOnline(side: "A" | "B"): boolean {
+  return side === "A" ? director.aOnline : director.bOnline;
 }
 
 function progText(side: "A" | "B"): string {
@@ -53,6 +84,11 @@ function bestMs(side: "A" | "B"): number | null {
   return arr.length ? Math.min(...arr) : null;
 }
 
+/** 日志时间戳：后端 ISO → 本地 HH:MM:SS；本地已格式化的原样显示 */
+function fmtTs(ts: string): string {
+  return shortTime(ts) || ts;
+}
+
 async function copyUrl(url: string): Promise<void> {
   if (!url) {
     ElMessage.warning(t("directorView.overlayNotReady"));
@@ -66,28 +102,412 @@ async function copyUrl(url: string): Promise<void> {
   }
 }
 
-/** 直播画面链接列表（叠加层 + 三个场景页 + 合并舞台） */
-const sceneLinks = computed(() => [
-  { key: "overlay", label: t("directorView.sceneOverlay"), url: director.sceneUrls.overlay },
-  { key: "matchDetail", label: t("directorView.sceneMatch"), url: director.sceneUrls.matchDetail },
-  { key: "mappool", label: t("directorView.sceneMappool"), url: director.sceneUrls.mappool },
-  { key: "bracket", label: t("directorView.sceneBracket"), url: director.sceneUrls.bracket },
-]);
+/** 手动重新拉取 speedrun.com：清前后端缓存并通知已挂载的榜单/PB 消费方刷新。 */
+function refreshSpeedrun(): void {
+  requestSpeedrunRefresh();
+  ElMessage.success(t("directorView.speedrunRefreshDone"));
+}
 
-/** 合并舞台：单 OBS 源承载全部场景（推荐挂这一个） */
-const stageUrl = computed(() => director.sceneUrls.stage);
+// ---- 共享直播地址：服务器保存，编辑草稿独立于正在播放的配置 ----
+const { config: cfgLocal, load: loadCfg, save: saveCfg } = useDirectorConfig();
+const streamLinks = useStreamLinksStore();
+const cfgConfig = computed(() => ({ ...cfgLocal, ...streamLinks.linksFor(director.matchId ?? "", cfgLocal) }));
+const streamDraft = reactive(new StreamLinkDraft());
+const legacyLinks = ref(pickStreamLinks({}));
+const canImportLinks = computed(() => streamLinks.loaded && streamLinks.version === 0 && Object.values(legacyLinks.value).some(Boolean));
+watch(() => [streamLinks.matchId, streamLinks.version, streamLinks.loaded], () => {
+  if (streamLinks.loaded && streamLinks.matchId === director.matchId && !streamLinks.saving)
+    streamDraft.load(streamLinks.values, streamLinks.version);
+});
+/** 场景配置下拉的本地副本：打开时从当前配置回填，保存才写 cfgForm / localStorage */
+const sceneThemeA = ref(DEFAULT_THEME_A);
+const sceneThemeB = ref(DEFAULT_THEME_B);
+/** 背景切换下拉的本地副本：打开时从当前配置回填，保存才写 cfgForm / localStorage */
+const sceneBackground = ref<SceneBackgroundKey>(DEFAULT_SCENE_BACKGROUND);
+/** 是否有颜色选择器覆盖层打开（用于临时撑高下拉，保证覆盖层完整显示） */
+const sceneCfgPickerOpen = ref(false);
+let sceneCfgOpenCount = 0;
+function onColorPickerOpenChange(open: boolean): void {
+  sceneCfgOpenCount += open ? 1 : -1;
+  sceneCfgPickerOpen.value = sceneCfgOpenCount > 0;
+}
+function onSceneCfgVisibleChange(visible: boolean): void {
+  if (!visible) {
+    sceneCfgOpenCount = 0;
+    sceneCfgPickerOpen.value = false;
+    return;
+  }
+  sceneThemeA.value = cfgForm.themeA || cfgConfig.value.themeA || DEFAULT_THEME_A;
+  sceneThemeB.value = cfgForm.themeB || cfgConfig.value.themeB || DEFAULT_THEME_B;
+  sceneBackground.value = normalizeSceneBackground(
+    cfgForm.background || cfgConfig.value.background || DEFAULT_SCENE_BACKGROUND,
+  );
+}
+/** 非链接展示控制的本地副本；四个共享地址由 streamDraft 管理。 */
+const cfgForm = reactive<DirectorConfig>({
+  hlsA: "",
+  hlsB: "",
+  embedA: "",
+  embedB: "",
+  hideA: false,
+  hideB: false,
+  refreshA: 0,
+  refreshB: 0,
+  alignA: true,
+  alignB: true,
+  decoupled: false,
+  delayA: 0,
+  delayB: 0,
+  delayDiff: 0,
+  themeA: DEFAULT_THEME_A,
+  themeB: DEFAULT_THEME_B,
+  background: DEFAULT_SCENE_BACKGROUND,
+});
+const cfgFields: { key: "hlsA" | "hlsB" | "embedA" | "embedB"; label: string }[] = [
+  { key: "hlsA", label: "scenes.edit.hlsA" },
+  { key: "hlsB", label: "scenes.edit.hlsB" },
+  { key: "embedA", label: "scenes.edit.embedA" },
+  { key: "embedB", label: "scenes.edit.embedB" },
+];
+// matchId 在 auth_ok 后才有；连接建立即载入该场已存配置
+watch(
+  () => director.matchId,
+  (id) => {
+    if (!id) return;
+    loadCfg(id, {});
+    Object.assign(cfgForm, cfgConfig.value);
+    legacyLinks.value = pickStreamLinks(cfgLocal);
+    streamDraft.load(streamLinks.linksFor(id), streamLinks.version, true);
+  },
+  { immediate: true },
+);
+async function saveConfig(): Promise<void> {
+  if (!director.matchId || readOnly.value) return;
+  if (await streamLinks.save({ ...streamDraft.values }, streamDraft.version)) {
+    streamDraft.load(streamLinks.values, streamLinks.version, true);
+    ElMessage.success(t("streamLinks.saved"));
+  } else ElMessage.error(streamLinks.conflict ? t("streamLinks.conflict") : streamLinks.error || t("streamLinks.saveFailed"));
+}
+async function reloadLinkDraft(): Promise<void> {
+  await streamLinks.refresh();
+  if (streamLinks.loaded && !streamLinks.error) streamDraft.load(streamLinks.values, streamLinks.version, true);
+}
+async function importLegacyLinks(): Promise<void> {
+  if (!canImportLinks.value || readOnly.value) return;
+  const mid = director.matchId, legacy = { ...legacyLinks.value };
+  try { await ElMessageBox.confirm(t("streamLinks.importConfirm"), t("streamLinks.importTitle"), { type: "warning" }); }
+  catch { return; }
+  if (director.matchId !== mid || !canImportLinks.value || readOnly.value) return;
+  streamDraft.load(legacy, 0, true); streamDraft.dirty = true;
+  await saveConfig();
+}
+
+/** 保存场景外观（选手主题色 + 背景样式）：落库 + WS 实时下发已打开的舞台/预览 */
+function saveSceneCfg(): void {
+  if (!director.matchId) return;
+  const patch = {
+    themeA: sceneThemeA.value,
+    themeB: sceneThemeB.value,
+    background: normalizeSceneBackground(sceneBackground.value),
+  };
+  Object.assign(cfgForm, patch);
+  saveCfg(director.matchId, patch);
+  director.sendDirectorCommand("config_update", { config: patch });
+  ElMessage.success(t("directorView.sceneCfgSaved"));
+}
+
+/** 直播画面实时控制：改动即时保存并广播（不等「保存」按钮） */
+function pushConfig(patch: Partial<DirectorConfig>): void {
+  if (!director.matchId) return;
+  saveCfg(director.matchId, patch);
+  director.sendDirectorCommand("config_update", { config: patch });
+}
+
+/** 显示开关（on = 显示画面，off = 隐藏成等待信号占位） */
+const showA = computed({
+  get: () => !cfgForm.hideA,
+  set: (v: boolean) => {
+    cfgForm.hideA = !v;
+    pushConfig({ hideA: !v });
+  },
+});
+const showB = computed({
+  get: () => !cfgForm.hideB,
+  set: (v: boolean) => {
+    cfgForm.hideB = !v;
+    pushConfig({ hideB: !v });
+  },
+});
+
+// 控制台监控预览：对齐开且有 HLS 地址 → SeiStream（使用本页引擎）；
+// 否则使用 MSE StreamFrame
+const previewAlignedA = computed(() => !cfgConfig.value.decoupled && !!cfgConfig.value.alignA && !!cfgConfig.value.hlsA);
+const previewAlignedB = computed(() => !cfgConfig.value.decoupled && !!cfgConfig.value.alignB && !!cfgConfig.value.hlsB);
+const showStreamDebug = ref(true);
+const anchorDelta = ref<number | undefined>(15);
+const wallNow = ref(Date.now());
+let wallTimer: ReturnType<typeof setInterval> | undefined;
+const playbackRecovery = new PlaybackRecovery();
+const displayedAnchor = computed(() => director.alignRole === "publisher"
+  ? director.resetPending ? alignEngine.sync.authorityUs : alignEngine.tUs.value
+  : alignEngine.sync.authorityUs);
+function clockText(us: number | null): string {
+  if (us == null) return "—";
+  const date = new Date(us / 1000);
+  return `${date.toLocaleString()} .${String(date.getMilliseconds()).padStart(3, "0")}`;
+}
+function applyAnchor(): void {
+  resyncStreams();
+}
+
+// 拉流失败只内联显示在 A/B 位置（指标条/画面占位），不弹窗打扰
+
+watch(() => JSON.stringify([cfgConfig.value.decoupled, cfgConfig.value.alignA, cfgConfig.value.hlsA, cfgConfig.value.alignB, cfgConfig.value.hlsB]), () => {
+  alignEngine.setRequiredSides((["A", "B"] as const).filter(side =>
+    !cfgConfig.value.decoupled && (side === "A" ? cfgConfig.value.alignA && !!cfgConfig.value.hlsA : cfgConfig.value.alignB && !!cfgConfig.value.hlsB)));
+}, { immediate: true });
+
+// 连通性指标条（维度对齐 SEIInjector 冒烟工具，刷新由 alignEngine.health ~2.5Hz）
+function healthText(side: "A" | "B"): string {
+  if (cfgConfig.value.decoupled) return "脱钩模式 · 独立直播，不等待对齐";
+  const err = alignEngine.streamError[side];
+  const on = side === "A" ? cfgConfig.value.alignA : cfgConfig.value.alignB;
+  const url = side === "A" ? cfgConfig.value.hlsA : cfgConfig.value.hlsB;
+  if (err) return `拉不到流 · ${err} ·（${url}）`;
+  if (!on || !url) return "对齐未启用（MSE 播放）";
+  const h = alignEngine.health[side];
+  // 关键诊断：倍速(>1=在追/快进)/落后秒数/可上屏队列/重同步次数
+  const pb = alignEngine.playback;
+  // 接收静默只看单调到达年龄；SEI 时间差含传输延迟和设备钟偏差。
+  const stale = (h.arrivalAgeMs ?? 0) / 1000;
+  const seiAge = h.frontRtUs == null ? "—" : ((Date.now() * 1000 - h.frontRtUs) / 1e6).toFixed(1);
+  const sync = alignEngine.sync;
+  const errMs = sync.targetErrorUs[side];
+  const timing = ` · ${sync.role}/${sync.state}/${sync.catchup} · ${sync.reason} · 重锚${sync.seekCount}次/最近计划跳${(sync.lastJumpUs / 1e6).toFixed(2)}s(${sync.lastSeekReason || "—"}) · T误差${errMs == null ? "—" : (errMs / 1000).toFixed(1)}ms · AB${sync.pairErrorUs == null ? "—" : (sync.pairErrorUs / 1000).toFixed(1)}ms`;
+  const diag = timing + ` · ×${pb.speed.toFixed(2)} · 追${pb.behindS.toFixed(1)}s · 队列${h.queueLen} · 重${h.resyncs}${h.resyncGap ? `段${h.resyncGap}` : ""}${h.resyncErr ? `错${h.resyncErr}` : ""}`;
+  // 解码流水线：原始环/解码游标/封装/解码累计输出（定位"队列0/没画面"）
+  const pipe = ` · raw${h.rawLen}/pos${h.decPos}/${h.enc || "-"}/出${h.decOutput}/qc${h.qc}/pn${h.pendCfg ? "1" : "0"} · 接收静默${h.arrivalAgeMs == null ? "—" : stale.toFixed(1)}s · SEI时间差${seiAge}s`;
+  if (h.frames === 0 && !h.hasContent) {
+    return h.segs > 0
+      ? `已收到 ${h.segs} 段但无 SEI 时间戳——该流需用 SEI Timestamp 编码器推`
+      : `等待内容 · 未从 media 列表取到分片 · ${url}`;
+  }
+  if (h.frames > 0 && !alignEngine.presented[side]) {
+    // 攒缓冲阶段也带诊断：看「追」是否在缩（能上屏）、队列是否有帧、主循环是否活
+    const head = stale > 4 ? `⚠ 接收静默 ${stale.toFixed(0)}s` : "⏳ 攒缓冲中";
+    return `${head}（总 ${h.frames} 帧 · 活 ${h.liveFps} fps）${diag}${pipe}`;
+  }
+  // 实时 fps 用近 1s 速率（liveFps），累计总数用 帧；信号中断时近 1s 速率归 0，
+  // 不回退历史中位数 fps（否则流已死仍显示"192 fps · 已就绪"误导导播）
+  const fps = (stale > 4 ? 0 : h.liveFps || 0).toFixed(0);
+  let s = `${h.codec.toUpperCase()} · ${fps} fps · 总${h.frames}帧 · NTP ${h.ntp}/${h.frames}`;
+  if (stale > 4) s = `⚠ 接收静默 ${stale.toFixed(0)}s · ` + s;
+  if (h.droppedSeq) s += ` · 丢帧 ${h.droppedSeq}`;
+  if (h.missing) s += ` · 缺SEI ${h.missing}`;
+  if (h.segAuth) s += ` · ⚠鉴权拒 ${h.segAuth}`;
+  if (h.segGaveUp) s += ` · 缺段 ${h.segGaveUp}`;
+  if (h.segRetries) s += ` · 补段中 ${h.segRetries}`;
+  s += ` · K ${h.key}`;
+  s += diag;
+  s += pipe;
+  return s;
+}
+function healthCls(side: "A" | "B"): "h-ok" | "h-err" | "" {
+  if (cfgConfig.value.decoupled) return "";
+  if (alignEngine.streamError[side]) return "h-err";
+  const on = side === "A" ? cfgConfig.value.alignA : cfgConfig.value.alignB;
+  const url = side === "A" ? cfgConfig.value.hlsA : cfgConfig.value.hlsB;
+  if (!on || !url) return "";
+  return alignEngine.health[side].frames > 0 ? "h-ok" : "";
+}
+
+/** A/B 信息行显示本控制台的同步、解码和呈现状态。舞台不参与主 T 选举。 */
+function readyState(side: "A" | "B"): { cls: string; label: string } {
+  if (cfgConfig.value.decoupled) return { cls: "off", label: "独立播放" };
+  const on = side === "A" ? cfgConfig.value.alignA : cfgConfig.value.alignB;
+  const url = side === "A" ? cfgConfig.value.hlsA : cfgConfig.value.hlsB;
+  if (!on || !url) return { cls: "off", label: "未启用" };
+  if (alignEngine.sync.waitingSides.includes(side)) return { cls: "wait", label: "等待信号 / 恢复对齐中" };
+  if (alignEngine.sync.authorityUs == null) return { cls: "wait", label: director.alignRole === "publisher" ? "主时钟攒缓冲中" : "等待主时钟" };
+  if (alignEngine.sync.state === "stale") return { cls: "wait", label: "同步失联，已冻结" };
+  if (alignEngine.sync.state !== "playing") return { cls: "wait", label: "等待共同帧" };
+  if (alignEngine.streamError[side]) return { cls: "err", label: "拉不到流" };
+  const h = alignEngine.health[side];
+  if (h.frames === 0 && !h.hasContent) return { cls: "wait", label: "无内容" };
+  if (!alignEngine.presented[side]) return { cls: "wait", label: "攒缓冲中" };
+  return { cls: "ok", label: "已就绪" };
+}
+const readyA = computed(() => readyState("A"));
+const readyB = computed(() => readyState("B"));
+
+/** 对齐模式重锚后刷新；脱钩模式直接重拉两路流。 */
+function resyncStreams(): void {
+  if (readOnly.value || !director.matchId) return;
+  if (cfgConfig.value.decoupled) { reloadStreams(); return; }
+  if (anchorDelta.value == null) return;
+  director.applyAnchorDelay(anchorDelta.value, reloadStreams);
+}
+function reloadStreams(): boolean {
+  const patch = {
+    refreshA: Math.max(cfgForm.refreshA, cfgConfig.value.refreshA) + 1,
+    refreshB: Math.max(cfgForm.refreshB, cfgConfig.value.refreshB) + 1,
+  };
+  if (!director.sendDirectorCommand("config_update", { config: patch })) return false;
+  Object.assign(cfgForm, patch);
+  saveCfg(director.matchId!, patch);
+  // Synchronous restart prevents an acknowledgement from old decoder buffers.
+  alignEngine.restartStream("A", patch.refreshA);
+  alignEngine.restartStream("B", patch.refreshB);
+  return true;
+}
+
+/** 计时显示延迟（秒）：把比赛详情场景的计时器 / 偏差条回放对齐有延迟的
+ *  选手画面；改动即时保存并广播（与显示开关同通道，不等「保存」按钮） */
+function pushDelay(key: "delayA" | "delayB" | "delayDiff"): void {
+  if (!director.matchId) return;
+  pushConfig({ [key]: cfgForm[key] } as Partial<DirectorConfig>);
+}
+
+/** 对齐开关（alignA/B）：开 = 舞台/控制台该侧 SEI 帧级对齐 + 计时锚定虚拟 T；关 = 回落 MSE + 手动 delay */
+function toggleAlign(key: "alignA" | "alignB"): void {
+  if (!director.matchId) return;
+  pushConfig({ [key]: cfgForm[key] } as Partial<DirectorConfig>);
+}
+
+/** 保留每侧对齐/延迟配置，退出脱钩时恢复。 */
+function toggleDecoupled(): void {
+  if (!director.matchId || readOnly.value) return;
+  cfgForm.decoupled = !cfgConfig.value.decoupled;
+  pushConfig({ decoupled: cfgForm.decoupled });
+}
+
+// 其他控制台（同账号另一浏览器）保存的配置广播过来：并入本地面板与舞台链接
+watch(
+  () => director.remoteConfig,
+  (c) => {
+    if (!c || !director.matchId) return;
+    saveCfg(director.matchId, c);
+    Object.assign(cfgForm, c);
+  },
+);
+
+/** 合并舞台：单 OBS 源承载全部场景（叠加信息 / 比赛详情 / 图池 / 赛程图）。
+ *  链接携带非链接外观配置；四个流地址由舞台从服务器读取。 */
+const CFG_URL_KEYS: Partial<Record<keyof DirectorConfig, string>> = {
+  alignA: "align_a",
+  alignB: "align_b",
+  decoupled: "decoupled",
+  themeA: "theme_a",
+  themeB: "theme_b",
+  background: "background",
+};
+const stageUrl = computed(() => withCfgParams(directorPageUrl("stage.html")));
+
+/** 场景页链接：确保即使 auth_ok 前 matchId 尚未写入 store，也带上当前路由的场次。
+ *  否则舞台可能连到同账号的另一场，收不到本控制台的场景广播。 */
+function directorPageUrl(page: string): string {
+  const base = director.scenePageUrl(page);
+  if (!base) return "";
+  const url = new URL(base);
+  if (!url.searchParams.get("match")) {
+    const sid = String(route.params.matchId ?? "");
+    if (sid) url.searchParams.set("match", sid);
+  }
+  return url.toString();
+}
+
+/** 场景页链接只附非链接展示配置；直播地址从服务器读取。 */
+function withCfgParams(base: string): string {
+  if (!base) return "";
+  const entries = Object.entries(CFG_URL_KEYS) as [keyof DirectorConfig, string][];
+  const qs = entries
+    .filter(([k]) => cfgConfig.value[k] !== "")
+    .map(([k, p]) => `${p}=${encodeURIComponent(String(cfgConfig.value[k]))}`)
+    .join("&");
+  return qs ? `${base}&${qs}` : base;
+}
 
 // ---- 场景切换（写 localStorage → 合并舞台跨标签监听切换）----
 const sceneBtnLabels: Record<SceneKey, string> = {
-  overlay: "directorView.sceneBtnOverlay",
+  categoryinfo: "directorView.sceneBtnCategoryinfo",
   match: "directorView.sceneBtnMatch",
   mappool: "directorView.sceneBtnMappool",
   bracket: "directorView.sceneBtnBracket",
+  soon: "directorView.sceneBtnSoon",
+  victory: "directorView.sceneBtnVictory",
 };
-const activeScene = ref<SceneKey>(getCurrentScene());
+const activeScene = ref<SceneKey>(DEFAULT_SCENE);
+// 同源缓存初始化：WS 尚未回放/未连接时先对齐本地上次场景（仅作控制台显示，
+// 舞台仍以 state_sync / storage / WS 为准）
+watch(
+  [() => director.accountId, () => director.matchId],
+  ([acc, mid]) => {
+    if (!acc || !mid || director.currentSceneCmd) return;
+    const stored = readStoredScene(acc, mid);
+    if (stored) activeScene.value = stored;
+  },
+  { immediate: true },
+);
 function onSwitchScene(key: SceneKey): void {
   activeScene.value = key;
-  setCurrentScene(key);
+  // 同源兜底（键按账号+比赛隔离）：同一浏览器/同一 storage 分区跨标签即时同步；
+  // WS 仍是跨进程主通道。
+  const sid = String(route.params.matchId ?? "");
+  writeStoredScene(director.accountId, director.matchId || sid, key);
+  director.sendDirectorCommand("switch_scene", { scene: key }); // WS 广播（跨进程主通道）
+}
+// WS 侧场景指令（state_sync 回放 / 其他控制台切换）→ 本地 radio 跟随
+watch(
+  () => director.currentSceneCmd,
+  (s) => {
+    if (isSceneKey(s)) activeScene.value = s;
+  },
+);
+
+const monitorEl = ref<HTMLDivElement | null>(null);
+const monitorVisible = usePanelVisibility(monitorEl);
+
+// ---- Coming Soon 倒计时控制（WS 广播 → 舞台 SoonScene 跨进程同步）----
+
+/** 读 director store 的 soonCmdState（WS 广播的权威状态） */
+const soonTargetSec = computed({
+  get: () => Math.round(director.soonCmdState.targetMs / 1000),
+  set: (v: number) => {
+    const newMs = v * 1000;
+    // 同步本地 + WS 发送
+    director.soonCmdState.targetMs = newMs;
+    director.sendDirectorCommand("soon_set_target", { target_ms: newMs });
+  },
+});
+
+/** 剩余毫秒 */
+const soonRemaining = computed(() => {
+  const s = director.soonCmdState;
+  if (s.startedAt === null) return s.targetMs;
+  const base = s.pausedAt ?? Date.now();
+  const elapsed = base - s.startedAt;
+  return Math.max(0, s.targetMs - elapsed);
+});
+
+/** 状态文字 */
+const soonStatusText = computed(() => {
+  const s = director.soonCmdState;
+  if (s.startedAt === null) return t("directorView.soonIdle");
+  if (s.pausedAt !== null) return t("directorView.soonPaused");
+  if (soonRemaining.value <= 0) return t("directorView.soonFinished");
+  return t("directorView.soonRunning");
+});
+
+function soonStart(): void {
+  director.sendDirectorCommand("soon_start");
+}
+
+function soonPause(): void {
+  director.sendDirectorCommand("soon_pause");
+}
+
+function soonReset(): void {
+  director.sendDirectorCommand("soon_reset");
 }
 
 function logout(): void {
@@ -97,6 +517,19 @@ function logout(): void {
 }
 
 onMounted(() => {
+  wallTimer = setInterval(() => {
+    wallNow.value = Date.now();
+    const receiving = (["A", "B"] as const).every(side => {
+      const h = alignEngine.health[side];
+      return h.arrivalAgeMs != null && h.arrivalAgeMs < 4000 && h.frames > 0;
+    });
+    if (playbackRecovery.check(performance.now(),
+      [alignEngine.sync.presentedRt.A, alignEngine.sync.presentedRt.B],
+      receiving && director.canAdjustAnchor && !readOnly.value && !!director.matchId,
+      alignEngine.localRecoveryPending(performance.now()))) {
+      director.recoverPlayback(reloadStreams);
+    }
+  }, 100);
   if (!auth.isLoggedIn) {
     router.replace("/login");
     return;
@@ -109,6 +542,7 @@ onMounted(() => {
   director.connectWithAuth(sid);
 });
 onUnmounted(() => {
+  if (wallTimer) clearInterval(wallTimer);
   director.disconnect();
 });
 </script>
@@ -116,20 +550,164 @@ onUnmounted(() => {
 <template>
   <div class="director-view">
     <header class="top">
-      <div class="brand">
-        🎬 {{ $t("directorView.brand") }}
-        <el-tag size="small" type="warning" effect="dark">{{ $t("directorView.readOnlyTag") }}</el-tag>
+      <div class="top-side left">
+        <div class="brand">
+          🎬 {{ $t("directorView.brand") }}
+          <el-tag v-if="readOnly" size="small" type="warning" effect="dark">{{ $t("directorView.readOnlyTag") }}</el-tag>
+        </div>
+        <el-button size="small" :disabled="readOnly" @click="refreshSpeedrun">
+          {{ $t("directorView.refreshSpeedrun") }}
+        </el-button>
       </div>
-      <div class="info">
-        <el-tag :type="phaseLabel ? 'primary' : 'info'" effect="dark" size="small">
-          {{ phaseLabel }}
-        </el-tag>
-        <span class="conn">{{ director.connStatus }}</span>
+
+      <!-- 场景切换（合并舞台）：居中；已结束比赛也保留切换（纯展示控制，不改比赛状态） -->
+      <el-radio-group
+        :model-value="activeScene"
+        size="small"
+        class="scene-switch"
+        @update:model-value="(v: string | number | boolean) => onSwitchScene(v as SceneKey)"
+      >
+        <el-radio-button
+          v-for="key in (['soon','mappool','categoryinfo','match','bracket','victory'] as SceneKey[])"
+          :key="key"
+          :value="key"
+        >
+          {{ $t(sceneBtnLabels[key]) }}
+        </el-radio-button>
+      </el-radio-group>
+
+      <div class="top-side right">
+        <div class="info">
+          <el-tag :type="phaseLabel ? 'primary' : 'info'" effect="dark" size="small">
+            {{ phaseLabel }}
+          </el-tag>
+          <span class="conn">{{ director.connStatus }}</span>
+        </div>
+
+        <!-- 场景配置下拉：调整场景外观（当前为选手主题色），保存后经 WS 实时下发 -->
+        <el-dropdown
+          trigger="click"
+          placement="bottom-end"
+          :disabled="readOnly"
+          :persistent="false"
+          @visible-change="onSceneCfgVisibleChange"
+        >
+          <el-button size="small" :disabled="readOnly">{{ $t("directorView.sceneCfgTitle") }}</el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <div class="scene-cfg-dd" :class="{ 'has-open-picker': sceneCfgPickerOpen }">
+                <div class="cfg-section-title">{{ $t("directorView.sceneCfgBackgroundTitle") }}</div>
+                <el-select
+                  v-model="sceneBackground"
+                  size="small"
+                  class="bg-select"
+                  :disabled="!director.matchId || readOnly"
+                  :teleported="false"
+                >
+                  <el-option
+                    v-for="opt in SCENE_BACKGROUND_OPTIONS"
+                    :key="opt.key"
+                    :value="opt.key"
+                    :label="$t(opt.labelKey)"
+                  />
+                </el-select>
+                <div class="cfg-section-title theme-title">{{ $t("directorView.sceneCfgThemeTitle") }}</div>
+                <div class="theme-row">
+                  <span class="theme-label">{{ $t("directorView.sceneCfgPlayerA") }}</span>
+                  <ColorField
+                    v-model="sceneThemeA"
+                    :label="$t('directorView.sceneCfgPlayerA')"
+                    :default-value="DEFAULT_THEME_A"
+                    :disabled="!director.matchId || readOnly"
+                    @open-change="onColorPickerOpenChange"
+                  />
+                  <span class="theme-label">{{ $t("directorView.sceneCfgPlayerB") }}</span>
+                  <ColorField
+                    v-model="sceneThemeB"
+                    :label="$t('directorView.sceneCfgPlayerB')"
+                    :default-value="DEFAULT_THEME_B"
+                    :disabled="!director.matchId || readOnly"
+                    @open-change="onColorPickerOpenChange"
+                  />
+                </div>
+                <div class="cfg-foot">
+                  <el-button
+                    size="small"
+                    type="primary"
+                    :disabled="!director.matchId || readOnly"
+                    @click="saveSceneCfg"
+                  >
+                    {{ $t("common.save") }}
+                  </el-button>
+                </div>
+              </div>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+
+        <!-- 共享链接：PUT 保存；服务器通知其他页面，舞台链接不携带地址副本 -->
+        <el-dropdown trigger="click" placement="bottom-end" :disabled="readOnly || streamLinks.saving">
+          <el-button size="small" :disabled="readOnly || streamLinks.saving">{{ $t("directorView.cfgTitle") }}</el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <div class="cfg-dd">
+                <div class="cfg-grid">
+                  <label v-for="f in cfgFields" :key="f.key" class="cfg-field">
+                    <span class="lbl">{{ $t(f.label) }}</span>
+                    <el-input
+                      :model-value="streamDraft.values[f.key]"
+                      @input="streamDraft.edit(f.key, $event)"
+                      size="small"
+                      :disabled="readOnly || streamLinks.saving"
+                      :placeholder="f.key.startsWith('hls') ? 'https://.../a.m3u8' : 'B站房间号/直播间链接 或 YouTube 直播链接（自动代理）'"
+                    />
+                  </label>
+                </div>
+                <div class="cfg-note">
+                  {{ streamLinks.unsupported ? $t('streamLinks.localOnly') : streamLinks.loaded ? $t('streamLinks.serverVersion', { version: streamLinks.version }) : $t('streamLinks.loading') }}
+                  <div v-if="streamLinks.error">{{ streamLinks.conflict ? $t('streamLinks.conflict') : streamLinks.error }}</div>
+                </div>
+                <div class="cfg-foot">
+                  <el-button size="small" :disabled="streamLinks.loading || streamLinks.saving" @click="reloadLinkDraft">{{ $t('streamLinks.reload') }}</el-button>
+                  <el-button v-if="canImportLinks" size="small" :disabled="readOnly || streamLinks.saving" @click="importLegacyLinks">{{ $t('streamLinks.import') }}</el-button>
+                  <el-button
+                    size="small"
+                    type="primary"
+                    :disabled="!director.matchId || readOnly || !streamLinks.loaded || streamLinks.unsupported || streamLinks.saving"
+                    :loading="streamLinks.saving"
+                    @click="saveConfig()"
+                  >
+                    {{ $t("streamLinks.saveServer") }}
+                  </el-button>
+                </div>
+                <!-- 合并舞台单源：根据比赛身份从服务器读取直播地址 -->
+                <div class="card-title stage-title">{{ $t("directorView.sceneTitle") }}</div>
+                <el-input
+                  :model-value="stageUrl || $t('directorView.sceneUnavailable')"
+                  readonly
+                  size="small"
+                  :disabled="!stageUrl"
+                >
+                  <template #append>
+                    <el-button size="small" :disabled="!stageUrl || readOnly" @click="copyUrl(stageUrl)">
+                      {{ $t("directorView.copyOverlayBtn") }}
+                    </el-button>
+                  </template>
+                </el-input>
+              </div>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+
+        <el-button size="small" @click="router.push('/director')">{{ $t("directorView.myMatchesBtn") }}</el-button>
+        <RoleSwitcher />
+        <AccountMenu @logout="logout" />
       </div>
-      <RoleSwitcher />
-      <el-button size="small" @click="router.push('/director')">{{ $t("directorView.myMatchesBtn") }}</el-button>
-      <AccountMenu @logout="logout" />
     </header>
+
+    <div v-if="readOnly" class="readonly-banner">
+      {{ $t("directorView.endedReadonly") }}
+    </div>
 
     <div
       v-if="['connecting', 'reconnecting'].includes(director.connStatus)"
@@ -144,119 +722,10 @@ onUnmounted(() => {
 
     <main class="main">
       <section class="col-left">
-        <!-- 比分 -->
-        <div class="card score-card">
-          <div class="score-side a" :class="{ dim: statusOf('A').dead }">
-            <div class="sname tc-a">{{ director.nameOf("A") }}</div>
-            <div class="snum">{{ director.winsA }}</div>
-            <div class="sstat">{{ statusOf("A").label }}</div>
-          </div>
-          <div class="vs">
-            <span v-if="director.matchWinner" class="winner">🏆{{ director.matchWinner }}</span>
-            <template v-else>:</template>
-          </div>
-          <div class="score-side b" :class="{ dim: statusOf('B').dead }">
-            <div class="sname tc-b">{{ director.nameOf("B") }}</div>
-            <div class="snum">{{ director.winsB }}</div>
-            <div class="sstat">{{ statusOf("B").label }}</div>
-          </div>
-        </div>
-
-        <!-- 当前回合 -->
         <div class="card">
-          <div class="card-title">{{ $t("directorView.currentRoundTitle") }}</div>
-          <template v-if="director.currentRound">
-            <div class="round-line">
-              <b>{{ director.currentRound.pick.code }}</b>
-              <span class="dim">{{ director.currentRound.pick.name }}</span>
-              <el-tag size="small" effect="plain">
-                {{ director.isMulti ? $t("pickType.multi") : $t("pickType.single") }}
-              </el-tag>
-            </div>
-            <div class="dim">
-              {{ phaseLabel }}
-              <span v-if="director.countdownRemaining != null" class="cd">
-                · {{ $t("directorView.countdownLabel", { n: director.countdownRemaining }) }}
-              </span>
-            </div>
-          </template>
-          <div v-else class="dim">{{ $t("directorView.noRoundYet") }}</div>
-        </div>
-
-        <!-- 进度 -->
-        <div class="card">
-          <div class="card-title">{{ $t("directorView.bothProgressTitle") }}</div>
-          <div class="prog-row">
-            <span class="who tc-a">A · {{ director.nameOf("A") }}</span>
-            <span>{{ progText("A") }}</span>
-            <span class="dim">{{ $t("directorView.bestTimeLabel", { time: formatMs(bestMs("A")) }) }}</span>
-          </div>
-          <div class="prog-row">
-            <span class="who tc-b">B · {{ director.nameOf("B") }}</span>
-            <span>{{ progText("B") }}</span>
-            <span class="dim">{{ $t("directorView.bestTimeLabel", { time: formatMs(bestMs("B")) }) }}</span>
-          </div>
-        </div>
-      </section>
-
-      <aside class="col-right">
-        <!-- 场景切换（合并舞台）：写 localStorage，舞台页跨标签监听 -->
-        <div class="card">
-          <div class="card-title">{{ $t("directorView.sceneSwitchTitle") }}</div>
-          <p class="hint">{{ $t("directorView.sceneSwitchHint") }}</p>
-          <el-radio-group
-            :model-value="activeScene"
-            size="small"
-            style="width: 100%; display: flex; flex-wrap: wrap; gap: 6px"
-            @update:model-value="(v: string | number | boolean) => onSwitchScene(v as SceneKey)"
-          >
-            <el-radio-button
-              v-for="key in (['overlay','match','mappool','bracket'] as SceneKey[])"
-              :key="key"
-              :value="key"
-            >
-              {{ $t(sceneBtnLabels[key]) }}
-            </el-radio-button>
-          </el-radio-group>
-        </div>
-
-        <!-- 直播画面链接（叠加层 + 场景页） -->
-        <div class="card">
-          <div class="card-title">{{ $t("directorView.sceneTitle") }}</div>
-          <p class="hint">{{ $t("directorView.sceneHint") }}</p>
-          <div class="scene-list">
-            <div v-for="s in sceneLinks" :key="s.key" class="scene-row">
-              <div class="scene-label">{{ s.label }}</div>
-              <el-input
-                :model-value="s.url || $t('directorView.sceneUnavailable')"
-                readonly
-                size="small"
-                :disabled="!s.url"
-              >
-                <template #append>
-                  <el-button size="small" :disabled="!s.url" @click="copyUrl(s.url)">
-                    {{ $t("directorView.copyOverlayBtn") }}
-                  </el-button>
-                </template>
-              </el-input>
-            </div>
-            <!-- 合并舞台：推荐挂这一个单源，导播按钮切场景 -->
-            <div class="scene-row stage-row">
-              <div class="scene-label">{{ $t("directorView.sceneStage") }}</div>
-              <el-input
-                :model-value="stageUrl || $t('directorView.sceneUnavailable')"
-                readonly
-                size="small"
-                :disabled="!stageUrl"
-              >
-                <template #append>
-                  <el-button size="small" :disabled="!stageUrl" @click="copyUrl(stageUrl)">
-                    {{ $t("directorView.copyOverlayBtn") }}
-                  </el-button>
-                </template>
-              </el-input>
-            </div>
-          </div>
+          <div class="card-title">speedrun.com · 当前项目</div>
+          <DirectorSpeedrunInfo v-if="auth.token && director.matchId" :key="director.matchId" />
+          <p v-else class="hint">等待比赛连接…</p>
         </div>
 
         <!-- 日志 -->
@@ -269,8 +738,345 @@ onUnmounted(() => {
               class="log-line"
               :class="m.kind"
             >
-              <span class="t">{{ m.ts }}</span>
+              <span class="t">{{ fmtTs(m.ts) }}</span>
               <span>{{ m.text }}</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="col-right">
+        <!-- Coming Soon 倒计时控制（仅待开始场景可用） -->
+        <div v-if="activeScene === 'soon' && !readOnly" class="card">
+          <div class="card-title">{{ $t("directorView.soonTitle") }}</div>
+          <p class="hint">{{ $t("directorView.soonHint") }}</p>
+          <div class="soon-row">
+            <span class="soon-label">{{ $t("directorView.soonLabel") }}</span>
+            <el-input-number
+              :model-value="soonTargetSec"
+              :min="10"
+              :max="3600"
+              :step="30"
+              size="small"
+              style="width: 120px"
+              @change="(v: number | undefined) => { if (v != null) soonTargetSec = v; }"
+            />
+            <span class="soon-status" :class="{ running: director.soonCmdState.startedAt !== null && director.soonCmdState.pausedAt === null && soonRemaining > 0 }">
+              {{ soonStatusText }}
+            </span>
+          </div>
+          <div class="soon-remaining" v-if="director.soonCmdState.startedAt !== null">
+            {{ Math.ceil(soonRemaining / 1000) }}s
+          </div>
+          <div class="soon-btns">
+            <el-button
+              size="small"
+              type="primary"
+              :disabled="soonRemaining <= 0 && director.soonCmdState.startedAt !== null"
+              @click="soonStart()"
+            >
+              {{ director.soonCmdState.pausedAt !== null ? $t("directorView.soonResume") : $t("directorView.soonStart") }}
+            </el-button>
+            <el-button
+              size="small"
+              :disabled="!director.soonCmdState.startedAt || director.soonCmdState.pausedAt !== null || soonRemaining <= 0"
+              @click="soonPause()"
+            >
+              {{ $t("directorView.soonPause") }}
+            </el-button>
+            <el-button
+              size="small"
+              @click="soonReset()"
+            >
+              {{ $t("directorView.soonReset") }}
+            </el-button>
+          </div>
+        </div>
+
+        <div v-if="activeScene === 'victory'" class="card">
+          <div class="card-title">{{ $t("directorView.sceneBtnVictory") }}</div>
+          <VictoryResult />
+        </div>
+
+        <!-- 选手画面监控：与舞台同源同配置实时预览（不受隐藏开关影响——先验证
+             画面加载正常，再开上方显示开关放上台；刷新按钮同时重拉预览与舞台） -->
+        <div class="card">
+          <div class="card-title monitor-title">
+            <span>{{ $t("directorView.previewTitle") }}</span>
+            <el-button
+              size="small"
+              :aria-expanded="showStreamDebug"
+              aria-controls="stream-debug-info"
+              @click="showStreamDebug = !showStreamDebug"
+            >
+              {{ $t(showStreamDebug ? "directorView.hideStreamDebug" : "directorView.showStreamDebug") }}
+            </el-button>
+          </div>
+          <p class="hint">{{ $t("directorView.previewHint") }}</p>
+          <!-- 两路显示独立控制；重新同步统一操作。 -->
+          <div class="cfg-ctl">
+            <div class="ctl-side">
+              <span class="lbl tc-a">A · {{ director.nameOf("A") }}</span>
+              <el-switch v-model="showA" size="small" :disabled="readOnly" />
+            </div>
+            <div class="ctl-side">
+              <span class="lbl tc-b">B · {{ director.nameOf("B") }}</span>
+              <el-switch v-model="showB" size="small" :disabled="readOnly" />
+            </div>
+          </div>
+          <div class="anchor-controls">
+            <el-button
+              size="small"
+              :type="cfgConfig.decoupled ? 'warning' : 'default'"
+              :aria-pressed="cfgConfig.decoupled"
+              :disabled="!director.matchId || readOnly"
+              @click="toggleDecoupled"
+            >{{ cfgConfig.decoupled ? "退出脱钩模式" : "切换到脱钩模式" }}</el-button>
+            <span v-if="cfgConfig.decoupled" class="hint" role="status">两路有画面即播出，无需对齐</span>
+            <label for="anchor-delta">{{ $t("directorView.anchorDelay") }}</label>
+            <el-input-number id="anchor-delta" v-model="anchorDelta" :min="0" :max="86400" :precision="1" :step="1" size="small" :disabled="cfgConfig.decoupled || !director.canEditAnchor || readOnly" />
+            <el-button size="small" :disabled="cfgConfig.decoupled || !director.canAdjustAnchor || readOnly || anchorDelta == null" @click="applyAnchor">{{ $t("directorView.applyAnchor") }}</el-button>
+            <el-button size="small" type="primary" :disabled="!director.matchId || readOnly || (!cfgConfig.decoupled && (!director.canAdjustAnchor || anchorDelta == null))" @click="resyncStreams">{{ $t("directorView.cfgRefresh") }}</el-button>
+            <span v-if="!cfgConfig.decoupled" class="hint" role="status">{{ director.anchorAdjustment || (director.alignRole !== 'publisher' ? $t("directorView.anchorOwnerOnly") : '') }}</span>
+          </div>
+          <div v-if="showStreamDebug" id="stream-debug-info" class="align-health">
+            <div v-if="!cfgConfig.decoupled" class="h-row anchor-clock">
+              <span>T：{{ clockText(displayedAnchor) }}</span>
+              <span>{{ $t("directorView.wallTime") }}：{{ clockText(wallNow * 1000) }}</span>
+              <span>Δ：{{ displayedAnchor == null ? '—' : ((wallNow * 1000 - displayedAnchor) / 1e6).toFixed(3) }} s</span>
+            </div>
+            <div v-if="!cfgConfig.decoupled && (!alignEngine.loopAlive.value || alignEngine.loopErr.value)" class="h-row loop">
+              <span class="h-ready err">
+                {{ alignEngine.loopAlive.value ? "循环异常" : "主循环卡死" }}：{{ alignEngine.loopErr.value || "无报错（看门狗）" }}
+              </span>
+            </div>
+            <div class="h-row">
+              <span class="h-side tc-a">A</span>
+              <span class="h-ready" :class="readyA.cls">{{ readyA.label }}</span>
+              <span class="h-val" :class="healthCls('A')">{{ healthText('A') }}</span>
+            </div>
+            <div class="h-row">
+              <span class="h-side tc-b">B</span>
+              <span class="h-ready" :class="readyB.cls">{{ readyB.label }}</span>
+              <span class="h-val" :class="healthCls('B')">{{ healthText('B') }}</span>
+            </div>
+          </div>
+          <div ref="monitorEl" class="stream-preview">
+            <div class="sp-col">
+              <!-- 隐藏态仅作视觉提示（画面本身仍实时播放供监控），舞台已切等待占位 -->
+              <div class="sp-frame">
+                <SeiStream
+                  v-if="previewAlignedA"
+                  side="A"
+                  :key="'A:' + director.matchId"
+                  :url="cfgConfig.hlsA"
+                  :refresh-nonce="cfgConfig.refreshA"
+                  :enabled="previewAlignedA"
+                  director-output
+                  :crop4to3="true"
+                />
+                <StreamFrame
+                  v-else-if="monitorVisible"
+                  side="A"
+                  :hls-url="cfgConfig.hlsA"
+                  :embed-url="cfgConfig.embedA"
+                  :token="auth.token"
+                  :refresh-nonce="cfgConfig.refreshA"
+                />
+                <Transition name="fade">
+                  <div v-if="!showA" class="hide-mask">
+                    <el-icon :size="56"><Hide /></el-icon>
+                  </div>
+                </Transition>
+              </div>
+            </div>
+            <div class="sp-col">
+              <div class="sp-frame">
+                <SeiStream
+                  v-if="previewAlignedB"
+                  side="B"
+                  :key="'B:' + director.matchId"
+                  :url="cfgConfig.hlsB"
+                  :refresh-nonce="cfgConfig.refreshB"
+                  :enabled="previewAlignedB"
+                  director-output
+                  :crop4to3="true"
+                />
+                <StreamFrame
+                  v-else-if="monitorVisible"
+                  side="B"
+                  :hls-url="cfgConfig.hlsB"
+                  :embed-url="cfgConfig.embedB"
+                  :token="auth.token"
+                  :refresh-nonce="cfgConfig.refreshB"
+                />
+                <Transition name="fade">
+                  <div v-if="!showB" class="hide-mask">
+                    <el-icon :size="56"><Hide /></el-icon>
+                  </div>
+                </Transition>
+              </div>
+            </div>
+          </div>
+          <!-- 比分：监控下方一行居中（原左栏比分卡已并入此处）；状态标签
+               （状态/就绪/预载）置于选手名与在线圆点的外侧 -->
+          <div class="preview-score">
+            <span class="tags">
+              <!-- 与 B 侧镜像：状态标签最靠近名字/比分，整行左右对称 -->
+              <el-tag :type="preloadTagInfo(director.aPreload).type" size="small" effect="plain">
+                {{ $t(preloadTagInfo(director.aPreload).key) }}
+              </el-tag>
+              <el-tag
+                v-if="director.phase === MatchPhase.PREP"
+                :type="director.aReady ? ('success' as const) : ('info' as const)"
+                size="small"
+                effect="dark"
+              >
+                {{ director.aReady ? $t("playerStatus.ready") : $t("playerStatus.notReady") }}
+              </el-tag>
+              <el-tag :type="sideStatusInfo('A').type" size="small" effect="dark">
+                {{ sideStatusInfo("A").label }}
+              </el-tag>
+            </span>
+            <span class="name tc-a">
+              <span
+                class="presence"
+                :class="{ off: !sideOnline('A') }"
+                :title="sideOnline('A') ? '' : $t('playerStatus.offline')"
+              ></span>
+              {{ director.nameOf("A") }}
+            </span>
+            <span class="num">{{ director.winsA }}</span>
+            <span class="sep">:</span>
+            <span class="num">{{ director.winsB }}</span>
+            <span class="name tc-b">
+              {{ director.nameOf("B") }}
+              <span
+                class="presence"
+                :class="{ off: !sideOnline('B') }"
+                :title="sideOnline('B') ? '' : $t('playerStatus.offline')"
+              ></span>
+            </span>
+            <span class="tags">
+              <el-tag :type="sideStatusInfo('B').type" size="small" effect="dark">
+                {{ sideStatusInfo("B").label }}
+              </el-tag>
+              <el-tag
+                v-if="director.phase === MatchPhase.PREP"
+                :type="director.bReady ? ('success' as const) : ('info' as const)"
+                size="small"
+                effect="dark"
+              >
+                {{ director.bReady ? $t("playerStatus.ready") : $t("playerStatus.notReady") }}
+              </el-tag>
+              <el-tag :type="preloadTagInfo(director.bPreload).type" size="small" effect="plain">
+                {{ $t(preloadTagInfo(director.bPreload).key) }}
+              </el-tag>
+            </span>
+          </div>
+        </div>
+
+        <!-- 当前回合 + 计时显示延迟 + 进度：三卡并列同高 -->
+        <div class="card-row">
+          <!-- 当前回合 -->
+          <div class="card">
+            <div class="card-title">{{ $t("directorView.currentRoundTitle") }}</div>
+            <template v-if="director.currentRound">
+              <div class="round-line">
+                <b>{{ director.currentRound.pick.code }}</b>
+                <span class="dim">{{ director.currentRound.pick.name }}</span>
+                <el-tag size="small" effect="plain">
+                  {{ director.isMulti ? $t("pickType.multi") : $t("pickType.single") }}
+                </el-tag>
+              </div>
+              <div class="dim">
+                {{ phaseLabel }}
+                <span v-if="director.countdownRemaining != null" class="cd">
+                  · {{ $t("directorView.countdownLabel", { n: director.countdownRemaining }) }}
+                </span>
+              </div>
+            </template>
+            <div v-else class="dim">{{ $t("directorView.noRoundYet") }}</div>
+          </div>
+
+          <!-- 计时显示延迟：比赛详情场景的计时器 / 偏差条按各画面延迟回放对齐
+               （秒，−/+ 以 0.5 步进；改动即时广播到舞台与场景，与显示开关同通道） -->
+          <div class="card">
+            <div class="card-title">{{ $t("directorView.delayTitle") }}</div>
+            <div class="align-row">
+              <span class="lbl tc-a">对齐 A</span>
+              <el-switch
+                v-model="cfgForm.alignA"
+                size="small"
+                :disabled="cfgConfig.decoupled || !director.matchId || readOnly"
+                @change="toggleAlign('alignA')"
+              />
+              <span class="lbl tc-b">对齐 B</span>
+              <el-switch
+                v-model="cfgForm.alignB"
+                size="small"
+                :disabled="cfgConfig.decoupled || !director.matchId || readOnly"
+                @change="toggleAlign('alignB')"
+              />
+            </div>
+            <div class="delay-grid">
+              <span class="lbl tc-a">A</span>
+              <el-input-number
+                v-model="cfgForm.delayA"
+                :min="0"
+                :max="60"
+                :step="0.5"
+                :precision="1"
+                :step-strict="true"
+                size="small"
+                class="delay-num"
+                :disabled="cfgConfig.decoupled || !director.matchId || readOnly"
+                @change="pushDelay('delayA')"
+              />
+              <span class="lbl tc-b">B</span>
+              <el-input-number
+                v-model="cfgForm.delayB"
+                :min="0"
+                :max="60"
+                :step="0.5"
+                :precision="1"
+                :step-strict="true"
+                size="small"
+                class="delay-num"
+                :disabled="cfgConfig.decoupled || !director.matchId || readOnly"
+                @change="pushDelay('delayB')"
+              />
+              <!-- 偏差条标签横跨前三列（左缘与 A 对齐），输入框与 B 调整框同列 -->
+              <span class="lbl diff">{{ $t("directorView.delayDiff") }}</span>
+              <el-input-number
+                v-model="cfgForm.delayDiff"
+                :min="0"
+                :max="60"
+                :step="0.5"
+                :precision="1"
+                :step-strict="true"
+                size="small"
+                class="delay-num"
+                :disabled="cfgConfig.decoupled || !director.matchId || readOnly"
+                @change="pushDelay('delayDiff')"
+              />
+            </div>
+          </div>
+
+          <!-- 进度 -->
+          <div class="card">
+            <div class="card-title">{{ $t("directorView.bothProgressTitle") }}</div>
+            <div class="prog-row">
+              <span class="who tc-a">A · {{ director.nameOf("A") }}</span>
+              <span>{{ progText("A") }}</span>
+              <span class="dim">{{ $t("directorView.bestTimeLabel", { time: formatMs(bestMs("A")) }) }}</span>
+              <span class="dim utc">{{ $t("directorView.utcSyncLabel", { time: director.utcA ? formatUtcTime(director.utcA.utcMs) : "—" }) }}</span>
+            </div>
+            <div class="prog-row">
+              <span class="who tc-b">B · {{ director.nameOf("B") }}</span>
+              <span>{{ progText("B") }}</span>
+              <span class="dim">{{ $t("directorView.bestTimeLabel", { time: formatMs(bestMs("B")) }) }}</span>
+              <span class="dim utc">{{ $t("directorView.utcSyncLabel", { time: director.utcB ? formatUtcTime(director.utcB.utcMs) : "—" }) }}</span>
             </div>
           </div>
         </div>
@@ -292,11 +1098,25 @@ onUnmounted(() => {
 .top {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
   padding: 10px 18px;
   background: var(--tc-bg-soft);
   border-bottom: 1px solid var(--tc-border);
+}
+/* 左右两侧等分（flex:1）夹住居中的场景切换，实现真居中 */
+.top-side {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.top-side.right {
+  justify-content: flex-end;
+}
+.scene-switch {
+  display: flex;
+  gap: 6px;
 }
 .brand {
   display: flex;
@@ -322,6 +1142,14 @@ onUnmounted(() => {
   padding: 3px 0;
   border-bottom: 1px solid #5a3f12;
 }
+.readonly-banner {
+  background: rgba(37, 143, 90, 0.12);
+  color: #7ee2a8;
+  font-size: 12px;
+  text-align: center;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(55, 210, 122, 0.25);
+}
 .main {
   flex: 1;
   min-height: 0;
@@ -329,16 +1157,17 @@ onUnmounted(() => {
   gap: 12px;
   padding: 12px;
 }
+/* 左栏细（speedrun 信息 + 日志占满），右栏粗（画面监控/回合/进度占主视觉） */
 .col-left {
-  flex: 1;
-  min-width: 0;
+  width: 380px;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 .col-right {
-  width: 420px;
-  flex-shrink: 0;
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -350,6 +1179,15 @@ onUnmounted(() => {
   border-radius: 10px;
   padding: 12px 14px;
 }
+/* 并列卡片行（当前回合 / 计时显示延迟 / 双方进度）：三卡等分同高 */
+.card-row {
+  display: flex;
+  gap: 12px;
+}
+.card-row .card {
+  flex: 1;
+  min-width: 0;
+}
 .card-title {
   font-size: 12px;
   font-weight: 600;
@@ -357,47 +1195,16 @@ onUnmounted(() => {
   margin-bottom: 8px;
   letter-spacing: 0.5px;
 }
-.score-card {
+.anchor-controls, .anchor-clock {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+}
+.anchor-controls { margin-bottom: 10px; font-size: 12px; }
+.monitor-title {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 24px;
-  padding: 18px;
-}
-.score-side {
-  text-align: center;
-  min-width: 120px;
-}
-.score-side.dim {
-  opacity: 0.5;
-}
-.sname {
-  font-size: 16px;
-  font-weight: 700;
-}
-.snum {
-  font-size: 48px;
-  font-weight: 900;
-  line-height: 1.1;
-}
-.score-side.a .snum {
-  color: var(--tc-a);
-}
-.score-side.b .snum {
-  color: var(--tc-b);
-}
-.sstat {
-  font-size: 12px;
-  color: var(--tc-text-dim);
-}
-.vs {
-  font-size: 28px;
-  color: var(--tc-text-dim);
-}
-.winner {
-  color: gold;
-  font-size: 18px;
-  font-weight: 700;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 .round-line {
   display: flex;
@@ -431,28 +1238,277 @@ onUnmounted(() => {
   color: var(--tc-text-dim);
   line-height: 1.6;
 }
-.scene-list {
+/* 下拉内的「直播画面链接」小节标题：与上方保存按钮拉开间距 */
+.stage-title {
+  margin-top: 12px;
+}
+.soon-row {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 10px;
 }
-.scene-row {
+.soon-label {
+  font-size: 13px;
+  color: var(--tc-text);
+  white-space: nowrap;
+}
+.soon-status {
+  font-size: 12px;
+  color: var(--tc-text-dim);
+  margin-left: auto;
+}
+.soon-status.running {
+  color: var(--tc-primary);
+  font-weight: 600;
+}
+.soon-remaining {
+  font-size: 28px;
+  font-weight: 900;
+  color: var(--tc-primary);
+  text-align: center;
+  padding: 6px 0;
+  font-variant-numeric: tabular-nums;
+}
+.soon-btns {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.cfg-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+}
+.cfg-field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
+  min-width: 0;
 }
-.scene-label {
-  font-size: 12px;
+.cfg-field .lbl {
+  font-size: 11px;
+  color: var(--tc-text-dim);
+}
+.cfg-dd {
+  /* 下拉面板（teleport 到 body，slot 内容仍带 scoped 属性可命中样式） */
+  width: 480px;
+  padding: 10px 12px;
+  box-sizing: border-box;
+}
+/* 场景配置下拉：主题色配置项（与导播配置下拉同构图） */
+.scene-cfg-dd {
+  position: relative;
+  width: 380px;
+  padding: 10px 12px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.scene-cfg-dd.has-open-picker {
+  min-height: 320px;
+}
+.cfg-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--tc-text);
+  letter-spacing: 0.5px;
+}
+.cfg-section-title.theme-title {
+  margin-top: 4px;
+}
+.bg-select {
+  width: 100%;
+}
+.theme-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.theme-label {
+  min-width: 44px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--tc-text);
 }
-.stage-row {
-  padding-top: 8px;
-  border-top: 1px dashed var(--tc-border);
-  margin-top: 4px;
+.cfg-ctl {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 10px;
 }
-.stage-row .scene-label {
-  color: var(--tc-primary);
+.ctl-side {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.ctl-side .lbl {
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ctl-side .el-button {
+  margin-left: auto;
+}
+/* 计时显示延迟面板：四列网格（标签A 输入A 标签B 输入B），两行——偏差条输入框
+   与 B 调整框同列对齐 */
+.align-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+/* 连通性/健康指标条：预览画面上方，A/B 各一行 */
+.align-health {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #11152a;
+  border: 1px solid var(--el-border-color-light, #2b3456);
+}
+.h-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
+}
+.h-side {
+  font-weight: 800;
+  flex: none;
+}
+.h-val { color: var(--el-text-color-secondary, #8b94bd); word-break: break-all; }
+.h-val.h-ok { color: #37d67a; }
+.h-val.h-err { color: #ff5f7a; font-weight: 700; }
+.h-ready {
+  flex: none;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--font-sans, -apple-system, "PingFang SC", sans-serif);
+}
+.h-ready.ok { color: #06381c; background: #37d67a; }
+.h-ready.wait { color: #3a2a00; background: #ffb454; }
+.h-ready.err { color: #fff; background: #ff5f7a; }
+.h-ready.off { color: var(--el-text-color-secondary, #8b94bd); background: var(--el-border-color-light, #2b3456); }
+.delay-grid {
+  display: grid;
+  grid-template-columns: auto auto auto auto;
+  column-gap: 10px;
+  row-gap: 10px;
+  align-items: center;
+}
+.delay-grid .lbl {
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+/* 偏差条标签横跨前三列，左缘与 A 标签对齐 */
+.delay-grid .lbl.diff {
+  grid-column: 1 / 4;
+}
+.delay-num {
+  width: 128px;
+}
+.cfg-note {
+  margin-top: 8px;
+  font-size: 12px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.cfg-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+/* 选手画面监控：复用舞台 StreamFrame——场景主题变量在此局部定义
+   （主应用不加载 scene-theme.css，占位描边/警示色需要这几个令牌） */
+.stream-preview {
+  --syn-a: #3d8bff;
+  --syn-b: #ff6b4a;
+  --syn-a-glow: rgba(61, 139, 255, 0.55);
+  --syn-b-glow: rgba(255, 107, 74, 0.55);
+  --syn-a-glow-soft: rgba(61, 139, 255, 0.25);
+  --syn-b-glow-soft: rgba(255, 107, 74, 0.25);
+  --syn-magenta: #ff2e88;
+  --syn-text-dim: #a99bd6;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.sp-col {
+  min-width: 0;
+}
+/* 监控下方比分行：名字按侧着色（带在线指示点），数字居中；
+   状态标签内联紧贴名字同一行，过窄时整行换行兜底 */
+.preview-score {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.preview-score .name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+}
+/* 在线状态指示点（口径同裁判端 PlayerStatusCard） */
+.presence {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #37d27a;
+  flex-shrink: 0;
+}
+.presence.off {
+  background: #7a7f8a;
+}
+.preview-score .num {
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.preview-score .sep {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--tc-text-dim);
+}
+/* 状态标签组：紧随选手名之后内联排布 */
+.preview-score .tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+/* 预览画面容器：承载隐藏态遮罩（画面继续播放，仅提示舞台侧已隐藏） */
+.sp-frame {
+  position: relative;
+}
+.hide-mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.55);
+  pointer-events: none;
 }
 .warn {
   margin: 8px 0 0;

@@ -1,19 +1,26 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { ElMessage, ElMessageBox } from "element-plus";
-import type { UploadRequestOptions } from "element-plus";
+import { ElMessageBox } from "element-plus";
+import { Delete } from "@element-plus/icons-vue";
 import { useI18n } from "vue-i18n";
-import { api, ApiError } from "@/api/client";
 import { useAdminStore } from "@/stores/admin";
-import { useAuthStore } from "@/stores/auth";
 import { CategoryKind, PickType, type Level, type Pick } from "@/api/types";
-import { categoryKindOf } from "@/utils/mappool";
+import {
+  GLITCHLESS_TAG,
+  inherentPickTags,
+  pickTagTokens,
+  setGlitchlessTag,
+  supportsGlitchless,
+  categoryKindOf,
+} from "@/utils/mappool";
+import { officialDisplayName } from "@/utils/officialLevels";
+import SpeedrunMappingEditor from "@/components/admin/SpeedrunMappingEditor.vue";
 
 /**
  * 单个选图编辑器。直接 mutate 父级传入的 reactive pick 引用。
  *
  * - 编号由父 MappoolEditor 按「类别 + 序号」自动分配（只读展示）。
- * - 类别由父 Category 决定；本面板不再重复展示类别标签（父卡片头已含 kind 选择器）。
+ * - 类别由父 Category 决定；本面板不再重复展示类别标签（父级侧栏已含类别缩写）。
  * - **关卡来自关卡管理页维护的关卡表**（admin store /admin/levels）：下拉 value 存关卡 id（UUID）、
  *   label 显示「展示名（名）」；数字工坊 ID 可直通；遗留名字符串/已删 id 以伪选项
  *   展示（黄警告）并原样透传，绝不静默丢值。
@@ -22,60 +29,17 @@ import { categoryKindOf } from "@/utils/mappool";
  * - 单关（SINGLE）：「关卡」下拉选库内关卡或输入工坊 ID（数字），自动生成
  *   「单关卡 + 重试次数」合集，无需手动编辑关卡列表。
  * - 合集 name 统一取选图「名称」(pick.name)；关卡合集写入 pick.collection.raw = { name, levels }（选手端按此消费）。
- * - logo：上传到 MinIO（POST /admin/uploads）→ 写 pick.logo（随整场图池一起保存）；
- *   pick.logo_url 仅本地预览用（后端持久化时忽略）。
+ * - logo 仅作只读展示；选图面板不再提供上传/移除入口（展示图不在编辑器中修改）。
  */
-const props = defineProps<{ pick: Pick; index: number; categoryName: string }>();
+const props = defineProps<{ pick: Pick; index: number; categoryName: string; savedTag: string | null }>();
 const emit = defineEmits<{ (e: "remove"): void }>();
 
 const { t } = useI18n();
-const auth = useAuthStore();
 
-const logoUploading = ref(false);
-const ACCEPT = ".png,.jpg,.jpeg,.webp,.gif";
-const MAX_BYTES = 5 * 1024 * 1024;
+const collapsed = ref(false);
 
 /** 选图当前 logo 预览地址（本地预览用 logo_url；可能为空） */
 const logoPreview = computed(() => props.pick.logo_url || "");
-
-/** 自定义上传：校验大小 → 调 uploadLogo → 写 pick.logo + logo_url（本地预览） */
-async function onUpload(req: UploadRequestOptions): Promise<void> {
-  const file = req.file as File;
-  if (file.size > MAX_BYTES) {
-    ElMessage.error(t("pickEditor.logoTooLarge"));
-    return;
-  }
-  if (!auth.token) {
-    ElMessage.error(t("pickEditor.logoNeedLogin"));
-    return;
-  }
-  logoUploading.value = true;
-  try {
-    const res = await api.uploadLogo(file, auth.token);
-    props.pick.logo = res.key;
-    if (res.url) props.pick.logo_url = res.url;
-    ElMessage.success(t("pickEditor.logoUploaded"));
-  } catch (e) {
-    ElMessage.error(e instanceof ApiError ? e.message : t("pickEditor.logoUploadFail"));
-  } finally {
-    logoUploading.value = false;
-  }
-}
-
-/** 移除 logo：清空 key 与本地预览（图池保存后该 pick 不再带 logo） */
-async function onRemoveLogo(): Promise<void> {
-  try {
-    await ElMessageBox.confirm(
-      t("pickEditor.logoRemoveConfirm"),
-      t("pickEditor.logoRemoveTitle"),
-      { type: "warning", confirmButtonText: t("common.delete"), cancelButtonText: t("common.cancel") },
-    );
-  } catch {
-    return;
-  }
-  props.pick.logo = null;
-  props.pick.logo_url = null;
-}
 
 const typeOptions = computed<{ value: PickType; label: string }[]>(() => [
   { value: PickType.MULTI, label: t("pickEditor.typeMulti") },
@@ -98,6 +62,33 @@ watch(
     if (k === CategoryKind.CT || k === CategoryKind.EX) {
       if (props.pick.type === PickType.SINGLE) props.pick.retry_count = null;
     }
+  },
+  { immediate: true },
+);
+
+// ── 固有词条「Glitchless」：仅 ML/IL/CP/TB 类别展示；勾选即写入 pick.tag ──────────
+// （CT/EX 的词条由裁判选图时选定，不在此处编辑。）
+const showGlitchless = computed(() => supportsGlitchless(categoryKindOf(props.categoryName)));
+const glitchless = computed<boolean>({
+  get: () => inherentPickTags(props.pick).includes(GLITCHLESS_TAG),
+  set: (v) => {
+    if (showGlitchless.value) setGlitchlessTag(props.pick, v);
+  },
+});
+/** 与打开图池时的持久化标签比较，避免自动勾选被误认为已保存。 */
+const unsavedGlitchless = computed(() =>
+  glitchless.value !== pickTagTokens({ ...props.pick, tag: props.savedTag }).includes(GLITCHLESS_TAG),
+);
+const autoGlitchlessUnsaved = computed(() =>
+  unsavedGlitchless.value && glitchless.value && /glitchless/i.test(props.pick.name ?? ""),
+);
+// 名称输入含 "Glitchless"（大小写不敏感）时自动勾选；仅自动勾选、不自动取消
+// （用户可手动取消，之后名称再变化会重新触发检测）。
+watch(
+  () => props.pick.name,
+  (n) => {
+    if (!showGlitchless.value || glitchless.value) return;
+    if (/glitchless/i.test(n ?? "")) setGlitchlessTag(props.pick, true);
   },
   { immediate: true },
 );
@@ -177,11 +168,10 @@ function levelStatus(v: string): LvStatus {
   return "unknown";
 }
 
-/** 关卡显示名：display_name（name）；相同则仅 name。 */
+/** 关卡显示名：有效展示名（自定义 > 官方默认）（name）；相同则仅 name。 */
 function levelLabelOf(l: Level): string {
-  return l.display_name && l.display_name !== l.name
-    ? `${l.display_name}（${l.name}）`
-    : l.name;
+  const dn = l.display_name || officialDisplayName(l.name);
+  return dn && dn !== l.name ? `${dn}（${l.name}）` : l.name;
 }
 
 interface LvOption {
@@ -269,6 +259,18 @@ function syncCollection(): void {
   recomputeMessages();
 }
 
+// 若父级直接换绑到另一个 pick（防御性处理，正常 key 已保证编辑器不会跨选图复用），
+// 重置本地编辑状态，避免把上一个选图的关卡/项目带到新选图上。
+watch(
+  () => props.pick,
+  () => {
+    colLevels.value = readLevels();
+    singleLevel.value = colLevels.value[0] ?? "";
+    projectSel.value = inferProject(colLevels.value);
+    syncCollection();
+  },
+);
+
 // 多关：选「项目」时，命中完整预设则按其关卡 id 序列填充（合集名即项目名）
 function onProjectChange(v: string | number | boolean | object): void {
   const name = String(v ?? "");
@@ -337,178 +339,198 @@ async function onRemove(): Promise<void> {
 </script>
 
 <template>
-  <div class="pick-card">
+  <div class="pick-card" :class="{ 'is-collapsed': collapsed }">
     <div class="pick-head">
-      <span class="pick-no">{{ $t("pickEditor.pickNumber", { index: index + 1 }) }}</span>
-      <el-button link type="danger" @click="onRemove">{{ $t("pickEditor.deletePickBtn") }}</el-button>
-    </div>
-
-    <div class="grid">
-      <el-form-item :label="$t('pickEditor.labelCode')" class="col">
-        <span class="code">{{ props.pick.code || $t("pickEditor.codeAuto") }}</span>
-      </el-form-item>
-      <el-form-item :label="$t('pickEditor.labelPickName')" class="col">
-        <el-input v-model="props.pick.name" :placeholder="$t('pickEditor.pickNamePlaceholder')" />
-      </el-form-item>
-    </div>
-
-    <!-- logo 展示图：上传到 MinIO，key 随选图保存 -->
-    <el-form-item :label="$t('pickEditor.labelLogo')">
-      <div class="logo-row">
-        <div v-if="logoPreview" class="logo-preview">
-          <img :src="logoPreview" :alt="props.pick.name" />
-          <el-button link type="danger" :disabled="logoUploading" @click="onRemoveLogo">
-            {{ $t("pickEditor.logoRemoveBtn") }}
-          </el-button>
-        </div>
-        <el-upload
-          :show-file-list="false"
-          :accept="ACCEPT"
-          :http-request="onUpload"
-          :disabled="logoUploading"
+      <div class="pick-head-left">
+        <el-button
+          link
+          class="collapse-btn"
+          :title="collapsed ? $t('pickEditor.expandPickBtn') : $t('pickEditor.collapsePickBtn')"
+          @click="collapsed = !collapsed"
         >
-          <el-button :loading="logoUploading">{{ $t("pickEditor.logoUploadBtn") }}</el-button>
-        </el-upload>
-        <span class="logo-hint">{{ $t("pickEditor.logoHint") }}</span>
+          <span class="collapse-icon">{{ collapsed ? "▸" : "▾" }}</span>
+          <span class="collapse-text">{{ collapsed ? $t("pickEditor.expandPickBtn") : $t("pickEditor.collapsePickBtn") }}</span>
+        </el-button>
+        <span class="pick-no">{{ $t("pickEditor.pickNumber", { index: index + 1 }) }}</span>
       </div>
-    </el-form-item>
-
-    <div class="grid">
-      <el-form-item :label="$t('pickEditor.labelType')" class="col">
-        <el-select v-model="props.pick.type">
-          <el-option
-            v-for="o in typeOptions"
-            :key="o.value"
-            :value="o.value"
-            :label="o.label"
-          />
-        </el-select>
-      </el-form-item>
-
-      <!-- 多关：项目下拉，选完整预设自动按主线顺序填关卡 id 序列；合集名即项目名。
-           预设按关卡名约定解析，缺关则禁用；无任何完整预设时整体隐藏。 -->
-      <el-form-item
-        v-if="props.pick.type === PickType.MULTI && hasCompletePreset"
-        :label="$t('pickEditor.labelProject')"
-        class="col"
+      <el-button
+        link
+        type="danger"
+        :title="$t('pickEditor.deletePickBtn')"
+        :aria-label="$t('pickEditor.deletePickBtn')"
+        @click="onRemove"
       >
-        <el-select
-          v-model="projectSel"
-          filterable
-          default-first-option
-          clearable
-          :placeholder="$t('pickEditor.projectPlaceholder')"
-          @change="onProjectChange"
-        >
-          <el-option
-            v-for="p in resolvedPresets"
-            :key="p.name"
-            :value="p.name"
-            :label="p.missing.length ? `${p.name}（缺 ${p.missing.length} 关）` : p.name"
-            :disabled="p.missing.length > 0"
-          />
-        </el-select>
-      </el-form-item>
-
-      <!-- 单关：关卡（可输入）下拉，选关卡或输入工坊 ID（数字） -->
-      <el-form-item v-else :label="$t('pickEditor.labelLevel')" class="col">
-        <el-select
-          v-model="singleLevel"
-          filterable
-          allow-create
-          default-first-option
-          clearable
-          :placeholder="$t('pickEditor.levelPlaceholder')"
-          @change="onSingleLevelChange"
-        >
-          <el-option
-            v-for="l in singleOptions"
-            :key="l.value"
-            :value="l.value"
-            :label="l.label"
-          >
-            <el-tag
-              v-if="l.status !== 'ok'"
-              size="small"
-              :type="l.status === 'workshop' ? 'info' : 'warning'"
-              effect="plain"
-            >
-              {{ $t(l.status === 'legacy' ? 'pickEditor.legacyTag' : l.status === 'unknown' ? 'pickEditor.unknownTag' : 'pickEditor.workshopTag') }}
-            </el-tag>
-          </el-option>
-        </el-select>
-      </el-form-item>
+        <el-icon><Delete /></el-icon>
+      </el-button>
     </div>
 
-    <div class="grid">
-      <el-form-item v-if="props.pick.type === PickType.SINGLE && showRetryCount" :label="$t('pickEditor.labelRetryCount')" class="col">
-        <el-input-number
-          v-model="props.pick.retry_count"
-          :min="0"
-          controls-position="right"
-          style="width: 100%"
-        />
-      </el-form-item>
-    </div>
+    <div v-show="!collapsed" class="pick-body">
+      <div class="grid">
+        <el-form-item :label="$t('pickEditor.labelCode')" class="col">
+          <span class="code">{{ props.pick.code || $t("pickEditor.codeAuto") }}</span>
+        </el-form-item>
+        <el-form-item :label="$t('pickEditor.labelPickName')" class="col">
+          <el-input v-model="props.pick.name" :placeholder="$t('pickEditor.pickNamePlaceholder')" />
+        </el-form-item>
+      </div>
 
-    <!-- 多关：关卡列表（可手动增删 / 排序）；每行选关卡（value=id, label=展示名） -->
-    <el-form-item v-if="props.pick.type === PickType.MULTI" :label="$t('pickEditor.labelLevelList')">
-      <div class="levels">
-        <div v-for="(lvl, i) in colLevels" :key="i" class="lvl-row">
-          <span class="lvl-no">{{ i + 1 }}</span>
-          <el-select
-            :model-value="lvl"
-            filterable
-            default-first-option
-            clearable
-            :placeholder="$t('pickEditor.levelIdPlaceholder')"
-            class="lvl-input"
-            @update:model-value="(v: string) => (colLevels[i] = v)"
-          >
+      <!-- 固有词条 Glitchless（仅 ML/IL/CP/TB）：勾选后该选图自带 Glitchless 标签，
+           名称含 Glitchless 文本时自动勾选；裁判选图时随选图自动提交 -->
+      <el-form-item v-if="showGlitchless" :label="$t('pickEditor.labelGlitchless')">
+        <el-checkbox v-model="glitchless">{{ $t("pickEditor.glitchlessOption") }}</el-checkbox>
+        <span v-if="unsavedGlitchless" class="glitchless-unsaved" role="status">
+          {{ $t(autoGlitchlessUnsaved ? "pickEditor.glitchlessAutoUnsaved" : "pickEditor.glitchlessUnsaved") }}
+        </span>
+        <span v-else class="glitchless-hint">{{ $t("pickEditor.glitchlessHint") }}</span>
+      </el-form-item>
+
+      <!-- logo 展示图：仅只读展示，不可在选图面板中修改 -->
+      <el-form-item v-if="logoPreview" :label="$t('pickEditor.labelLogo')">
+        <div class="logo-preview">
+          <img :src="logoPreview" :alt="props.pick.name" />
+        </div>
+      </el-form-item>
+
+      <div class="grid">
+        <el-form-item :label="$t('pickEditor.labelType')" class="col">
+          <el-select v-model="props.pick.type">
             <el-option
-              v-for="o in optionsFor(lvl)"
+              v-for="o in typeOptions"
               :key="o.value"
               :value="o.value"
               :label="o.label"
+            />
+          </el-select>
+        </el-form-item>
+
+        <!-- 多关：项目下拉，选完整预设自动按主线顺序填关卡 id 序列；合集名即项目名。
+             预设按关卡名约定解析，缺关则禁用；无任何完整预设时整体隐藏。 -->
+        <el-form-item
+          v-if="props.pick.type === PickType.MULTI && hasCompletePreset"
+          :label="$t('pickEditor.labelProject')"
+          class="col"
+        >
+          <el-select
+            v-model="projectSel"
+            filterable
+            default-first-option
+            clearable
+            :placeholder="$t('pickEditor.projectPlaceholder')"
+            @change="onProjectChange"
+          >
+            <el-option
+              v-for="p in resolvedPresets"
+              :key="p.name"
+              :value="p.name"
+              :label="p.missing.length ? `${p.name}（缺 ${p.missing.length} 关）` : p.name"
+              :disabled="p.missing.length > 0"
+            />
+          </el-select>
+        </el-form-item>
+
+        <!-- 单关：关卡（可输入）下拉，选关卡或输入工坊 ID（数字） -->
+        <el-form-item v-else :label="$t('pickEditor.labelLevel')" class="col">
+          <el-select
+            v-model="singleLevel"
+            filterable
+            allow-create
+            default-first-option
+            clearable
+            :placeholder="$t('pickEditor.levelPlaceholder')"
+            @change="onSingleLevelChange"
+          >
+            <el-option
+              v-for="l in singleOptions"
+              :key="l.value"
+              :value="l.value"
+              :label="l.label"
             >
               <el-tag
-                v-if="o.status !== 'ok'"
+                v-if="l.status !== 'ok'"
                 size="small"
-                :type="o.status === 'workshop' ? 'info' : 'warning'"
+                :type="l.status === 'workshop' ? 'info' : 'warning'"
                 effect="plain"
               >
-                {{ $t(o.status === 'legacy' ? 'pickEditor.legacyTag' : o.status === 'unknown' ? 'pickEditor.unknownTag' : 'pickEditor.workshopTag') }}
+                {{ $t(l.status === 'legacy' ? 'pickEditor.legacyTag' : l.status === 'unknown' ? 'pickEditor.unknownTag' : 'pickEditor.workshopTag') }}
               </el-tag>
             </el-option>
           </el-select>
-          <el-button-group class="lvl-ops">
-            <el-button link :disabled="i === 0" @click="moveLevel(i, -1)">↑</el-button>
-            <el-button link :disabled="i === colLevels.length - 1" @click="moveLevel(i, 1)">↓</el-button>
-            <el-button link type="danger" @click="removeLevel(i)">✕</el-button>
-          </el-button-group>
+        </el-form-item>
+      </div>
+
+      <div class="grid">
+        <el-form-item v-if="props.pick.type === PickType.SINGLE && showRetryCount" :label="$t('pickEditor.labelRetryCount')" class="col">
+          <el-input-number
+            v-model="props.pick.retry_count"
+            :min="0"
+            controls-position="right"
+            style="width: 100%"
+          />
+        </el-form-item>
+      </div>
+
+      <!-- 多关：关卡列表（可手动增删 / 排序）；每行选关卡（value=id, label=展示名） -->
+      <el-form-item v-if="props.pick.type === PickType.MULTI" :label="$t('pickEditor.labelLevelList')">
+        <div class="levels">
+          <div v-for="(lvl, i) in colLevels" :key="i" class="lvl-row">
+            <span class="lvl-no">{{ i + 1 }}</span>
+            <el-select
+              :model-value="lvl"
+              filterable
+              default-first-option
+              clearable
+              :placeholder="$t('pickEditor.levelIdPlaceholder')"
+              class="lvl-input"
+              @update:model-value="(v: string) => (colLevels[i] = v)"
+            >
+              <el-option
+                v-for="o in optionsFor(lvl)"
+                :key="o.value"
+                :value="o.value"
+                :label="o.label"
+              >
+                <el-tag
+                  v-if="o.status !== 'ok'"
+                  size="small"
+                  :type="o.status === 'workshop' ? 'info' : 'warning'"
+                  effect="plain"
+                >
+                  {{ $t(o.status === 'legacy' ? 'pickEditor.legacyTag' : o.status === 'unknown' ? 'pickEditor.unknownTag' : 'pickEditor.workshopTag') }}
+                </el-tag>
+              </el-option>
+            </el-select>
+            <el-button-group class="lvl-ops">
+              <el-button link :disabled="i === 0" @click="moveLevel(i, -1)">↑</el-button>
+              <el-button link :disabled="i === colLevels.length - 1" @click="moveLevel(i, 1)">↓</el-button>
+              <el-button link type="danger" @click="removeLevel(i)">✕</el-button>
+            </el-button-group>
+          </div>
+          <el-button size="small" @click="addLevel">{{ $t("pickEditor.addLevelBtn") }}</el-button>
+          <div v-if="admin.levels.length === 0" class="lvl-hint">
+            {{ $t("pickEditor.levelsEmptyHint") }}
+          </div>
+          <div v-if="levelsError" class="lvl-err">{{ levelsError }}</div>
+          <div v-if="levelsWarn" class="lvl-warn">{{ levelsWarn }}</div>
+          <div class="lvl-hint">
+            {{ $t("pickEditor.multiHint") }}
+          </div>
         </div>
-        <el-button size="small" @click="addLevel">{{ $t("pickEditor.addLevelBtn") }}</el-button>
+      </el-form-item>
+
+      <!-- 单关：自动生成合集，无需编辑关卡列表 -->
+      <div v-else class="single-hint">
         <div v-if="admin.levels.length === 0" class="lvl-hint">
           {{ $t("pickEditor.levelsEmptyHint") }}
         </div>
+        <div class="lvl-hint">
+          {{ $t("pickEditor.singleHint") }}
+        </div>
         <div v-if="levelsError" class="lvl-err">{{ levelsError }}</div>
         <div v-if="levelsWarn" class="lvl-warn">{{ levelsWarn }}</div>
-        <div class="lvl-hint">
-          {{ $t("pickEditor.multiHint") }}
-        </div>
       </div>
-    </el-form-item>
 
-    <!-- 单关：自动生成合集，无需编辑关卡列表 -->
-    <div v-else class="single-hint">
-      <div v-if="admin.levels.length === 0" class="lvl-hint">
-        {{ $t("pickEditor.levelsEmptyHint") }}
-      </div>
-      <div class="lvl-hint">
-        {{ $t("pickEditor.singleHint") }}
-      </div>
-      <div v-if="levelsError" class="lvl-err">{{ levelsError }}</div>
-      <div v-if="levelsWarn" class="lvl-warn">{{ levelsWarn }}</div>
+      <!-- speedrun.com 排行榜映射（导播 categoryinfo 场景拉榜依据） -->
+      <SpeedrunMappingEditor :pick="props.pick" />
     </div>
   </div>
 </template>
@@ -524,7 +546,27 @@ async function onRemove(): Promise<void> {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   margin-bottom: 6px;
+}
+.pick-head-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.collapse-btn {
+  padding: 0 4px;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.collapse-icon {
+  display: inline-block;
+  width: 14px;
+  text-align: center;
+}
+.collapse-text {
+  font-size: 12px;
 }
 .pick-no {
   font-size: 12px;
@@ -582,11 +624,15 @@ async function onRemove(): Promise<void> {
 .single-hint {
   padding: 2px 0 4px;
 }
-.logo-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
+.glitchless-unsaved {
+  margin-left: 10px;
+  color: var(--el-color-warning);
+  font-size: 12px;
+}
+.glitchless-hint {
+  margin-left: 10px;
+  color: var(--tc-text-dim);
+  font-size: 12px;
 }
 .logo-preview {
   display: flex;
@@ -600,9 +646,5 @@ async function onRemove(): Promise<void> {
   border-radius: 6px;
   border: 1px solid var(--tc-border);
   background: #000;
-}
-.logo-hint {
-  color: var(--tc-text-dim);
-  font-size: 12px;
 }
 </style>

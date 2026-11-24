@@ -16,6 +16,8 @@ export interface SceneContext {
   hosted: boolean;
   /** true=host 提供共享 SynthwaveBg，场景应省略自己的背景 */
   sharedBg: boolean;
+  /** true=host 常驻渲染顶部信息栏（舞台切场景不重挂），场景应省略自己的顶栏 */
+  sharedTopBar: boolean;
 }
 
 export const SCENE_CONTEXT_KEY: InjectionKey<SceneContext> = Symbol("sceneContext");
@@ -31,6 +33,7 @@ export function useSceneContext(): SceneContext {
       params: useSceneParams(),
       hosted: false,
       sharedBg: false,
+      sharedTopBar: false,
     }
   );
 }

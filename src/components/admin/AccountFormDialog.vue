@@ -34,6 +34,7 @@ interface FormState {
   password: string;
   displayName: string;
   roles: AccountType[];
+  speedrunId: string;
 }
 
 const form = reactive<FormState>({
@@ -41,6 +42,7 @@ const form = reactive<FormState>({
   password: "",
   displayName: "",
   roles: [AccountType.PLAYER],
+  speedrunId: "",
 });
 
 const roleOptions = computed<{ value: AccountType; label: string }[]>(() => [
@@ -84,11 +86,13 @@ watch(
       form.password = "";
       form.displayName = props.account.display_name;
       form.roles = [...props.account.roles];
+      form.speedrunId = props.account.speedrun_id ?? "";
     } else {
       form.username = "";
       form.password = "";
       form.displayName = "";
       form.roles = [AccountType.PLAYER];
+      form.speedrunId = "";
     }
     formRef.value?.clearValidate();
   },
@@ -126,6 +130,8 @@ async function onSubmit(): Promise<void> {
     const body: AccountUpdate = {
       display_name: form.displayName.trim(),
       roles: form.roles,
+      // 空串 = 解绑（后端 strip 后置 None）
+      speedrun_id: form.speedrunId.trim(),
     };
     if (form.password) body.password = form.password;
     ok = await admin.updateAccount(props.account.id, body);
@@ -135,6 +141,7 @@ async function onSubmit(): Promise<void> {
       password: form.password,
       display_name: form.displayName.trim(),
       roles: form.roles,
+      speedrun_id: form.speedrunId.trim() || null,
     });
   }
   submitting.value = false;
@@ -191,6 +198,13 @@ async function onSubmit(): Promise<void> {
           </el-checkbox>
         </el-checkbox-group>
         <div class="role-hint">{{ $t('accountForm.adminRoleHint') }}</div>
+      </el-form-item>
+      <el-form-item :label="$t('accountForm.labelSpeedrun')">
+        <el-input
+          v-model="form.speedrunId"
+          :placeholder="$t('accountForm.speedrunPlaceholder')"
+        />
+        <div class="role-hint">{{ $t('accountForm.speedrunHint') }}</div>
       </el-form-item>
     </el-form>
 

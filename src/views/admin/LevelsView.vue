@@ -5,6 +5,7 @@ import { useI18n } from "vue-i18n";
 import { useAdminStore } from "@/stores/admin";
 import type { Level } from "@/api/types";
 import { dateTime } from "@/utils/format";
+import { officialDisplayName } from "@/utils/officialLevels";
 import LevelFormDialog from "@/components/admin/LevelFormDialog.vue";
 
 const { t } = useI18n();
@@ -71,7 +72,14 @@ onMounted(() => {
         </template>
       </el-table-column>
       <el-table-column :label="$t('admin.levels.colName')" prop="name" min-width="140" />
-      <el-table-column :label="$t('admin.levels.colDisplayName')" prop="display_name" min-width="140" />
+      <el-table-column :label="$t('admin.levels.colDisplayName')" min-width="140">
+        <template #default="{ row }">
+          <!-- 展示名：自定义优先；官方默认回退展示（弱化标识未自定义） -->
+          <span v-if="row.display_name">{{ row.display_name }}</span>
+          <span v-else-if="officialDisplayName(row.name)" class="dim">{{ officialDisplayName(row.name) }}</span>
+          <span v-else class="dim">{{ $t('common.dash') }}</span>
+        </template>
+      </el-table-column>
       <el-table-column :label="$t('common.createdAt')" width="170">
         <template #default="{ row }">{{ dateTime(row.created_at) }}</template>
       </el-table-column>

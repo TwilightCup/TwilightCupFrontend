@@ -1,57 +1,59 @@
 /**
- * 合并舞台的场景切换状态（localStorage 持久化 + 跨标签页同步）。
+ * 合并舞台的场景切换状态。
  *
- * 导播控制台点按钮 → setCurrentScene 写 localStorage；舞台页（另一标签/OBS 源）监听
- * 'storage' 事件即时切换。控制台与舞台同源同浏览器时生效（OBS CEF 需与控制台同进程
- * 分区，详见 StageScene 注释）。
+ * 主通道是 WS 广播（director_command switch_scene → 后端只发给同比赛同账号的
+ * 其他 DIRECTOR 连接），舞台初始场景由连接时的 state_sync 回放对齐。
  *
- * 非响应式状态本身：舞台页自己维护 currentScene ref，此处只提供读写 + 校验。
+ * 另保留一个按「账号 + 比赛」隔离的同源 localStorage 兜底：控制台与舞台在
+ * 同一浏览器/同一 OBS CEF storage 分区时，即使 WS 广播暂时未达也能即时切换；
+ * 键含 accountId，避免旧全局键导致同机不同导播互相切台。
  */
-import type { Ref } from "vue";
 
-export type SceneKey = "overlay" | "match" | "mappool" | "bracket";
+export type SceneKey = "categoryinfo" | "match" | "mappool" | "bracket" | "soon" | "victory";
 
-export const SCENE_KEYS: SceneKey[] = ["overlay", "match", "mappool", "bracket"];
+export const SCENE_KEYS: SceneKey[] = [
+  "categoryinfo",
+  "match",
+  "mappool",
+  "bracket",
+  "soon",
+  "victory",
+];
 
-export const SCENE_STORAGE_KEY = "twc-director-scene";
-
-/** 最常用场景作默认 */
+/** 默认场景（state_sync 到达前的初始值） */
 export const DEFAULT_SCENE: SceneKey = "match";
 
-function isValid(v: unknown): v is SceneKey {
+const SCENE_STORAGE_PREFIX = "twc-director-scene";
+
+/** 校验未知字符串是否为合法场景键（state_sync 回放值防脏） */
+export function isSceneKey(v: unknown): v is SceneKey {
   return typeof v === "string" && (SCENE_KEYS as string[]).includes(v);
 }
 
-/** 读当前场景（localStorage + 校验，非法/缺失回退默认） */
-export function getCurrentScene(): SceneKey {
+/** 按「账号 + 比赛」隔离的场景键；缺账号/比赛时仍用可读的兜底段。 */
+export function sceneStorageKey(accountId: string, matchId: string): string {
+  return `${SCENE_STORAGE_PREFIX}:${accountId || "_"}:${matchId || "_"}`;
+}
+
+/** 读同源缓存的当前场景（非法/缺失返回 null，由调用方决定回退）。 */
+export function readStoredScene(accountId: string, matchId: string): SceneKey | null {
   try {
-    const v = localStorage.getItem(SCENE_STORAGE_KEY);
-    return isValid(v) ? v : DEFAULT_SCENE;
+    const raw = localStorage.getItem(sceneStorageKey(accountId, matchId));
+    return isSceneKey(raw) ? raw : null;
   } catch {
-    return DEFAULT_SCENE;
+    return null;
   }
 }
 
-/** 写当前场景（导播控制台点按钮时调） */
-export function setCurrentScene(key: SceneKey): void {
+/** 写同源缓存当前场景（导播控制台切场景时调用，舞台 storage 事件同步）。 */
+export function writeStoredScene(
+  accountId: string,
+  matchId: string,
+  key: SceneKey,
+): void {
   try {
-    localStorage.setItem(SCENE_STORAGE_KEY, key);
+    localStorage.setItem(sceneStorageKey(accountId, matchId), key);
   } catch {
-    // 隐私模式 / 配额，忽略——本标签内仍即时生效（调用方自己更新本地 ref）
+    // 隐私模式 / 配额满：忽略，WS 广播仍为主通道
   }
-}
-
-/**
- * 舞台页用：维护响应式 currentScene，并监听跨标签 storage 事件。
- * 返回 ref + 清理函数（onUnmounted 调）。
- */
-export function bindStageScene(current: Ref<SceneKey>): () => void {
-  current.value = getCurrentScene();
-  const onStorage = (e: StorageEvent): void => {
-    if (e.key === SCENE_STORAGE_KEY && isValid(e.newValue)) {
-      current.value = e.newValue;
-    }
-  };
-  window.addEventListener("storage", onStorage);
-  return () => window.removeEventListener("storage", onStorage);
 }

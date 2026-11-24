@@ -1,3 +1,8 @@
+import { useStreamLinksStore, withoutStreamLinks } from "./streamLinks";
+import { mergeMessageHistory } from "@/utils/mergeMessageHistory";
+import { loadScoreRounds } from "@/scenes/align/loadScoreRounds";
+import { ScoreHistory } from "@/scenes/align/scoreHistory";
+import { AutoCatchup } from "@/scenes/align/autoCatchup";
 /**
  * 导播端状态：控制台与 OBS 叠加层共用。
  *
@@ -9,11 +14,12 @@
  * （赛制 / 延迟）在 auth_ok 后拉 match_log 补全（首回合前日志不存在则忽略）。
  */
 import { defineStore } from "pinia";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 
 import { api } from "@/api/client";
 import {
   MatchPhase,
+  MatchStatus as MS,
   PickType,
   PlayerStatus,
   type Attempt,
@@ -26,8 +32,19 @@ import {
   type SeatName,
 } from "@/api/types";
 import type { ServerMessage } from "@/ws/protocol";
+import { send } from "@/ws/protocol";
 import { ConnStatus, MatchSocket } from "@/ws/socket";
 import { useAuthStore } from "./auth";
+import { PresentationHistory } from "@/scenes/align/presentationHistory";
+import { timerIsAdvancing } from "@/scenes/match/timerProjection";
+import type { FrameAlignAnchor } from "@/scenes/align/externalClock";
+import { FrameLeaseClient } from "@/scenes/align/frameLeaseClient";
+import { AuthorityRole, type AuthorityAssignment } from "@/scenes/align/authorityRole";
+import { alignEngine } from "@/scenes/align/useFrameAlign";
+import {
+  mergeStoredConfig,
+  type DirectorConfig,
+} from "@/scenes/composables/useDirectorConfig";
 import { t as tr } from "@/locales";
 
 export interface PlayerLive {
@@ -45,9 +62,41 @@ export interface DirectorRound {
 }
 
 interface LogLine {
+  id: string;
   ts: string;
   kind: string;
   text: string;
+}
+
+/** 场景页聊天行（结构化，供导播场景按身份着色渲染，样式对齐管理端日志） */
+export interface DirectorChatLine {
+  id: number;
+  ts: string;
+  kind: "chat" | "system";
+  seat: SeatName | "";
+  sender: string;
+  text: string;
+}
+
+/** 某席最近一条 live_time 实时计时读数（receivedAt = 本地接收时刻） */
+export interface LiveTime {
+  levelIndex: number;
+  /** 回合累计毫秒（与官方计分同一条时间线） */
+  totalMs: number;
+  /** 当前分段进行时长（自该关加载沿起算） */
+  segmentMs: number;
+  /** 现实/墙钟累计（毫秒）；提供方支持时存在 */
+  realTimeMs?: number | null;
+  /** Inferred growth from consecutive reports, not a protocol pause guarantee. */
+  advancing?: boolean;
+  receivedAt: number;
+}
+
+/** 某席最近一条 UTC 时间戳（receivedAt = 本地接收时刻） */
+export interface UtcTimestamp {
+  /** Unix UTC 毫秒时间戳（选手端上报） */
+  utcMs: number;
+  receivedAt: number;
 }
 
 const MAX_LOG = 200;
@@ -67,18 +116,26 @@ function freshPlayer(): PlayerLive {
 
 export const useDirectorStore = defineStore("director", () => {
   const auth = useAuthStore();
+  const streamLinks = useStreamLinksStore();
   const socket = new MatchSocket();
 
   const tokenRef = ref("");
   const connStatus = ref<ConnStatus>("idle");
   const seat = ref<SeatName | "">("");
   const matchId = ref("");
+  const accountId = ref("");
   const displayName = ref("");
   const authError = ref("");
 
   const phase = ref<MP>(MatchPhase.IDLE);
   const aReady = ref(false);
   const bReady = ref(false);
+  /** 双方选手 WS 在线（seat_state 广播维护，连接时后端补发全量快照；默认 true 兜底） */
+  const aOnline = ref(true);
+  const bOnline = ref(true);
+  /** 双方预载状态（preload_state 广播；absent = 从未上报/无预载） */
+  const aPreload = ref<"absent" | "in_progress" | "done" | "failed" | "na">("absent");
+  const bPreload = ref<"absent" | "in_progress" | "done" | "failed" | "na">("absent");
   const countdownRemaining = ref<number | null>(null);
   const countdownSource = ref<"auto" | "manual" | null>(null);
 
@@ -86,42 +143,348 @@ export const useDirectorStore = defineStore("director", () => {
   const playerA = ref<PlayerLive>(freshPlayer());
   const playerB = ref<PlayerLive>(freshPlayer());
 
+  const scoreHistory = new ScoreHistory();
+  const scoreRevision = ref(0);
+  let metaGeneration = 0;
   const winsA = ref(0);
   const winsB = ref(0);
   const threshold = ref(0);
+  let winnerRevision = 0;
+  let cumulativeRevision = 0;
+  const resultScoreReady = ref(false);
   const matchWinner = ref<"A" | "B" | null>(null);
   const lastResult = ref<{
     verdict: RoundVerdict;
     scoreA: number | null;
     scoreB: number | null;
   } | null>(null);
+  /** round_result 到达时刻（纪元 ms）——叠加层按 `T/1000 ≥ at` 门控揭示防剧透 */
+  const lastResultAt = ref<number | null>(null);
 
   const nameA = ref(tr("seat.a"));
   const nameB = ref(tr("seat.b"));
 
   const matchName = ref("");
+  /** 比赛状态（MatchStatus；首回合前 REST 拉到，Coming Soon 场景兜底显示用） */
+  const matchStatus = ref<MS | null>(null);
   const boFormat = ref(0);
   const winThreshold = ref(0);
   const scoringMethodName = ref<"FASTEST" | "AVERAGE" | "">("");
   const countdownDelay = ref<number | null>(null);
   /** 所属赛事 id（独立比赛为空）；赛程图场景页链接用 */
   const tournamentId = ref("");
+  /** 双方选手的 speedrun.com 账号绑定（REST getMyMatch 拉取；categoryinfo 场景高亮用） */
+  const speedrunA = ref<string | null>(null);
+  const speedrunB = ref<string | null>(null);
   const metaReady = ref(false);
 
   const messages = ref<LogLine[]>([]);
+  let messageSeq = 0;
+  let chatGeneration = 0;
+
+  /** 聊天行（时间正序追加；仅实时 WS 流，无历史回填——场景页接入即从当下开始） */
+  const chatLines = ref<DirectorChatLine[]>([]);
+  let chatSeq = 0;
+  function pushChatLine(line: Omit<DirectorChatLine, "id">): void {
+    chatLines.value.push({ id: ++chatSeq, ...line });
+    if (chatLines.value.length > MAX_LOG) {
+      chatLines.value.splice(0, chatLines.value.length - MAX_LOG);
+    }
+  }
 
   /** ban/pick 草稿状态（裁判端权威上报、后端转发；供叠加层渲染 ban/pick 动画） */
   const draft = ref<Record<string, unknown> | null>(null);
 
+  /**
+   * 最近一条 subsegment 实时时间差（仅 MULTI 回合进行中产生，需求见
+   * ignored/需求-subsegment实时时间差追踪与前端接入.md），已归一为有符号
+   * 偏差（毫秒）：正 = B 落后（偏差条游标向 B 侧），负 = A 落后。
+   * 回合级内存态：服务端回合结束即清空且断线不补发，前端在离开 IN_ROUND /
+   * 新回合时同步清空；长直道可能长时间无新 gap（≠ 掉线），最近一条照常显示。
+   */
+  const subsegmentGap = ref<number | null>(null);
+  /** 最近一条 gap 的到达时刻（纪元 ms）——叠加层按 `T/1000 ≥ at` 门控揭示防剧透 */
+  const subsegmentGapAt = ref<number | null>(null);
+
+  /**
+   * 双席最近一条 live_time 实时计时（每秒上报，仅裁判/导播收到，需求见
+   * ignored/需求-live_time实时计时中转.md）。消息无时间戳，receivedAt 记本地
+   * 接收时刻供场景页判断陈旧度。回合级内存态：与 subsegmentGap 同生命周期
+   * （服务端回合结束即清空且断线不补发，仅握手时补发最近一条）。
+   */
+  const liveTimeA = ref<LiveTime | null>(null);
+  const liveTimeB = ref<LiveTime | null>(null);
+  // 双席最近一条 UTC 时间戳（连接级遥测，不随回合清空；服务端按席暂存并
+  // 在裁判/导播连入时握手补发，用于时钟偏移/同步显示）
+  const utcA = ref<UtcTimestamp | null>(null);
+  const utcB = ref<UtcTimestamp | null>(null);
+
+  function broadcastSnapshot() {
+    return { phase: phase.value, currentRound: currentRound.value,
+      playerA: playerA.value, playerB: playerB.value,
+      winsA: winsA.value, winsB: winsB.value, lastResult: lastResult.value,
+      lastResultAt: lastResultAt.value, matchWinner: matchWinner.value,
+      aOnline: aOnline.value, bOnline: bOnline.value,
+      subsegmentGap: subsegmentGap.value, subsegmentGapAt: subsegmentGapAt.value,
+      liveTimeA: liveTimeA.value, liveTimeB: liveTimeB.value, draft: draft.value };
+  }
+  const emptyBroadcast = { ...broadcastSnapshot(), playerA: freshPlayer(), playerB: freshPlayer() };
+  const history = new PresentationHistory<ReturnType<typeof broadcastSnapshot>>();
+  const historyRevision = ref(0);
+  const liveBroadcast = computed(broadcastSnapshot);
+  watch(liveBroadcast, value => {
+    history.add(Date.now(), JSON.parse(JSON.stringify(value)) as ReturnType<typeof broadcastSnapshot>);
+    historyRevision.value++;
+  }, { deep: true, flush: "sync" });
+  function presentationAt(wallMs: number | null) {
+    void historyRevision.value;
+    return wallMs == null ? null : history.at(wallMs);
+  }
+  const presentationWallMs = computed(() => {
+    const T = alignEngine.tUs.value;
+    const frames = Object.values(alignEngine.sync.presentedRt).filter((x): x is number => x != null);
+    return T == null ? null : Math.min(T, ...frames) / 1000;
+  });
+  const presentation = computed(() => presentationAt(presentationWallMs.value));
+  const presentedScore = computed(() => {
+    void scoreRevision.value;
+    const wallMs = presentationWallMs.value;
+    return wallMs == null ? { winsA: winsA.value, winsB: winsB.value } : scoreHistory.at(wallMs);
+  });
+
+  const authorityRole = new AuthorityRole();
+  const frameLease = new FrameLeaseClient();
+  const alignRole = ref<"publisher" | "follower">("follower");
+  const timelineVersion = ref(0);
+  let awaitingTimelineTarget = false;
+  const anchorAdjustment = ref("");
+  const resetPending = ref(false);
+  let requestedReset: string | null = null;
+  let onResetAccepted: (() => boolean) | null = null;
+  let reloadFailed = false;
+  let lastFailedResetReconnect = -Infinity;
+  let autoCatchup = new AutoCatchup();
+  let resetRecord: { request_id: string; status: "preparing" | "completed" | "failed"; target_t_us: number; owner_id: string; authority_epoch: number } | null = null;
+  let ackSent = false;
+  const canEditAnchor = computed(() => connStatus.value === "open" && alignRole.value === "publisher");
+  const canAdjustAnchor = computed(() => canEditAnchor.value && !resetPending.value);
+  function applyAnchorDelay(delta: number, onAccepted?: () => boolean): boolean {
+    return requestAnchorDelay(delta, () => {
+      autoCatchup = new AutoCatchup(delta);
+      alignEngine.setDelaySeconds(delta);
+      return onAccepted?.() ?? true;
+    });
+  }
+  function recoverPlayback(onAccepted?: () => boolean): boolean {
+    if (alignEngine.localRecoveryPending(performance.now())) return false;
+    return requestAnchorDelay(autoCatchup.deltaSeconds, onAccepted);
+  }
+  function requestAnchorDelay(delta: number, onAccepted?: () => boolean): boolean {
+    if (!canAdjustAnchor.value || !Number.isFinite(delta) || delta < 0 || delta > 86400) return false;
+    const target = alignEngine.delayTargetUs(delta);
+    if (target == null) { anchorAdjustment.value = "等待双路流前沿，暂无法计算目标时间"; return false; }
+    if (!Number.isSafeInteger(target) || target <= 0) return false;
+    const id = globalThis.crypto?.randomUUID?.() ?? `reset_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+    if (!socket.send(send.directorCommand("frame_align_reset", {
+      request_id: id, connection_id: authorityRole.connectionId, account_id: accountId.value,
+      match_id: matchId.value, authority_epoch: authorityRole.epoch,
+      timeline_version: timelineVersion.value, target_t_us: target,
+    }))) { anchorAdjustment.value = "发送失败，请重试"; return false; }
+    onResetAccepted = onAccepted ?? null; reloadFailed = false;
+    requestedReset = id; resetPending.value = true; anchorAdjustment.value = "等待服务器接受";
+    return true;
+  }
+  function acceptTimeline(p: { timeline_version?: number; t_floor_us?: number | null; t_us?: number; reset?: unknown }, initial = false): boolean {
+    const v = p.timeline_version ?? 0;
+    if (!Number.isSafeInteger(v) || v < timelineVersion.value) return false;
+    if (v > timelineVersion.value || awaitingTimelineTarget) {
+      const r = p.reset as { target_t_us?: number } | null;
+      const target = p.t_floor_us ?? p.t_us ?? r?.target_t_us;
+      if (target == null && initial) {
+        // auth_ok carries the version fence without a playback target. Leases
+        // must immediately use that fence so this connection can be elected.
+        timelineVersion.value = v;
+        awaitingTimelineTarget = true;
+      } else {
+        if (target == null || !Number.isSafeInteger(target) || target <= 0) return false;
+        timelineVersion.value = v;
+        awaitingTimelineTarget = false;
+        alignEngine.beginTimeline(target); ackSent = false; lastAlignPublish = -Infinity;
+        if (!p.reset) alignEngine.finishTimeline("completed", target);
+      }
+    }
+    if (p.reset) applyResetResult(p.reset);
+    return true;
+  }
+  function applyResetResult(value: unknown): void {
+    const p = value as Record<string, unknown>;
+    if (!p || p.timeline_version !== timelineVersion.value ||
+        (p.account_id != null && p.account_id !== accountId.value) ||
+        (p.match_id != null && p.match_id !== matchId.value)) return;
+    if (p.status === "rejected") {
+      if (p.request_id === requestedReset) {
+        onResetAccepted = null;
+        resetPending.value = false; anchorAdjustment.value = `调整被拒绝：${p.code}`;
+      }
+      return;
+    }
+    if (!["preparing", "completed", "failed"].includes(String(p.status)) ||
+        typeof p.request_id !== "string" || typeof p.owner_id !== "string" ||
+        !Number.isSafeInteger(p.target_t_us) || !Number.isSafeInteger(p.authority_epoch)) return;
+    // History in a later owner's snapshot is not an instruction for that owner.
+    if (p.authority_epoch !== authorityRole.epoch) return;
+    if (resetRecord?.request_id === p.request_id && resetRecord.status !== "preparing") return;
+    if (p.request_id === requestedReset) {
+      const callback = onResetAccepted;
+      onResetAccepted = null;
+      if (p.status === "preparing" && p.owner_id === authorityRole.connectionId && authorityRole.publisher && callback) {
+        reloadFailed = !callback();
+      }
+    }
+    resetRecord = p as unknown as NonNullable<typeof resetRecord>;
+    alignEngine.finishTimeline(resetRecord.status, resetRecord.target_t_us);
+    resetPending.value = p.status === "preparing";
+    anchorAdjustment.value = p.status === "preparing" ? "准备目标画面中（最长 10 秒）"
+      : p.status === "completed" ? "应用成功" : `调整失败：${p.code}`;
+    if (reloadFailed) anchorAdjustment.value += "；双路重拉未发送，请重试";
+    if (p.status === "failed" && p.owner_id === authorityRole.connectionId &&
+        authorityRole.publisher && !frameLease.required) {
+      const request = p.request_id, connection = authorityRole.connectionId, epoch = authorityRole.epoch;
+      queueMicrotask(() => reconnectFailedReset(request, connection, epoch));
+    }
+  }
+
+  function reconnectFailedReset(request: string, connection: string | null, epoch: number): boolean {
+    // Latest-console registration creates a new owner. The backend rejects
+    // ordinary anchors from the failed transaction's original owner; never
+    // forge completion or reclaim authority after another console took over.
+    const now = performance.now();
+    const target = alignEngine.delayTargetUs(autoCatchup.deltaSeconds);
+    if (resetRecord?.request_id !== request || resetRecord.status !== "failed" ||
+        resetRecord.owner_id !== connection || !authorityRole.publisher || authorityRole.connectionId !== connection ||
+        authorityRole.epoch !== epoch || frameLease.required || !auth.token || !matchId.value ||
+        connStatus.value !== "open" || matchEnded.value || now - lastFailedResetReconnect < 30_000 ||
+        target == null || !alignEngine.canAutoSeek(target)) return false;
+    lastFailedResetReconnect = now;
+    const mid = matchId.value;
+    disconnect();
+    anchorAdjustment.value = "调整失败，正在重连控制台恢复播放";
+    connectWithAuth(mid);
+    return true;
+  }
+
+  let awaitingPromotionAnchor = false;
+  let lastAlignPublish = -Infinity;
+  let alignHeartbeat: ReturnType<typeof setInterval> | null = null;
+  function stopPublishing(): void {
+    if (alignHeartbeat) clearInterval(alignHeartbeat);
+    alignHeartbeat = null;
+    onResetAccepted = null; reloadFailed = false;
+    autoCatchup = new AutoCatchup(autoCatchup.deltaSeconds);
+    requestedReset = null; resetRecord = null; resetPending.value = false; timelineVersion.value = 0; awaitingTimelineTarget = false; ackSent = false;
+    anchorAdjustment.value = "";
+    awaitingPromotionAnchor = false;
+    lastAlignPublish = -Infinity; alignEngine.setClockPulse(null);
+    frameLease.reset(); authorityRole.disconnect(); alignRole.value = "follower";
+    alignEngine.resetClockConnection();
+  }
+  function applyAuthority(p: AuthorityAssignment, initial = false): void {
+    const wasPublisher = authorityRole.publisher;
+    if ((p.timeline_version ?? 0) < timelineVersion.value || !authorityRole.assign(p)) return;
+    if (!authorityRole.publisher) { onResetAccepted = null; }
+    if (!acceptTimeline(p, initial)) return;
+    const priorReset = p.reset as { authority_epoch?: number; target_t_us?: number } | undefined;
+    if (priorReset && priorReset.authority_epoch !== authorityRole.epoch && typeof priorReset.target_t_us === "number") {
+      alignEngine.finishTimeline("completed", Math.max(priorReset.target_t_us, p.t_floor_us ?? 0));
+      resetPending.value = false;
+    }
+    frameLease.observe(p, authorityRole, performance.now());
+    if (resetRecord?.status === "preparing" && resetRecord.owner_id === authorityRole.connectionId && resetRecord.authority_epoch === authorityRole.epoch) frameLease.retainResetOwner(authorityRole);
+    alignEngine.setAuthorityFloor(p.t_floor_us ?? null);
+    if (alignEngine.canCompete && frameLease.required && authorityRole.publisher) {
+      awaitingPromotionAnchor = p.t_floor_us === undefined;
+    } else if (alignEngine.canCompete && !initial && !wasPublisher && authorityRole.publisher && alignEngine.tUs.value != null) {
+      awaitingPromotionAnchor = true;
+    }
+    if (!alignEngine.canCompete || !authorityRole.publisher) awaitingPromotionAnchor = false;
+    currentAlignSrc.value = authorityRole.src;
+    alignEngine.selectAuthority(authorityRole.src, authorityRole.epoch);
+    alignRole.value = alignEngine.canCompete ? authorityRole.role : "follower";
+    alignEngine.setPublisher(authorityRole.publisher && !awaitingPromotionAnchor);
+  }
+  function publishFrameAlign(): void {
+    const now = performance.now();
+    // Also expire stage visibility when no aligned media component is mounted.
+    alignEngine.refreshAuthority(now);
+    if (!alignEngine.canCompete) return; // Stage connections receive only; the backend ignores their leases.
+    // Retry readiness/cooldown checks even if reset cleared all presented frames:
+    // the UI picture watchdog deliberately cannot act before first presentation.
+    if (resetRecord?.status === "failed" && reconnectFailedReset(resetRecord.request_id,
+      authorityRole.connectionId, authorityRole.epoch)) return;
+    let leaseRunning = true;
+    let reportedReady = false;
+    if (frameLease.supported && accountId.value && matchId.value) {
+      const sample = alignEngine.leaseSample(now);
+      leaseRunning = sample.state === "running";
+      const status = frameLease.report(authorityRole, accountId.value, matchId.value, sample,
+        document.hidden ? "hidden" : "visible", now);
+      // WebSocket ordering: new-epoch readiness confirmation precedes any T.
+      if (status && !socket.send(send.directorCommand("frame_align_status", { ...status, timeline_version: timelineVersion.value }))) {
+        frameLease.deliveryFailed(); return;
+      }
+      reportedReady = sample.state === "running" && sample.decode_ready && sample.media_ready;
+    }
+    if (resetRecord?.owner_id === authorityRole.connectionId && resetRecord.authority_epoch === authorityRole.epoch && resetRecord.status !== "completed") {
+      const t = alignEngine.resetPresentedUs.value;
+      if (resetRecord.status === "preparing" && !ackSent && t != null && reportedReady) {
+        ackSent = socket.send(send.directorCommand("frame_align_reset_ack", {
+          request_id: resetRecord.request_id, authority_epoch: authorityRole.epoch,
+          timeline_version: timelineVersion.value, outcome: "presented", presented_t_us: t,
+        }));
+      }
+      return;
+    }
+    const t = alignEngine.tUs.value;
+    if (!authorityRole.publisher || awaitingPromotionAnchor || t == null ||
+        !frameLease.canPublish(authorityRole) || (frameLease.required && !leaseRunning)) return;
+    if (now - lastAlignPublish < 400) return;
+    lastAlignPublish = now;
+    const playing = alignEngine.sync.state === "playing";
+    // Keep decoded buffers: automatic catchup only moves the shared timeline.
+    // Automatic resets preserve the initial deltaT; never compound the +5s margin.
+    const slowUs = alignEngine.slowestFrontierUs();
+    const targetUs = alignEngine.delayTargetUs(autoCatchup.targetSeconds);
+    if (slowUs != null && targetUs != null && autoCatchup.check(t, slowUs / 1000, now,
+      playing && canAdjustAnchor.value && !matchEnded.value &&
+      !alignEngine.localRecoveryPending(now) && alignEngine.canAutoSeek(targetUs))) {
+      if (requestAnchorDelay(autoCatchup.targetSeconds)) return;
+    }
+    socket.send(send.directorCommand("frame_align", {
+      timeline_version: timelineVersion.value, t_us: Math.floor(t), epoch: authorityRole.epoch, seq: ++authorityRole.sequence,
+      src: authorityRole.connectionId, source_id: authorityRole.connectionId,
+      scene: "shared-playback", account_id: accountId.value, match_id: matchId.value,
+      rate: playing ? alignEngine.playback.speed : 0,
+      paused: !playing, frozen: !playing,
+      ready_a: alignEngine.presented.A, ready_b: alignEngine.presented.B,
+      active_sides: [...alignEngine.sync.activeSides],
+      waiting_sides: [...alignEngine.sync.waitingSides],
+    })); // Never queue a time anchor across reconnect.
+  }
+
   socket.onStatusChange = (s) => {
     connStatus.value = s;
+    if (s !== "open") stopPublishing();
   };
   socket.onMessage = (msg) => handle(msg);
 
   const isMulti = computed(() => currentRound.value?.type === PickType.MULTI);
+  /** 已结束比赛：导播仅可查看；除场景切换（纯舞台展示控制）外，倒计时 / 配置广播等操作全部锁定。 */
+  const matchEnded = computed(
+    () => matchWinner.value !== null || matchStatus.value === MS.ENDED || phase.value === MatchPhase.MATCH_END,
+  );
 
   function log(kind: string, text: string, ts?: string): void {
-    messages.value.unshift({ ts: ts ?? clock(), kind, text });
+    messages.value.unshift({ id: `live-${messageSeq++}`, ts: ts ?? clock(), kind, text });
     if (messages.value.length > MAX_LOG) messages.value.length = MAX_LOG;
   }
 
@@ -130,27 +493,85 @@ export const useDirectorStore = defineStore("director", () => {
     else if (s === "PLAYER_B") playerB.value = live;
   }
 
+  /** 回合级实时遥测清空（subsegment 差距 + 双席 live_time，随回合边界重置） */
+  function clearRoundTelemetry(): void {
+    subsegmentGap.value = null;
+    subsegmentGapAt.value = null;
+    liveTimeA.value = null;
+    liveTimeB.value = null;
+  }
+
   function handle(msg: ServerMessage): void {
     switch (msg.type) {
+      case "stream_links_update":
+        streamLinks.receive(msg.payload);
+        break;
       case "auth_ok":
+        if (matchId.value !== msg.match_id || accountId.value !== msg.account_id) {
+          history.clear();
+          scoreHistory.clear(); scoreRevision.value++;
+          messages.value = []; chatLines.value = [];
+          historyRevision.value++;
+          if (matchId.value) alignEngine.resetSession();
+          resultScoreReady.value = false; cumulativeRevision++; winnerRevision++;
+          matchStatus.value = null; metaReady.value = false; matchName.value = "";
+          boFormat.value = winThreshold.value = threshold.value = 0;
+          nameA.value = tr("seat.a"); nameB.value = tr("seat.b");
+          currentSceneCmd.value = null; remoteConfig.value = null;
+          phase.value = MatchPhase.IDLE; matchWinner.value = null; lastResultAt.value = null;
+          aOnline.value = bOnline.value = false;
+          currentRound.value = null;
+          playerA.value = freshPlayer(); playerB.value = freshPlayer();
+          winsA.value = winsB.value = 0; lastResult.value = null; draft.value = null;
+          clearRoundTelemetry();
+          history.clear(); // never retain a partially reset old-match snapshot
+          currentAlignSrc.value = null;
+        }
         seat.value = msg.seat;
         matchId.value = msg.match_id;
+        accountId.value = msg.account_id;
         displayName.value = msg.display_name;
+        void streamLinks.activate(tokenRef.value, msg.match_id, msg.account_id);
+        stopPublishing();
+        if (msg.seat === "DIRECTOR" && msg.connection_id) {
+          authorityRole.connect(msg.connection_id);
+          applyAuthority({ connection_id: msg.connection_id, src: msg.align_authority_src,
+            timeline_version: msg.timeline_version, epoch: msg.authority_epoch, role: msg.align_role, lease_required: msg.align_lease_required }, true);
+          alignEngine.setClockPulse(publishFrameAlign);
+          alignHeartbeat = setInterval(publishFrameAlign, 400);
+        }
         // 双方选手名：auth_ok 即带（后端已补），连入即有，不再依赖聊天捕获
         if (msg.player_a_name) nameA.value = msg.player_a_name;
         if (msg.player_b_name) nameB.value = msg.player_b_name;
         authError.value = "";
+        // 新连接/换场先清旧 UTC 遥测，随后服务端握手会补发当前双方最近值
+        utcA.value = null;
+        utcB.value = null;
         void loadMeta();
+        void loadChatHistory();
         break;
       case "auth_error":
+        streamLinks.clear();
         authError.value = msg.msg;
         break;
       case "phase_change":
+        // 离开 IN_ROUND：服务端已清空回合级 subsegment / live_time 数据，前端同步清掉
+        if (phase.value === MatchPhase.IN_ROUND && msg.phase !== MatchPhase.IN_ROUND) {
+          clearRoundTelemetry();
+        }
         phase.value = msg.phase;
         break;
       case "ready_state":
         aReady.value = msg.a_ready;
         bReady.value = msg.b_ready;
+        break;
+      case "preload_state":
+        aPreload.value = msg.a_status;
+        bPreload.value = msg.b_status;
+        break;
+      case "seat_state":
+        if (msg.seat === "PLAYER_A") aOnline.value = msg.online;
+        else if (msg.seat === "PLAYER_B") bOnline.value = msg.online;
         break;
       case "countdown_tick":
         countdownRemaining.value = msg.remaining_secs;
@@ -160,6 +581,25 @@ export const useDirectorStore = defineStore("director", () => {
         countdownRemaining.value = null;
         countdownSource.value = null;
         break;
+      case "pick_announced": {
+        // 裁判选图确定（进入 PREP 前）即重置上一回合数据：场景计时 / 偏差条
+        // 提前归零，并以预览 pick 提前切换多关 / 单关布局。
+        // round_start 仍是权威（重复赋值幂等，届时补上真实 round_id）。
+        currentRound.value = {
+          roundId: "",
+          pick: msg.pick,
+          collection: msg.collection,
+          type: msg.pick.type,
+        };
+        playerA.value = freshPlayer();
+        playerB.value = freshPlayer();
+        winnerRevision++;
+        matchWinner.value = null;
+        lastResult.value = null;
+        lastResultAt.value = null;
+        clearRoundTelemetry();
+        break;
+      }
       case "round_start":
         currentRound.value = {
           roundId: msg.round_id,
@@ -169,8 +609,11 @@ export const useDirectorStore = defineStore("director", () => {
         };
         playerA.value = freshPlayer();
         playerB.value = freshPlayer();
+        winnerRevision++;
         matchWinner.value = null;
         lastResult.value = null;
+        lastResultAt.value = null;
+        clearRoundTelemetry();
         break;
       case "player_status":
         applyPlayer(msg.seat, {
@@ -180,34 +623,148 @@ export const useDirectorStore = defineStore("director", () => {
           attempts: msg.attempts,
         });
         break;
+      case "subsegment_gap": {
+        // 实时时间差：最近一条直接覆盖（双向 gap 交错时最新比较点即当前差距）。
+        // 服务端只广播当前回合，此处再按 round_id 防御过期回合串扰（回合 id 未知
+        // 时放行——中途接入尚未收到 round_start 也能立即显示）。
+        const cur = currentRound.value?.roundId;
+        if (cur && msg.round_id !== cur) break;
+        subsegmentGap.value =
+          // gap_ms >0 = 穿越方（hit_seat）落后 → 归一为偏差条口径「正 = B 落后」
+          msg.hit_seat === "PLAYER_B" ? msg.gap_ms : -msg.gap_ms;
+        subsegmentGapAt.value = Date.now();
+        break;
+      }
+      case "live_time": {
+        // 双席实时计时（每秒）：按席暂存最近一条供场景页平滑外推走表，每条
+        // 到达即重新锚定。同 subsegment_gap 按 round_id 防御过期回合串扰
+        // （回合 id 未知时放行——中途接入尚未收到 round_start 也能立即对齐）。
+        const cur = currentRound.value?.roundId;
+        if (cur && msg.round_id !== cur) break;
+        const sample: LiveTime = {
+          levelIndex: msg.level_index,
+          totalMs: msg.total_ms,
+          segmentMs: msg.segment_ms,
+          realTimeMs: msg.real_time_ms ?? null,
+          receivedAt: Date.now(),
+        };
+        sample.advancing = timerIsAdvancing(msg.seat === "PLAYER_A" ? liveTimeA.value : liveTimeB.value, sample);
+        if (msg.seat === "PLAYER_A") liveTimeA.value = sample;
+        else if (msg.seat === "PLAYER_B") liveTimeB.value = sample;
+        break;
+      }
+      case "utc_timestamp": {
+        // 选手 UTC 时间戳：连接级遥测，按席覆盖最近一条（服务端已按席暂存，
+        // 晚连握手里也会先补发）。用于裁判/导播侧时钟偏移/同步展示。
+        const sample: UtcTimestamp = {
+          utcMs: msg.utc_ms,
+          receivedAt: Date.now(),
+        };
+        if (msg.seat === "PLAYER_A") utcA.value = sample;
+        else if (msg.seat === "PLAYER_B") utcB.value = sample;
+        break;
+      }
       case "round_result":
         lastResult.value = {
           verdict: msg.verdict,
           scoreA: msg.score_a_ms ?? null,
           scoreB: msg.score_b_ms ?? null,
         };
+        lastResultAt.value = Date.now();
         break;
       case "cumulative_score":
+        cumulativeRevision++; resultScoreReady.value = true;
+        scoreHistory.add(Date.now(), { winsA: msg.wins_a, winsB: msg.wins_b });
+        scoreRevision.value++;
         winsA.value = msg.wins_a;
         winsB.value = msg.wins_b;
         threshold.value = msg.threshold;
         break;
       case "match_end":
+        winnerRevision++;
         matchWinner.value = msg.winner;
         break;
       case "chat":
         if (msg.seat === "PLAYER_A") nameA.value = msg.sender_name;
         else if (msg.seat === "PLAYER_B") nameB.value = msg.sender_name;
         log("chat", `${msg.sender_name}：${msg.text}`, msg.ts);
+        pushChatLine({ ts: msg.ts, kind: "chat", seat: msg.seat, sender: msg.sender_name, text: msg.text });
         break;
       case "system":
         log("system", msg.text, msg.ts);
+        pushChatLine({ ts: msg.ts, kind: "system", seat: "", sender: msg.sender ?? "Twilight", text: msg.text });
         break;
       case "error":
+        if (requestedReset && resetPending.value && resetRecord?.request_id !== requestedReset) {
+          onResetAccepted = null;
+          resetPending.value = false; anchorAdjustment.value = `调整失败：${msg.msg}`;
+        }
         log("error", tr("log.errorLog", { code: msg.code, msg: msg.msg }));
         break;
       case "draft_state":
         draft.value = msg.state;
+        break;
+      case "director_cmd":
+        // 导播控制台通过 WS 广播的指令（场景切换 / 倒计时操控 / 配置下发），
+        // 以及服务端连接回放（state_sync：舞台/控制台晚打开也能对齐状态）
+        if (msg.action === "state_sync") {
+          applyStateSync(msg.payload ?? {});
+          // 后端把最近一次 frame_align 作为 state_sync 的独立子键补发（权威 T + 就绪），
+          // 并带 align_authority_src 指明该跟谁（晚连一致跟随）
+          const s = msg.payload as { frame_align?: unknown; align_authority_src?: unknown } | undefined;
+          // The backend omits this key when there is no owner. Normalize it
+          // before restoring the timeline, so the frozen floor cannot become
+          // an apparent live authority and block candidate decoder preparation.
+          const asrc = s?.align_authority_src ?? null;
+          if (!authorityRole.connectionId && typeof asrc === "string") { currentAlignSrc.value = asrc; alignEngine.selectAuthority(asrc); }
+          const replay = msg.payload ?? {};
+          const replayFrame = replay.frame_align as Partial<FrameAlignAnchor> | undefined;
+          applyAuthority({ connection_id: replay.connection_id as string | undefined,
+            src: asrc as string | null | undefined, role: replay.align_role as string | undefined,
+            epoch: replayFrame?.epoch ?? authorityRole.epoch,
+            lease_required: replay.align_lease_required as boolean | undefined,
+            timeline_version: replay.timeline_version as number | undefined, reset: replay.reset,
+            t_floor_us: replayFrame?.t_us ?? null });
+          const fa = s?.frame_align as
+            | { t_us?: unknown; ready_a?: unknown; ready_b?: unknown }
+            | undefined;
+          if (fa && typeof fa.t_us === "number") applyFrameAlign(fa as FrameAlignPayload, true);
+        } else if (msg.action === "align_authority" && (typeof msg.payload?.src === "string" || msg.payload?.src === null)) {
+          // 后端权威接任时广播该跟谁
+          if (msg.payload.account_id != null && msg.payload.account_id !== accountId.value) break;
+          if (msg.payload.match_id != null && msg.payload.match_id !== matchId.value) break;
+          applyAuthority(msg.payload as AuthorityAssignment);
+        } else if (msg.action === "frame_align_reset_result") {
+          applyResetResult(msg.payload);
+        } else if (msg.action === "switch_scene") {
+          currentSceneCmd.value = (msg.payload?.scene as string) ?? null;
+        } else if (msg.action === "soon_set_target" && msg.payload?.target_ms) {
+          soonCmdState.value.targetMs = msg.payload.target_ms as number;
+        } else if (msg.action === "soon_start") {
+          const s = soonCmdState.value;
+          if (s.pausedAt !== null) {
+            s.startedAt = (s.startedAt ?? 0) + (Date.now() - s.pausedAt);
+            s.pausedAt = null;
+          } else {
+            s.startedAt = Date.now();
+          }
+        } else if (msg.action === "soon_pause") {
+          const s = soonCmdState.value;
+          if (s.startedAt !== null && s.pausedAt === null) s.pausedAt = Date.now();
+        } else if (msg.action === "soon_reset") {
+          soonCmdState.value = { targetMs: soonCmdState.value.targetMs, startedAt: null, pausedAt: null };
+        } else if (msg.action === "config_update" && msg.payload?.config) {
+          // 直播配置实时下发（控制台保存 → 舞台/其他控制台，后端排除发送者）：
+          // 落库（舞台此刻可能不在比赛场景，挂载后 load 才能读到）+ 更新 ref
+          // 供已挂载的 MatchScene / 控制台面板实时并入。
+          const patch = withoutStreamLinks(msg.payload.config as Partial<DirectorConfig>);
+          remoteConfig.value = patch;
+          if (matchId.value) mergeStoredConfig(matchId.value, patch);
+        } else if (msg.action === "frame_align" && typeof msg.payload?.t_us === "number") {
+          // 控制台主页面广播 T（µs）和 A/B 就绪；舞台及其他控制台跟随。
+          // 正常广播排除发送者，冻结和换主快照可能发给所有连接。
+          applyFrameAlign(msg.payload as unknown as FrameAlignPayload);
+        }
         break;
       default:
         // level_time_update / counter_* / round_started_broadcast / verdict_edit
@@ -216,35 +773,228 @@ export const useDirectorStore = defineStore("director", () => {
     }
   }
 
+  async function loadChatHistory(): Promise<void> {
+    const mid = matchId.value, token = tokenRef.value, generation = ++chatGeneration;
+    if (!mid || !token) return;
+    try {
+      const rows = await api.getChatLog(mid, token);
+      if (generation !== chatGeneration || mid !== matchId.value || token !== tokenRef.value) return;
+      const restored: LogLine[] = rows.filter(row => row.match_id === mid).map(row => ({
+        id: row.id, ts: row.ts, kind: row.is_system ? "system" : "chat",
+        text: row.is_system ? row.text : `${row.sender_name}：${row.text}`,
+      }));
+      messages.value = mergeMessageHistory(messages.value, restored, row => JSON.stringify([row.kind, row.text]))
+        .reverse().slice(0, MAX_LOG);
+    } catch {
+      // Keep live messages if history is temporarily unavailable; reconnect retries.
+    }
+  }
+
   async function loadMeta(): Promise<void> {
     if (!matchId.value || !tokenRef.value) return;
+    const mid = matchId.value, token = tokenRef.value, generation = ++metaGeneration;
+    const requestedAt = Date.now();
+    const requestedWinnerRevision = winnerRevision;
+    const requestedCumulativeRevision = cumulativeRevision;
+    const current = () => generation === metaGeneration && matchId.value === mid && tokenRef.value === token;
+    // 1) /me/matches/{id}：首回合前即可用（match_log 要首回合后才生成），
+    //    尽早补比赛名/状态/赛事归属（Coming Soon 场景与舞台 URL 依赖），
+    //    并提前回填 BO/胜点（顶栏比分指示器在首个判决前就有据可依）。
     try {
-      const doc = await api.getMatchLog(matchId.value, tokenRef.value);
+      const m = await api.getMyMatch(mid, token);
+      if (!current()) return;
+      matchName.value = m.name || matchName.value;
+      if (winnerRevision === requestedWinnerRevision) {
+        matchStatus.value = m.status;
+        if (m.winner === "A" || m.winner === "B") matchWinner.value = m.winner;
+      }
+      if (m.player_a_username) nameA.value = m.player_a_username;
+      if (m.player_b_username) nameB.value = m.player_b_username;
+      tournamentId.value = m.tournament_id || tournamentId.value;
+      boFormat.value = m.bo_format || boFormat.value;
+      winThreshold.value = m.win_threshold || winThreshold.value;
+      speedrunA.value = m.player_a_speedrun ?? null;
+      speedrunB.value = m.player_b_speedrun ?? null;
+    } catch {
+      // token 无权限等，忽略（下面 match_log 再试一次）
+    }
+    // 2) match_log：BO/胜点/计分制等（首回合前 404 忽略）。
+    try {
+      const doc = await api.getMatchLog(mid, token);
+      if (!current()) return;
+      const final = doc.final_result;
+      if (!matchWinner.value && winnerRevision === requestedWinnerRevision && (final?.winner === "A" || final?.winner === "B")) {
+        matchWinner.value = final.winner;
+      }
+      const finalWinsA = final?.wins_a, finalWinsB = final?.wins_b;
+      const hasFinalScore = typeof finalWinsA === "number" && typeof finalWinsB === "number"
+        && Number.isInteger(finalWinsA) && Number.isInteger(finalWinsB)
+        && finalWinsA >= 0 && finalWinsB >= 0;
+      if (hasFinalScore && cumulativeRevision === requestedCumulativeRevision) {
+        winsA.value = finalWinsA; winsB.value = finalWinsB;
+        resultScoreReady.value = true;
+      }
       const info = doc.initial_info;
-      matchName.value = info.name ?? "";
-      boFormat.value = info.bo_format ?? 0;
-      winThreshold.value = info.win_threshold ?? 0;
+      matchName.value = info.name ?? matchName.value;
+      boFormat.value = info.bo_format ?? boFormat.value;
+      winThreshold.value = info.win_threshold ?? winThreshold.value;
       scoringMethodName.value =
         (info.scoring_method as "FASTEST" | "AVERAGE" | undefined) ?? "";
       countdownDelay.value = info.start_countdown_delay ?? null;
       tournamentId.value = doc.tournament_id ?? "";
-      metaReady.value = true;
+      // Existing log endpoints also work for authenticated stage viewers.
+      // All rounds must arrive before applying totals; partial results are unsafe.
+      const records = await loadScoreRounds(mid, doc.round_ids, number => api.getRoundDetail(mid, number, token));
+      if (!current()) return;
+      const restored = scoreHistory.restore(records, Date.now(), requestedAt);
+      if (!hasFinalScore || cumulativeRevision !== requestedCumulativeRevision) {
+        winsA.value = restored.winsA; winsB.value = restored.winsB;
+      }
+      if (records.length > 0) resultScoreReady.value = true;
+      scoreRevision.value++;
     } catch {
       // 首回合前 match_log 尚未生成（404），忽略
     }
+    if (current()) metaReady.value = true;
   }
 
-  function connect(token: string, matchId?: string): void {
+  function connect(token: string, matchId?: string, mode: "receiver" | "console" = "receiver"): void {
+    alignEngine.setCandidateEnabled(mode === "console");
+    if (streamLinks.matchId && (streamLinks.matchId !== matchId || tokenRef.value !== token)) streamLinks.clear();
     tokenRef.value = token;
-    socket.connect(token, "DIRECTOR", matchId);
+    // Existing backend exclusive key is account + seat + match. Stage sockets
+    // reconnect as receivers after displacement; old consoles stay invalid.
+    socket.connect(token, "DIRECTOR", matchId, mode === "console", mode === "console" ? "console" : "stage");
   }
 
   function connectWithAuth(matchId?: string): void {
-    if (auth.token) connect(auth.token, matchId);
+    if (auth.token) connect(auth.token, matchId, "console");
   }
 
   function disconnect(): void {
+    stopPublishing();
     socket.disconnect();
+  }
+
+  // ---- 导播控制台 → 舞台 WS 广播指令 ----
+
+  /** 当前场景指令（控制台发 → store 收 director_cmd 后更新；舞台/SoonScene 读此 ref） */
+  const currentSceneCmd = ref<string | null>(null);
+  /** Coming Soon 倒计时状态（同上，WS 广播同步） */
+  interface SoonCmdState {
+    targetMs: number;
+    startedAt: number | null;
+    pausedAt: number | null;
+  }
+  const soonCmdState = ref<SoonCmdState>({
+    targetMs: 300_000,
+    startedAt: null,
+    pausedAt: null,
+  });
+  /** 最近一次 config_update 广播的配置（已同步落库；ref 供已挂载场景响应） */
+  const remoteConfig = ref<Partial<DirectorConfig> | null>(null);
+
+  /** 主控制台上报的最近一次帧对齐状态：统一虚拟时间 T + A/B 就绪 */
+  interface FrameAlignPayload extends FrameAlignAnchor {
+    ready_a?: boolean;
+    ready_b?: boolean;
+    src?: string | null;
+  }
+  /** 当前唯一权威 id——由后端选举决定（align_authority 通知 / state_sync.align_authority_src）。
+   *  后端已只扇出权威的 frame_align，前端不再自己锁 src，避免拒绝后端合法接管的新权威。 */
+  const currentAlignSrc = ref<string | null>(null);
+  function applyFrameAlign(p: FrameAlignPayload, replay = false): void {
+    if (p.match_id != null && p.match_id !== matchId.value) return;
+    if (p.account_id != null && p.account_id !== accountId.value) return;
+    if ((p.timeline_version ?? 0) !== timelineVersion.value || (p.epoch != null && p.epoch < authorityRole.epoch)) return;
+    if (!acceptTimeline(p)) return;
+    if (alignEngine.setExternalTUs(p.t_us, { ...p, replay, src: p.src === undefined ? currentAlignSrc.value ?? undefined : p.src })) {
+      if (alignEngine.canCompete && authorityRole.publisher && p.epoch === authorityRole.epoch && p.src === authorityRole.connectionId) {
+        frameLease.observe({ t_floor_us: p.t_us }, authorityRole, performance.now());
+        alignEngine.setAuthorityFloor(p.t_us);
+        awaitingPromotionAnchor = false;
+        alignEngine.setPublisher(true);
+      }
+    }
+  }
+
+  /**
+   * state_sync 回放（连接建立时服务端补发，后端 c58f0ad）：并入场景/倒计时/配置。
+   * soon 时间戳是服务器毫秒，用 now_ms 折算本地偏移（跨机时钟不一时剩余时间仍准；
+   * started_at 服务端已扣暂停时长，与本地 soonCmdState 语义一致）。
+   * scene/config 为空表示该部分从未发过指令，保持现状不动。
+   */
+  function applyStateSync(p: Record<string, unknown>): void {
+    if (typeof p.scene === "string" && p.scene) currentSceneCmd.value = p.scene;
+
+    const soon = p.soon as
+      | { target_ms?: number | null; started_at?: number | null; paused_at?: number | null; now_ms?: number }
+      | undefined;
+    if (soon && typeof soon.now_ms === "number") {
+      const offset = Date.now() - soon.now_ms;
+      soonCmdState.value = {
+        targetMs:
+          typeof soon.target_ms === "number"
+            ? soon.target_ms
+            : soonCmdState.value.targetMs,
+        startedAt: typeof soon.started_at === "number" ? soon.started_at + offset : null,
+        pausedAt: typeof soon.paused_at === "number" ? soon.paused_at + offset : null,
+      };
+    }
+
+    const cfg = p.config ? withoutStreamLinks(p.config as Partial<DirectorConfig>) : undefined;
+    if (cfg && Object.keys(cfg).length > 0) {
+      remoteConfig.value = cfg;
+      if (matchId.value) mergeStoredConfig(matchId.value, cfg);
+    }
+  }
+
+  /**
+   * 发送导演指令到后端，后端广播给同账号其他导播连接（OBS 舞台）。
+   * 同时更新本地状态（控制台自身也是 director 连接，但后端广播 exclude sender）。
+   */
+  function sendDirectorCommand(
+    action:
+      | "switch_scene"
+      | "soon_start"
+      | "soon_pause"
+      | "soon_reset"
+      | "soon_set_target"
+      | "config_update",
+    payload?: Record<string, unknown>,
+  ): boolean {
+    // 已结束比赛仅锁定会改变比赛/直播配置的操作；场景切换只是舞台展示控制，
+    // 仍应允许导播在结束后切换查看比赛详情 / 图池 / 赛程图等回放画面。
+    if (matchEnded.value && action !== "switch_scene") return false;
+    // 同步本地状态（config_update 无需：发送方本地已保存，后端广播排除发送者）
+    if (action === "switch_scene") {
+      currentSceneCmd.value = (payload?.scene as string) ?? null;
+    } else if (action === "soon_set_target" && payload?.target_ms) {
+      soonCmdState.value.targetMs = payload.target_ms as number;
+    } else if (action === "soon_start") {
+      const s = soonCmdState.value;
+      if (s.pausedAt !== null) {
+        // 继续：补偿暂停时长
+        s.startedAt = (s.startedAt ?? 0) + (Date.now() - s.pausedAt);
+        s.pausedAt = null;
+      } else {
+        s.startedAt = Date.now();
+        s.pausedAt = null;
+      }
+    } else if (action === "soon_pause") {
+      const s = soonCmdState.value;
+      if (s.startedAt !== null && s.pausedAt === null) {
+        s.pausedAt = Date.now();
+      }
+    } else if (action === "soon_reset") {
+      soonCmdState.value = { targetMs: soonCmdState.value.targetMs, startedAt: null, pausedAt: null };
+    }
+
+    if (action === "config_update" && payload?.config) {
+      payload = { ...payload, config: withoutStreamLinks(payload.config as Partial<DirectorConfig>) };
+    }
+    // 发 WS（可排队：连接未就绪时暂存，open 后按序补发，断线窗口点按钮不丢指令）
+    return socket.sendQueued(send.directorCommand(action, payload));
   }
 
   function nameOf(side: "A" | "B"): string {
@@ -253,83 +1003,109 @@ export const useDirectorStore = defineStore("director", () => {
   function playerOf(side: "A" | "B"): PlayerLive {
     return side === "A" ? playerA.value : playerB.value;
   }
-
-  /** OBS 浏览器源叠加层链接（带当前 token + 本场 match，多场区分） */
-  const overlayUrl = computed(() => {
-    if (!tokenRef.value) return "";
-    const base = `${globalThis.location.origin}/overlay.html?token=${encodeURIComponent(
-      tokenRef.value,
-    )}`;
-    return matchId.value ? `${base}&match=${encodeURIComponent(matchId.value)}` : base;
-  });
+  /** 某席最近一条 live_time 实时计时（无上报 / 回合外为 null） */
+  function liveTimeOf(side: "A" | "B"): LiveTime | null {
+    return side === "A" ? liveTimeA.value : liveTimeB.value;
+  }
+  /** 某席最近一条 UTC 时间戳（无上报为 null） */
+  function utcOf(side: "A" | "B"): UtcTimestamp | null {
+    return side === "A" ? utcA.value : utcB.value;
+  }
 
   /**
-   * 直播画面场景页链接集合（叠加层 + 赛程图 + 图池 + 比赛详情）。
-   * 各带当前 token；按需带 match / tournament。tournament 缺失（独立比赛 / 首回合前）
-   * 时赛程图链接留空（赛程图对无赛事比赛无意义）。
+   * 场景独立入口页链接（stage.html / mappool.html 等，页面名不带斜杠）：
+   * 带当前 token + 本场 match + 所属 tournament（赛程图 / 图池场景需）。
    */
-  const sceneUrls = computed(() => {
-    const origin = globalThis.location.origin;
-    const tok = encodeURIComponent(tokenRef.value);
-    const match = matchId.value ? encodeURIComponent(matchId.value) : "";
-    const tour = tournamentId.value ? encodeURIComponent(tournamentId.value) : "";
-    if (!tok) {
-      return { overlay: "", bracket: "", mappool: "", matchDetail: "", stage: "" };
-    }
-    const q = (file: string, extra = ""): string =>
-      `${origin}/${file}?token=${tok}${extra}`;
-    return {
-      overlay: q("overlay.html", match ? `&match=${match}` : ""),
-      matchDetail: q("match-scene.html", match ? `&match=${match}` : ""),
-      mappool: q("mappool.html", match ? `&match=${match}` : tour ? `&tournament=${tour}` : ""),
-      bracket: tour ? q("bracket.html", `&tournament=${tour}`) : "",
-      // 合并舞台：含 match + tournament（舞台内赛程图场景需 tournament）
-      stage: q("stage.html", (match ? `&match=${match}` : "") + (tour ? `&tournament=${tour}` : "")),
-    };
-  });
+  function scenePageUrl(page: string): string {
+    if (!tokenRef.value) return "";
+    const qs = [
+      `token=${encodeURIComponent(tokenRef.value)}`,
+      matchId.value ? `match=${encodeURIComponent(matchId.value)}` : "",
+      tournamentId.value ? `tournament=${encodeURIComponent(tournamentId.value)}` : "",
+    ]
+      .filter(Boolean)
+      .join("&");
+    return `${globalThis.location.origin}/${page}?${qs}`;
+  }
+
+  /** 合并舞台链接：单 OBS 浏览器源承载全部场景，导播控制台切场景 */
+  const stageUrl = computed(() => scenePageUrl("stage.html"));
 
   return {
+    // 接收时间展示历史（常驻 store，不随场景卸载）
+    presentation, presentationAt, liveBroadcast, emptyBroadcast, currentAlignSrc,
     // 连接
     connStatus,
     seat,
     matchId,
+    accountId,
     displayName,
     authError,
     // 比赛
     phase,
     aReady,
     bReady,
+    aOnline,
+    bOnline,
+    aPreload,
+    bPreload,
     countdownRemaining,
     countdownSource,
     currentRound,
     playerA,
     playerB,
+    presentedScore,
     winsA,
     winsB,
     threshold,
     matchWinner,
+    resultScoreReady,
     lastResult,
+    lastResultAt,
     // 名字 / 元数据
     nameA,
     nameB,
     matchName,
+    matchStatus,
     boFormat,
     winThreshold,
     scoringMethodName,
     countdownDelay,
     tournamentId,
+    speedrunA,
+    speedrunB,
     metaReady,
     // 日志
     messages,
+    chatLines,
     draft,
+    // subsegment 实时时间差（偏差条数据源）+ 到达时刻（防剧透门控）
+    subsegmentGap,
+    subsegmentGapAt,
+    // 对齐角色与公共时间线重锚控制
+    alignRole, timelineVersion, anchorAdjustment, resetPending, canEditAnchor, canAdjustAnchor, applyAnchorDelay, recoverPlayback,
+    // 双席 live_time 实时计时（主计时器实时走表数据源）
+    liveTimeA,
+    liveTimeB,
+    // 双席 UTC 时间戳（时钟同步显示数据源）
+    utcA,
+    utcB,
     // 派生 / 动作
     isMulti,
-    overlayUrl,
-    sceneUrls,
+    matchEnded,
+    stageUrl,
+    scenePageUrl,
+    // 导演指令（WS 广播 → 舞台）
+    currentSceneCmd,
+    soonCmdState,
+    remoteConfig,
+    sendDirectorCommand,
     connect,
     connectWithAuth,
     disconnect,
     nameOf,
     playerOf,
+    liveTimeOf,
+    utcOf,
   };
 });

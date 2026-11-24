@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import { ElMessageBox } from "element-plus";
+import { Delete } from "@element-plus/icons-vue";
 import { useI18n } from "vue-i18n";
 import {
   CATEGORY_KINDS,
@@ -12,24 +13,118 @@ import {
 } from "@/api/types";
 import { categoryKindOf } from "@/utils/mappool";
 import { categoryKindInfo } from "@/utils/format";
+import { useAdminStore } from "@/stores/admin";
 import MappoolPickEditor from "./MappoolPickEditor.vue";
 
 const { t } = useI18n();
+const admin = useAdminStore();
+void admin.loadCustomTags();
 
 /**
- * 图池编辑器：类别（kind）→ 选图。
+ * 图池编辑器：左侧类别侧栏 → 右侧当前类别选图。
  *
- * 类别名即文档固定 kind（ML/IL/CP/CT/EX/TB），故用下拉而非自由文本；每个 kind 至多一个类别，
+ * 类别名即文档固定 kind（ML/IL/CP/CT/EX/TB），创建后不可更改；每个 kind 至多一个类别，
  * TB 类别限定 1 个选图。直接 mutate 父级传入的 reactive mappool 引用。
  */
 const props = defineProps<{ mappool: Mappool }>();
 
-const kindOptions = CATEGORY_KINDS.map((k) => {
-  const info = categoryKindInfo(k);
-  return { value: k, short: info?.short ?? k, label: info?.label ?? k };
+// 独立保留载入时的标签；切换类别导致子编辑器重建时，仍能识别未保存的自动勾选。
+let savedPickTags = new WeakMap<Pick, string | null>();
+function savedTagOf(pick: Pick): string | null {
+  if (!savedPickTags.has(pick)) savedPickTags.set(pick, pick.tag ?? null);
+  return savedPickTags.get(pick) ?? null;
+}
+
+/** 为每个选图对象分配稳定的就地 key，避免不同类别/不同图池间复用同一编辑器实例。 */
+let pickIdSeed = 0;
+const pickIdMap = new WeakMap<object, number>();
+function pickKey(pick: object): number {
+  const existed = pickIdMap.get(pick);
+  if (existed !== undefined) return existed;
+  const id = ++pickIdSeed;
+  pickIdMap.set(pick, id);
+  return id;
+}
+
+/** 当前选中的类别下标；-1 表示未选择（无类别）。 */
+const selectedIndex = ref(-1);
+
+/** 新增类别时待选用的 kind；为空时不可提交。 */
+const newCategoryKind = ref("");
+
+const selectedCategory = computed(() =>
+  selectedIndex.value >= 0 && selectedIndex.value < props.mappool.categories.length
+    ? props.mappool.categories[selectedIndex.value]
+    : null,
+);
+
+/** CT 类别支持词条的选择值（旧数据未配置时回退展示词条库全部）。 */
+const selectedCtTags = computed<string[]>({
+  get() {
+    const cat = selectedCategory.value;
+    if (!cat || categoryKindOf(cat.name) !== CategoryKind.CT) return [];
+    if (cat.ct_tags) return [...cat.ct_tags];
+    return admin.customTags.map((x) => x.name);
+  },
+  set(v) {
+    const cat = selectedCategory.value;
+    if (cat && categoryKindOf(cat.name) === CategoryKind.CT) {
+      cat.ct_tags = [...v];
+    }
+  },
 });
 
-/** 各类别已用 kind（用于下拉禁用）。 */
+const allCtTagNames = computed(() => admin.customTags.map((x) => x.name));
+const isAllCtTagsSelected = computed(
+  () => allCtTagNames.value.length > 0 && allCtTagNames.value.every((t) => selectedCtTags.value.includes(t)),
+);
+const isCtTagSelectionIndeterminate = computed(() => {
+  const selected = selectedCtTags.value.filter((t) => allCtTagNames.value.includes(t));
+  return selected.length > 0 && !isAllCtTagsSelected.value;
+});
+
+function toggleAllCtTags(value: string | number | boolean): void {
+  const on = value === true || value === 1 || value === "true";
+  selectedCtTags.value = on ? [...allCtTagNames.value] : [];
+}
+
+watch(
+  () => props.mappool,
+  () => {
+    savedPickTags = new WeakMap();
+    props.mappool.categories.forEach((c) => c.picks.forEach(savedTagOf));
+    selectedIndex.value = props.mappool.categories.length > 0 ? 0 : -1;
+    newCategoryKind.value = "";
+  },
+  { immediate: true },
+);
+
+watch(
+  () => props.mappool.categories.length,
+  () => {
+    if (selectedIndex.value < 0) {
+      selectedIndex.value = props.mappool.categories.length > 0 ? 0 : -1;
+    } else if (selectedIndex.value >= props.mappool.categories.length) {
+      selectedIndex.value = props.mappool.categories.length > 0 ? props.mappool.categories.length - 1 : -1;
+    }
+  },
+);
+
+function selectCategory(ci: number): void {
+  if (ci >= 0 && ci < props.mappool.categories.length) {
+    selectedIndex.value = ci;
+  }
+}
+
+/** 尚未使用的类别选项（新增类别时可选）。 */
+const freeKindOptions = computed(() =>
+  CATEGORY_KINDS.filter((k) => !usedKinds(-1).has(k)).map((k) => {
+    const info = categoryKindInfo(k);
+    return { value: k, label: `${info?.short ?? k} · ${info?.label ?? k}` };
+  }),
+);
+
+/** 各类别已用 kind（用于新增类别时避免重复）。 */
 function usedKinds(excludeIndex: number): Set<string> {
   const s = new Set<string>();
   props.mappool.categories.forEach((c, i) => {
@@ -48,19 +143,20 @@ function firstUnusedKind(): string {
 }
 
 function addCategory(): void {
+  const name = newCategoryKind.value || firstUnusedKind();
+  if (!name || usedKinds(-1).has(name)) return;
   props.mappool.categories.push({
-    name: firstUnusedKind(),
+    name,
     picks: [],
+    // 新建 CT 类别默认启用词条库全部词条；管理端可再缩减。
+    // 词条库尚未加载完成时保持 null（旧数据回退内置词条），避免误写为空列表。
+    ct_tags:
+      name === CategoryKind.CT && admin.customTagsLoaded
+        ? admin.customTags.map((x) => x.name)
+        : null,
   });
-}
-
-function onKindChange(ci: number): void {
-  const cat = props.mappool.categories[ci];
-  // 切到 TB 时收敛到 1 个选图
-  if (categoryKindOf(cat.name) === CategoryKind.TB && cat.picks.length > 1) {
-    cat.picks = cat.picks.slice(0, 1);
-  }
-  renumberCategory(cat);
+  selectedIndex.value = props.mappool.categories.length - 1;
+  newCategoryKind.value = "";
 }
 
 /** 按类别 + 序号自动分配编号：ML→ML1/ML2…、TB→TB；未知类别保持原值。 */
@@ -85,6 +181,9 @@ async function removeCategory(ci: number): Promise<void> {
     return;
   }
   props.mappool.categories.splice(ci, 1);
+  if (selectedIndex.value >= props.mappool.categories.length) {
+    selectedIndex.value = props.mappool.categories.length > 0 ? props.mappool.categories.length - 1 : -1;
+  }
 }
 
 function addPick(ci: number): void {
@@ -123,111 +222,302 @@ const canAddCategory = computed(() => props.mappool.categories.length < CATEGORY
 
 <template>
   <div class="mappool-editor">
-    <div v-if="mappool.categories.length === 0" class="empty">
-      {{ $t("mappoolEditor.empty") }}
-    </div>
-
-    <div
-      v-for="(cat, ci) in mappool.categories"
-      :key="ci"
-      class="category-card"
-    >
-      <div class="cat-head">
-        <div class="cat-name-wrap">
-          <span class="cat-label">{{ $t("mappoolEditor.labelCategory") }}</span>
-          <el-select
-            v-model="cat.name"
-            class="cat-name-input"
-            :placeholder="$t('mappoolEditor.categoryPlaceholder')"
-            @change="onKindChange(ci)"
-          >
-            <el-option
-              v-for="o in kindOptions"
-              :key="o.value"
-              :value="o.value"
-              :label="`${o.short} · ${o.label.split(' · ')[0]}`"
-              :disabled="usedKinds(ci).has(o.value)"
-            />
-          </el-select>
-          <span class="cat-desc">{{ categoryKindInfo(cat.name)?.label }}</span>
+    <div class="editor-layout">
+      <aside class="category-sidebar">
+        <div class="sidebar-header">
+          <span class="sidebar-title">{{ $t("mappoolEditor.sidebarTitle") }}</span>
+          <span class="sidebar-hint">{{ $t("mappoolEditor.sidebarHint") }}</span>
         </div>
-        <el-button link type="danger" @click="removeCategory(ci)">
-          {{ $t("mappoolEditor.deleteCategoryBtn") }}
+
+        <div v-if="mappool.categories.length === 0" class="sidebar-empty">
+          {{ $t("mappoolEditor.emptySidebar") }}
+        </div>
+
+        <div
+          v-for="(cat, ci) in mappool.categories"
+          :key="ci"
+          class="category-row"
+          :class="{ active: ci === selectedIndex }"
+        >
+          <button type="button" class="category-item" @click="selectCategory(ci)">
+            <span class="cat-short">{{ categoryKindInfo(cat.name)?.short ?? cat.name }}</span>
+            <span class="cat-count">{{ cat.picks.length }}</span>
+          </button>
+          <el-button
+            link
+            type="danger"
+            class="cat-delete"
+            :title="$t('mappoolEditor.deleteCategoryBtn')"
+            :aria-label="$t('mappoolEditor.deleteCategoryBtn')"
+            @click="removeCategory(ci)"
+          >
+            <el-icon><Delete /></el-icon>
+          </el-button>
+        </div>
+
+        <el-select
+          v-model="newCategoryKind"
+          :placeholder="$t('mappoolEditor.categoryPlaceholder')"
+          class="new-cat-select"
+          :disabled="!canAddCategory"
+        >
+          <el-option
+            v-for="o in freeKindOptions"
+            :key="o.value"
+            :value="o.value"
+            :label="o.label"
+          />
+        </el-select>
+        <el-button
+          class="add-cat"
+          type="primary"
+          plain
+          :disabled="!canAddCategory || !newCategoryKind"
+          @click="addCategory"
+        >
+          {{ canAddCategory ? $t("mappoolEditor.addCategoryBtn") : $t("mappoolEditor.maxCategories") }}
         </el-button>
-      </div>
+      </aside>
 
-      <div class="picks">
-        <MappoolPickEditor
-          v-for="(pick, pi) in cat.picks"
-          :key="pi"
-          :pick="pick"
-          :index="pi"
-          :category-name="cat.name"
-          @remove="removePick(ci, pi)"
-        />
-      </div>
+      <section class="category-main">
+        <div v-if="!selectedCategory" class="main-empty">
+          <p>{{ $t("mappoolEditor.selectCategoryHint") }}</p>
+        </div>
 
-      <el-button
-        class="add-pick"
-        plain
-        size="small"
-        :disabled="categoryKindOf(cat.name) === CategoryKind.TB && cat.picks.length >= 1"
-        @click="addPick(ci)"
-      >
-        {{
-          categoryKindOf(cat.name) === CategoryKind.TB && cat.picks.length >= 1
-            ? $t("mappoolEditor.tbOnlyOne")
-            : $t("mappoolEditor.addPickBtn")
-        }}
-      </el-button>
+        <template v-else>
+          <div
+            v-if="categoryKindOf(selectedCategory.name) === CategoryKind.CT"
+            class="ct-tag-card"
+          >
+            <div class="ct-tag-card-head">
+              <span class="ct-tag-card-title">{{ $t("mappoolEditor.ctTagTitle") }}</span>
+            </div>
+            <el-select
+              v-model="selectedCtTags"
+              multiple
+              collapse-tags
+              :placeholder="$t('mappoolEditor.ctTagPlaceholder')"
+              class="ct-tag-select"
+              :disabled="admin.customTags.length === 0"
+            >
+              <template #header>
+                <el-checkbox
+                  :model-value="isAllCtTagsSelected"
+                  :indeterminate="isCtTagSelectionIndeterminate"
+                  :disabled="admin.customTags.length === 0"
+                  @change="toggleAllCtTags"
+                >
+                  {{ $t("mappoolEditor.selectAllCtTags") }}
+                </el-checkbox>
+              </template>
+              <el-option
+                v-for="tag in admin.customTags"
+                :key="tag.id"
+                :value="tag.name"
+                :label="tag.name"
+              />
+            </el-select>
+            <p v-if="admin.customTags.length === 0" class="ct-tag-empty">
+              {{ $t("mappoolEditor.ctTagEmpty") }}
+            </p>
+          </div>
+
+          <div class="picks">
+            <MappoolPickEditor
+              v-for="(pick, pi) in selectedCategory.picks"
+              :key="pickKey(pick)"
+              :pick="pick"
+              :saved-tag="savedTagOf(pick)"
+              :index="pi"
+              :category-name="selectedCategory.name"
+              @remove="removePick(selectedIndex, pi)"
+            />
+          </div>
+
+          <el-button
+            class="add-pick"
+            plain
+            size="small"
+            :disabled="categoryKindOf(selectedCategory.name) === CategoryKind.TB && selectedCategory.picks.length >= 1"
+            @click="addPick(selectedIndex)"
+          >
+            {{
+              categoryKindOf(selectedCategory.name) === CategoryKind.TB && selectedCategory.picks.length >= 1
+                ? $t("mappoolEditor.tbOnlyOne")
+                : $t("mappoolEditor.addPickBtn")
+            }}
+          </el-button>
+        </template>
+      </section>
     </div>
-
-    <el-button class="add-cat" type="primary" plain :disabled="!canAddCategory" @click="addCategory">
-      {{ canAddCategory ? $t("mappoolEditor.addCategoryBtn") : $t("mappoolEditor.maxCategories") }}
-    </el-button>
   </div>
 </template>
 
 <style scoped>
 .mappool-editor {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+.editor-layout {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+  height: 100%;
+  min-height: 0;
+}
+.category-sidebar {
+  width: 190px;
+  flex-shrink: 0;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
+  padding: 12px;
+  background: var(--tc-bg-soft);
+  border: 1px solid var(--tc-border);
+  border-radius: 10px;
 }
-.empty {
-  color: var(--tc-text-dim);
+.sidebar-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sidebar-title {
   font-size: 13px;
-  padding: 16px;
+  font-weight: 600;
+  color: var(--tc-text);
+}
+.sidebar-hint {
+  font-size: 11px;
+  color: var(--tc-text-dim);
+}
+.sidebar-empty {
+  font-size: 12px;
+  color: var(--tc-text-dim);
+  padding: 8px 4px;
   text-align: center;
   border: 1px dashed var(--tc-border);
   border-radius: 8px;
 }
-.category-card {
+.category-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  transition: background 0.15s, border-color 0.15s;
+}
+.category-row:hover {
+  background: var(--tc-hover);
+}
+.category-row.active {
+  background: var(--tc-bg-soft);
+  border-color: var(--tc-border);
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--el-color-primary);
+}
+.category-item {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--tc-text);
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+}
+.category-item:focus-visible {
+  outline: 2px solid var(--el-color-primary);
+  outline-offset: -2px;
+}
+.cat-delete {
+  flex-shrink: 0;
+  padding: 4px 6px;
+  margin-right: 4px;
+  font-size: 12px;
+}
+.cat-short {
+  width: 30px;
+  flex-shrink: 0;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+.cat-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--tc-text-dim);
+  background: var(--tc-hover);
+  border-radius: 10px;
+  padding: 1px 7px;
+}
+.new-cat-select {
+  width: 100%;
+  margin-top: auto;
+}
+.add-cat {
+  width: 100%;
+  margin-top: 8px;
+}
+.category-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   background: var(--tc-bg-soft);
   border: 1px solid var(--tc-border);
   border-radius: 10px;
   padding: 12px;
 }
-.cat-head {
+.main-empty {
+  flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
+  justify-content: center;
+  gap: 10px;
+  color: var(--tc-text-dim);
+  font-size: 13px;
+  text-align: center;
 }
-.cat-name-wrap {
+.main-empty p {
+  margin: 0;
+}
+.ct-tag-card {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--tc-bg);
+  border: 1px solid var(--tc-border);
+  border-radius: 10px;
+}
+.ct-tag-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
   gap: 8px;
   flex-wrap: wrap;
 }
-.cat-label {
-  font-size: 12px;
-  color: var(--tc-text-dim);
+.ct-tag-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tc-text);
 }
-.cat-name-input {
-  width: 200px;
+.ct-tag-select {
+  width: 100%;
 }
-.cat-desc {
+.ct-tag-empty {
+  margin: 0;
   font-size: 12px;
   color: var(--tc-text-dim);
 }
@@ -238,9 +528,6 @@ const canAddCategory = computed(() => props.mappool.categories.length < CATEGORY
   margin-bottom: 10px;
 }
 .add-pick {
-  width: 100%;
-}
-.add-cat {
   width: 100%;
 }
 </style>

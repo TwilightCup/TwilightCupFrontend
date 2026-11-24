@@ -12,7 +12,7 @@ import PrepPanel from "@/components/PrepPanel.vue";
 import BanPickPanel from "@/components/BanPickPanel.vue";
 import VerdictPanel from "@/components/VerdictPanel.vue";
 import PlayerStatusCard from "@/components/PlayerStatusCard.vue";
-import CounterWidget from "@/components/CounterWidget.vue";
+import PlayerMonitorPanel from "@/components/PlayerMonitorPanel.vue";
 import ChatPanel from "@/components/ChatPanel.vue";
 import RoundHistoryDrawer from "@/components/RoundHistoryDrawer.vue";
 import AuthFailMask from "@/components/AuthFailMask.vue";
@@ -24,6 +24,12 @@ const route = useRoute();
 const router = useRouter();
 
 const historyOpen = ref(false);
+const mainEl = ref<HTMLElement | null>(null);
+/** 三栏模式中，按可用高度反推可完整容纳两张 16:9 选手画面的中栏宽度 */
+const middleWidth = ref(340);
+
+/** 已结束比赛：只读查看，隐藏全部裁判操作面板。 */
+const readOnly = computed(() => match.matchEnded);
 
 const inDraftPhase = computed(
   () => match.canMarkPrep || match.phase === MatchPhase.PREP,
@@ -39,12 +45,44 @@ const showVerdict = computed(
   () =>
     match.phase === MatchPhase.IN_ROUND || match.phase === MatchPhase.ROUND_JUDGING,
 );
+/** 准备阶段 / 倒计时阶段 / 回合进行阶段显示选手画面监控。
+ *  取消选图回到 PICK/TB_FORCE 后即使服务端仍是 PREP，也不显示三栏监控。 */
+const showPlayerMonitor = computed(
+  () =>
+    match.phase === MatchPhase.COUNTDOWN ||
+    match.phase === MatchPhase.IN_ROUND ||
+    (match.phase === MatchPhase.PREP && draft.state.stage === "PREP"),
+);
+
+function updateMiddleWidth(): void {
+  const main = mainEl.value;
+  if (!main) return;
+  const h = main.clientHeight;
+  if (!h) return;
+  // 两张 16:9 画面纵向排列：减去卡片内边距、间距等固定开销，
+  // 再按每张 16:9 反推中栏最大宽度，保证两个画面都能完整落入可视高度。
+  const overhead = 30;
+  const frameArea = Math.max(100, h - overhead);
+  const byHeight = Math.max(260, Math.round((frameArea / 2) * 16 / 9));
+  const availableWidth = main.clientWidth - 360 - 48 - 220;
+  middleWidth.value = Math.min(byHeight, Math.max(240, availableWidth));
+}
+
+let mainResize: ResizeObserver | null = null;
 
 function logout(): void {
   match.$reset();
   draft.$reset();
   auth.logout();
   router.replace("/login");
+}
+
+/** 进入一场比赛：先清掉上一场（/上一次登录）残留的 match + draft，再建立新连接。 */
+function openMatch(sid: string): void {
+  historyOpen.value = false;
+  match.$reset();
+  draft.$reset();
+  match.connect(sid);
 }
 
 /** 比赛就绪后拉取结构化图池（admin-as-referee 成功；纯裁判 403 → 回退手动）。 */
@@ -58,21 +96,50 @@ watch(
   { immediate: true },
 );
 
+// 同一 MatchView 实例在 /referee/:matchId 间跳转时会被 Vue Router 复用，
+// 必须监听路由参数变化主动切场，不能只依赖 onMounted 的一次 connect。
+watch(
+  () => route.params.matchId,
+  (sid) => {
+    if (!auth.isLoggedIn) {
+      router.replace("/login");
+      return;
+    }
+    const s = String(sid ?? "");
+    if (!s) {
+      router.replace("/referee");
+      return;
+    }
+    openMatch(s);
+  },
+  { immediate: true },
+);
+
 onMounted(() => {
   if (!auth.isLoggedIn) {
     router.replace("/login");
-    return;
   }
-  const sid = String(route.params.matchId ?? "");
-  if (!sid) {
-    router.replace("/referee");
-    return;
-  }
-  match.connect(sid);
 });
 
+// 三栏主区域尺寸变化（含切场重建 <main>）时重新计算中栏宽度。
+watch(
+  mainEl,
+  (el) => {
+    mainResize?.disconnect();
+    mainResize = null;
+    if (!el) return;
+    mainResize = new ResizeObserver(updateMiddleWidth);
+    mainResize.observe(el);
+    updateMiddleWidth();
+  },
+  { immediate: true, flush: "post" },
+);
+
 onUnmounted(() => {
-  match.disconnect();
+  mainResize?.disconnect();
+  mainResize = null;
+  match.$reset();
+  draft.$reset();
 });
 </script>
 
@@ -91,8 +158,15 @@ onUnmounted(() => {
       {{ $t('conn.connectingBanner', { action: $t(match.connStatus === 'reconnecting' ? 'conn.action.reconnect' : 'conn.action.connect') }) }}
     </div>
 
-    <main class="main">
-      <div class="col-center">
+    <main ref="mainEl" :key="String(route.params.matchId)" class="main" :class="{ 'three-col': showPlayerMonitor }">
+      <div v-if="showPlayerMonitor" class="col-left">
+        <PlayerStatusCard side="A" />
+        <PlayerStatusCard side="B" />
+      </div>
+
+      <div class="col-center" :style="showPlayerMonitor ? { width: `${middleWidth}px` } : undefined">
+        <PlayerMonitorPanel v-if="showPlayerMonitor && !readOnly" />
+
         <el-alert
           v-if="!match.metaReady"
           type="info"
@@ -103,7 +177,7 @@ onUnmounted(() => {
           {{ $t('matchView.coldAlert') }}
         </el-alert>
 
-        <CountdownBanner />
+        <CountdownBanner v-if="match.phase !== MatchPhase.COUNTDOWN" />
 
         <!-- 胜负已定：手动收尾横幅（结束比赛/踢选手由裁判触发） -->
         <MatchEndBanner v-if="match.winnerDecided && !match.matchEnded" />
@@ -114,26 +188,32 @@ onUnmounted(() => {
           show-icon
           class="ended-alert"
         >
-          {{ $t('matchEndBanner.endedAlert') }}
+          {{ $t('matchView.endedReadonly') }}
         </el-alert>
 
-        <BanPickPanel v-if="showBanPick" />
-        <PrepPanel v-if="showPrepFallback" />
-        <VerdictPanel v-if="showVerdict" />
+        <template v-if="!showPlayerMonitor">
+          <BanPickPanel v-if="showBanPick && !readOnly" />
+          <PrepPanel v-if="showPrepFallback && !readOnly" />
+          <VerdictPanel v-if="showVerdict && !readOnly" />
+        </template>
 
-        <div class="players">
+        <div v-if="!showPlayerMonitor" class="players">
           <PlayerStatusCard side="A" />
           <PlayerStatusCard side="B" />
         </div>
       </div>
 
       <div class="col-right">
-        <CounterWidget />
-        <ChatPanel />
+        <template v-if="showPlayerMonitor">
+          <BanPickPanel v-if="showBanPick && !readOnly" />
+          <PrepPanel v-if="showPrepFallback && !readOnly" />
+          <VerdictPanel v-if="showVerdict && !readOnly" />
+        </template>
+        <ChatPanel :read-only="readOnly" />
       </div>
     </main>
 
-    <RoundHistoryDrawer v-model="historyOpen" />
+    <RoundHistoryDrawer v-model="historyOpen" :read-only="readOnly" />
 
     <!-- 鉴权失败遮罩（无活动比赛时可不登出，返回主页 / 切换端） -->
     <Transition name="fade">
@@ -166,6 +246,21 @@ onUnmounted(() => {
   gap: 12px;
   padding: 12px;
 }
+.col-left {
+  flex: 1 1 0;
+  min-width: 220px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+}
+/* 左栏两张卡片各占半高；内容多时在卡片内部滚动 */
+.main.three-col .col-left :deep(.card) {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+}
 .col-center {
   flex: 1;
   min-width: 0;
@@ -174,6 +269,41 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 4px;
   overflow-y: auto;
+}
+/* 三栏模式下中栏宽度由 JS 按 16:9 画面高度反推，左栏吃掉剩余宽度 */
+.main.three-col .col-center {
+  flex: 0 1 auto;
+}
+/* 三栏模式下中栏监控面板填满可用高度；流画面始终按 16:9 展示 */
+.main.three-col .col-center :deep(.monitor) {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0;
+}
+.main.three-col .col-center :deep(.monitor .title) {
+  flex: 0 0 auto;
+}
+.main.three-col .col-center :deep(.monitor .monitor-grid) {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.main.three-col .col-center :deep(.monitor .monitor-side) {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.main.three-col .col-center :deep(.monitor .monitor-side .stream-wrap) {
+  flex: 0 0 auto;
+}
+.main.three-col .col-center :deep(.monitor .monitor-side .frame) {
+  flex: 0 0 auto;
+  width: 100%;
+  min-height: 0;
 }
 .col-right {
   width: 360px;

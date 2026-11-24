@@ -1,3 +1,5 @@
+import { useStreamLinksStore } from "./streamLinks";
+import { mergeMessageHistory } from "@/utils/mergeMessageHistory";
 /**
  * 比赛中央状态：WebSocket 连接、阶段/比分/选手实时状态、聊天、回合历史。
  *
@@ -10,12 +12,13 @@
  */
 import { defineStore } from "pinia";
 import { computed, reactive, ref } from "vue";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 
 import { api } from "@/api/client";
 import {
   AttemptStatus,
   MatchPhase,
+  MatchStatus,
   PlayerStatus,
   RoundVerdict,
   type Attempt,
@@ -52,6 +55,12 @@ export interface ChatLine {
   text: string;
   ts: string;
   systemKind?: string;
+}
+
+/** 某席最近一条 UTC 时间戳（receivedAt = 本地接收时刻） */
+export interface UtcTimestamp {
+  utcMs: number;
+  receivedAt: number;
 }
 
 type Side = "A" | "B";
@@ -95,6 +104,18 @@ let liveSeq = 0;
 
 export const useMatchStore = defineStore("match", () => {
   const auth = useAuthStore();
+  const streamLinks = useStreamLinksStore();
+
+  /**
+   * 连接/加载世代号。每次切场或重置都会递增；所有异步 REST 重建（match detail、
+   * match_log、回合明细、聊天）都在写回前校验世代号 + 当前 matchId，避免上一场
+   * 的迟到响应把当前场数据覆盖成错乱。
+   */
+  let loadEpoch = 0;
+
+  function isCurrentSession(epoch: number, sid: string): boolean {
+    return epoch === loadEpoch && matchId.value === sid;
+  }
 
   // --- 连接 ---
   const connStatus = ref<ConnStatus>("idle");
@@ -104,6 +125,8 @@ export const useMatchStore = defineStore("match", () => {
 
   // --- 比赛元数据（来自 match_log.initial_info，可能尚未就绪）---
   const matchName = ref("");
+  /** 比赛状态（来自 /me/matches/{id}；已结束比赛进入只读查看用） */
+  const matchStatus = ref<MatchStatus | null>(null);
   const boFormat = ref(0);
   const winThreshold = ref(0);
   const scoringMethodName = ref<string>("");
@@ -126,12 +149,18 @@ export const useMatchStore = defineStore("match", () => {
   // --- 准备状态 ---
   const aReady = ref(false);
   const bReady = ref(false);
+  /** 双方预载状态（preload_state 广播；absent = 从未上报/无预载） */
+  const aPreload = ref<"absent" | "in_progress" | "done" | "failed" | "na">("absent");
+  const bPreload = ref<"absent" | "in_progress" | "done" | "failed" | "na">("absent");
 
   // --- 双方实时状态 ---
   const players = reactive<{ A: PlayerLive; B: PlayerLive }>({
     A: freshPlayer(),
     B: freshPlayer(),
   });
+  // 双席最近一条 UTC 时间戳（裁判侧时钟同步/监控用；连接级遥测，不随回合清空）
+  const utcA = ref<UtcTimestamp | null>(null);
+  const utcB = ref<UtcTimestamp | null>(null);
 
   // --- 比分 ---
   const winsA = ref(0);
@@ -158,6 +187,10 @@ export const useMatchStore = defineStore("match", () => {
 
   const metaReady = computed(() => !!matchName.value || pickCodes.value.length > 0);
   const bothReady = computed(() => aReady.value && bReady.value);
+  /** 存在预载未完的席位（手动开始确认提示用） */
+  const preloadIncomplete = computed(
+    () => aPreload.value === "in_progress" || bPreload.value === "in_progress",
+  );
   const canMarkPrep = computed(
     () => phase.value === MatchPhase.IDLE || phase.value === MatchPhase.ROUND_END,
   );
@@ -165,7 +198,10 @@ export const useMatchStore = defineStore("match", () => {
   const canVerdict = computed(
     () => phase.value === MatchPhase.ROUND_JUDGING && !!currentRoundId.value,
   );
-  const matchEnded = computed(() => phase.value === MatchPhase.MATCH_END);
+  const matchEnded = computed(
+    () =>
+      phase.value === MatchPhase.MATCH_END || matchStatus.value === MatchStatus.ENDED,
+  );
   /** 胜负已定：某方达到取胜分数（达阈值后比赛不自动结束，等裁判手动收尾） */
   const decidedWinner = computed<"A" | "B" | null>(() => {
     if (winThreshold.value <= 0) return null;
@@ -207,17 +243,47 @@ export const useMatchStore = defineStore("match", () => {
   // 连接生命周期
   // =========================================================================
 
-  function connect(matchId?: string): void {
+  function connect(requestedMatchId?: string): void {
     if (!auth.token) return;
+    // 每次建立连接都视为一个全新会话：让上一连接尚未完成的 REST 回填全部失效。
+    loadEpoch += 1;
+    const target = requestedMatchId ?? null;
+    // 切到另一场比赛（或从已清空状态重新建立连接）前先清掉上一场残留数据，
+    // 避免旧数据在 auth_ok/REST 回来前短暂显示，也避免旧异步请求写回新场。
+    if (target !== matchId.value) {
+      streamLinks.clear();
+      $reset();
+    }
     authErrorMessage.value = "";
     if (!socket) {
       socket = new MatchSocket();
       socket.onMessage = handleMessage;
       socket.onStatusChange = (s) => {
         connStatus.value = s;
+        // 被同账号新窗口顶掉（exclusive 接管）：弹窗告知；确认可反手接管回来
+        if (s === "displaced") void promptDisplaced(() => connect(lastMatchId()));
       };
     }
-    socket.connect(auth.token, "REFEREE", matchId);
+    // exclusive：独占裁判身份（账号+比赛）——本窗口顶掉旧窗口，也接受被新窗口顶掉
+    socket.connect(auth.token, "REFEREE", requestedMatchId, true);
+  }
+
+  /** 当前执裁比赛 id：优先 auth_ok 回填的 matchId，兜底连接时传入的选场参数 */
+  function lastMatchId(): string | undefined {
+    return matchId.value || undefined;
+  }
+
+  /** 「已被其他窗口接管」弹窗：确认=重新接管（顶掉对方），关闭=留在本页不再重连 */
+  async function promptDisplaced(retake: () => void): Promise<void> {
+    try {
+      await ElMessageBox.alert(tr("conn.displacedMsg"), tr("conn.displacedTitle"), {
+        type: "warning",
+        confirmButtonText: tr("conn.retakeBtn"),
+      });
+      retake();
+    } catch {
+      // 右上角关闭/ESC：留在本页（socket 已终态停止重连，可手动刷新恢复）
+    }
   }
 
   function disconnect(): void {
@@ -230,24 +296,36 @@ export const useMatchStore = defineStore("match", () => {
 
   function handleMessage(msg: ServerMessage): void {
     switch (msg.type) {
+      case "stream_links_update":
+        streamLinks.receive(msg.payload);
+        break;
       case "auth_ok":
         matchId.value = msg.match_id;
         seat.value = msg.seat;
+        void streamLinks.activate(auth.token, msg.match_id, msg.account_id);
         if (msg.match_name) matchName.value = msg.match_name;
         // 双方选手名：auth_ok 即带（后端已补），连入即有
         if (msg.player_a_name) playerNames.A = msg.player_a_name;
         if (msg.player_b_name) playerNames.B = msg.player_b_name;
         authErrorMessage.value = "";
+        // 新连接/换场先清旧 UTC 遥测，随后服务端握手会补发当前双方最近值
+        utcA.value = null;
+        utcB.value = null;
         void loadMatchDetail();
         void loadHistory();
         break;
       case "auth_error":
+        streamLinks.clear();
         authErrorMessage.value = msg.msg || tr("toast.matchAuthFailed");
         socket?.disconnect();
         break;
       case "ready_state":
         aReady.value = msg.a_ready;
         bReady.value = msg.b_ready;
+        break;
+      case "preload_state":
+        aPreload.value = msg.a_status;
+        bPreload.value = msg.b_status;
         break;
       case "seat_state":
         if (msg.seat === "PLAYER_A" || msg.seat === "PLAYER_B") {
@@ -276,6 +354,17 @@ export const useMatchStore = defineStore("match", () => {
         // player_status 会随后带全量状态；此处仅作最小更新兜底
         applyLevelTimeUpdate(msg.seat, msg);
         break;
+      case "utc_timestamp": {
+        // 选手 UTC 时间戳：连接级遥测，按席覆盖最近一条（服务端已按席暂存，
+        // 晚连握手里也会先补发）。用于裁判侧时钟同步/监控展示。
+        const sample: UtcTimestamp = {
+          utcMs: msg.utc_ms,
+          receivedAt: Date.now(),
+        };
+        if (msg.seat === "PLAYER_A") utcA.value = sample;
+        else if (msg.seat === "PLAYER_B") utcB.value = sample;
+        break;
+      }
       case "round_result":
         applyRoundResult(msg.round_id, msg.verdict, msg.score_a_ms ?? null, msg.score_b_ms ?? null);
         break;
@@ -311,7 +400,7 @@ export const useMatchStore = defineStore("match", () => {
         pushChat({
           id: `live-${liveSeq++}`,
           kind: "system",
-          senderName: "System",
+          senderName: msg.sender ?? "Twilight",
           text: msg.text,
           ts: msg.ts,
           systemKind: msg.kind,
@@ -450,28 +539,23 @@ export const useMatchStore = defineStore("match", () => {
   }
 
   function ingestChatLog(log: ChatMessage[]): void {
-    if (log.length === 0) return;
-    if (messages.value.length === 0) {
-      messages.value = log.map(toLine);
-      for (const m of log) knownIds.add(m.id);
-    } else {
-      for (const m of log) {
-        if (!knownIds.has(m.id)) {
-          knownIds.add(m.id);
-          messages.value.push(toLine(m));
-        }
-      }
-    }
+    messages.value = mergeMessageHistory(messages.value, log.map(toLine),
+      row => JSON.stringify([row.kind, row.senderName, row.text]));
+    knownIds.clear();
+    for (const row of messages.value) knownIds.add(row.id);
   }
 
   function toLine(m: ChatMessage): ChatLine {
     return {
       id: m.id,
       kind: m.is_system ? "system" : "user",
-      senderName: m.is_system ? "System" : m.sender_name,
+      senderName: m.sender_name, // 系统消息为 "Twilight"（旧记录可能是 "System"，按存储值展示）
       text: m.text,
       ts: m.ts,
       systemKind: m.is_system ? "info" : undefined,
+      seat: m.sender_id && m.sender_id === players.A.accountId ? "PLAYER_A"
+        : m.sender_id && m.sender_id === players.B.accountId ? "PLAYER_B"
+        : m.sender_role === 2 ? "REFEREE" : undefined,
     };
   }
 
@@ -488,14 +572,18 @@ export const useMatchStore = defineStore("match", () => {
    */
   async function loadMatchDetail(): Promise<void> {
     if (!matchId.value || !auth.token) return;
+    const epoch = loadEpoch;
+    const sid = matchId.value;
     try {
-      const m = await api.getMyMatch(matchId.value, auth.token);
+      const m = await api.getMyMatch(sid, auth.token);
+      if (!isCurrentSession(epoch, sid)) return;
       if (m.player_a_id) players.A.accountId = m.player_a_id;
       if (m.player_b_id) players.B.accountId = m.player_b_id;
       if (m.player_a_username) playerNames.A = m.player_a_username;
       if (m.player_b_username) playerNames.B = m.player_b_username;
       if (m.bo_format) boFormat.value = m.bo_format;
       if (m.win_threshold) winThreshold.value = m.win_threshold;
+      matchStatus.value = m.status;
     } catch {
       // 纯裁判无权或网络失败：保持空，由 match_log/WS 兜底
     }
@@ -503,19 +591,22 @@ export const useMatchStore = defineStore("match", () => {
 
   async function loadHistory(): Promise<void> {
     if (!matchId.value || !auth.token) return;
-    historyLoading.value = true;
+    const epoch = loadEpoch;
     const sid = matchId.value;
+    historyLoading.value = true;
     try {
-      // match_log + 全部回合明细 + 比分 + 图池元数据
-      await refreshRounds();
-      try {
-        const chat = await api.getChatLog(sid, auth.token);
-        ingestChatLog(chat);
-      } catch {
-        // 聊天日志拉取失败不阻断
-      }
+      // Chat must not wait for every round request (or a stalled round endpoint).
+      await Promise.all([
+        refreshRounds(),
+        (async () => {
+          try {
+            const chat = await api.getChatLog(sid, auth.token!);
+            if (isCurrentSession(epoch, sid)) ingestChatLog(chat.filter(row => row.match_id === sid));
+          } catch { /* Keep live messages; reconnect retries history. */ }
+        })(),
+      ]);
     } finally {
-      historyLoading.value = false;
+      if (isCurrentSession(epoch, sid)) historyLoading.value = false;
     }
   }
 
@@ -538,10 +629,13 @@ export const useMatchStore = defineStore("match", () => {
   /** 拉取全部回合明细，重建比分/图池信息/历史缓存 */
   async function refreshRounds(): Promise<void> {
     if (!matchId.value || !auth.token) return;
+    const epoch = loadEpoch;
+    const sid = matchId.value;
     // 先取 match_log：拿到 initial_info（元数据/图池编号）与回合总数
     let count = roundsCache.value.length;
     try {
-      const log = await api.getMatchLog(matchId.value, auth.token);
+      const log = await api.getMatchLog(sid, auth.token);
+      if (!isCurrentSession(epoch, sid)) return;
       applyInitialInfo(log);
       count = Math.max(count, log.round_ids.length);
       if (log.final_result?.winner) {
@@ -550,16 +644,18 @@ export const useMatchStore = defineStore("match", () => {
     } catch {
       // 首回合开始前日志尚不存在（404）：保持已有缓存，无回合可拉
     }
-    if (count === 0) return;
+    if (!isCurrentSession(epoch, sid) || count === 0) return;
     const list: RoundRecord[] = [];
     for (let i = 1; i <= count; i++) {
       try {
-        list.push(await api.getRoundDetail(matchId.value, i, auth.token));
+        const r = await api.getRoundDetail(sid, i, auth.token);
+        if (!isCurrentSession(epoch, sid)) return;
+        list.push(r);
       } catch {
         break; // 回合不存在即到边界
       }
     }
-    if (list.length === 0) return;
+    if (!isCurrentSession(epoch, sid) || list.length === 0) return;
     list.sort((a, b) => a.round_no - b.round_no);
     roundsCache.value = list;
     // 丰富图池展示信息
@@ -596,8 +692,8 @@ export const useMatchStore = defineStore("match", () => {
   function selectPick(code: string, tags?: string[], retryCount?: number): void {
     const c = code.trim();
     if (!c) return;
-    // 仅 CT/EX/CP 选图携带词条、CT/EX 单关携带重试次数；
-    // 发送失败（含服务端校验 error）时保留原选择，不清空
+    // 词条：CT/EX/CP 选图携带，以及 ML/IL/CP/TB 的固有 Glitchless；
+    // CT/EX 单关携带重试次数；发送失败（含服务端校验 error）时保留原选择，不清空
     const sendTags = tags && tags.length > 0 ? tags : undefined;
     const sendRetry = retryCount != null ? retryCount : undefined;
     if (socket?.send(send.refereeSelectPick(c, sendTags, sendRetry))) {
@@ -605,6 +701,13 @@ export const useMatchStore = defineStore("match", () => {
       pendingTags.value = sendTags ?? [];
       pendingRetry.value = sendRetry ?? null;
     }
+  }
+
+  /** 取消当前尚未开始的选图（仅改本地 pending，服务端仍以之后的新选图覆盖）。 */
+  function clearPendingPick(): void {
+    pendingPickCode.value = null;
+    pendingTags.value = [];
+    pendingRetry.value = null;
   }
 
   function manualStart(): void {
@@ -646,6 +749,7 @@ export const useMatchStore = defineStore("match", () => {
   // =========================================================================
 
   function $reset(): void {
+    loadEpoch += 1;
     disconnect();
     socket = null;
     connStatus.value = "idle";
@@ -653,6 +757,7 @@ export const useMatchStore = defineStore("match", () => {
     seat.value = null;
     authErrorMessage.value = "";
     matchName.value = "";
+    matchStatus.value = null;
     boFormat.value = 0;
     winThreshold.value = 0;
     scoringMethodName.value = "";
@@ -668,12 +773,17 @@ export const useMatchStore = defineStore("match", () => {
     countdown.value = null;
     aReady.value = false;
     bReady.value = false;
+    aPreload.value = "absent";
+    bPreload.value = "absent";
     players.A = freshPlayer();
     players.B = freshPlayer();
+    utcA.value = null;
+    utcB.value = null;
     winsA.value = 0;
     winsB.value = 0;
     matchWinner.value = null;
     roundsCache.value = [];
+    historyLoading.value = false;
     messages.value = [];
     knownIds.clear();
     chatInput.value = "";
@@ -689,6 +799,7 @@ export const useMatchStore = defineStore("match", () => {
     seat,
     authErrorMessage,
     matchName,
+    matchStatus,
     boFormat,
     winThreshold,
     scoringMethodName,
@@ -704,7 +815,11 @@ export const useMatchStore = defineStore("match", () => {
     countdown,
     aReady,
     bReady,
+    aPreload,
+    bPreload,
     players,
+    utcA,
+    utcB,
     playerNames,
     winsA,
     winsB,
@@ -717,6 +832,7 @@ export const useMatchStore = defineStore("match", () => {
     // 计算
     metaReady,
     bothReady,
+    preloadIncomplete,
     canMarkPrep,
     canManualStart,
     canVerdict,
@@ -732,6 +848,7 @@ export const useMatchStore = defineStore("match", () => {
     sendChat,
     markPrep,
     selectPick,
+    clearPendingPick,
     manualStart,
     sendDraft,
     doVerdict,

@@ -6,8 +6,8 @@
  * （fixtureId 无对应 score，如未开始 / 比分拉取失败）。
  */
 import { computed } from "vue";
-import { useI18n } from "vue-i18n";
 import { FixtureStatus, type FixtureOut } from "@/api/types";
+import { bi } from "@/utils/bilingual";
 
 const props = defineProps<{
   fixture: FixtureOut;
@@ -18,8 +18,6 @@ const props = defineProps<{
   /** 该对阵是否处于当前轮（高亮整张卡） */
   isCurrent: boolean;
 }>();
-
-const { t } = useI18n();
 
 const isRunning = computed(() => props.fixture.status === FixtureStatus.RUNNING);
 const winnerIsA = computed(
@@ -40,7 +38,7 @@ const hasScore = computed(
   <div class="card neon-panel" :class="{ current: isCurrent, running: isRunning }">
     <!-- A（蓝，上） -->
     <div class="side" :class="{ win: winnerIsA, bye: fixture.is_bye }">
-      <span class="nm">{{ fixture.is_bye ? t('scenes.bracket.bye') : nameOf(fixture.player_a_id) }}</span>
+      <span class="nm">{{ fixture.is_bye ? bi('scenes.bracket.bye') : nameOf(fixture.player_a_id) }}</span>
       <span class="sc">{{ hasScore ? scoreA : '—' }}</span>
     </div>
     <div class="divider" />
@@ -49,7 +47,7 @@ const hasScore = computed(
       <span class="nm">{{ nameOf(fixture.player_b_id) }}</span>
       <span class="sc">{{ hasScore ? scoreB : '—' }}</span>
     </div>
-    <span v-if="isCurrent" class="cur-tag">{{ t('scenes.bracket.currentRound') }}</span>
+    <span v-if="isCurrent" class="cur-tag">{{ bi('scenes.bracket.currentRound') }}</span>
   </div>
 </template>
 

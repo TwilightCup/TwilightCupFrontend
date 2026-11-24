@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { h, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useI18n } from "vue-i18n";
 import { useMatchStore } from "@/stores/match";
 import { MatchPhase } from "@/api/types";
+import { preloadTagInfo } from "@/utils/format";
 import { useCtTagSelect } from "@/composables/useCtTagSelect";
 
 const { t } = useI18n();
@@ -44,14 +45,23 @@ function applyPick(): void {
   match.selectPick(code, ctTags.prepareSubmit(code), ctTags.needsRetry.value ? (retryInput.value ?? 1) : undefined);
 }
 
+/** 预载徽标映射已提取至 format.ts（preloadTagInfo），导播端共用 */
+
 async function confirmManualStart(): Promise<void> {
   if (!match.pendingPickCode) {
     ElMessage.warning(t("prep.pickBeforeManual"));
     return;
   }
+  // 存在预载未完席位时，确认框追加强制开始的后果提示
+  const message = match.preloadIncomplete
+    ? h("div", null, [
+        h("div", null, t("prep.manualConfirmMsg")),
+        h("div", { style: "margin-top: 8px;" }, t("prep.preloadIncompleteWarning")),
+      ])
+    : t("prep.manualConfirmMsg");
   try {
     await ElMessageBox.confirm(
-      t("prep.manualConfirmMsg"),
+      message,
       t("prep.manualConfirmTitle"),
       { type: "warning", confirmButtonText: t("prep.manualConfirmBtn"), cancelButtonText: t("common.cancel") },
     );
@@ -159,15 +169,25 @@ const isPrep = () => match.phase === MatchPhase.PREP;
         <div class="ready-row">
           <div class="ready a" :class="{ on: match.aReady }">
             <span class="who">{{ match.playerNames.A || $t('seat.a') }}</span>
-            <el-tag :type="match.aReady ? ('success' as const) : ('info' as const)" effect="dark">
-              {{ match.aReady ? $t('playerStatus.ready') : $t('playerStatus.notReady') }}
-            </el-tag>
+            <span class="ready-tags">
+              <el-tag :type="match.aReady ? ('success' as const) : ('info' as const)" effect="dark">
+                {{ match.aReady ? $t('playerStatus.ready') : $t('playerStatus.notReady') }}
+              </el-tag>
+              <el-tag :type="preloadTagInfo(match.aPreload).type" effect="plain">
+                {{ $t(preloadTagInfo(match.aPreload).key) }}
+              </el-tag>
+            </span>
           </div>
           <div class="ready b" :class="{ on: match.bReady }">
             <span class="who">{{ match.playerNames.B || $t('seat.b') }}</span>
-            <el-tag :type="match.bReady ? ('success' as const) : ('info' as const)" effect="dark">
-              {{ match.bReady ? $t('playerStatus.ready') : $t('playerStatus.notReady') }}
-            </el-tag>
+            <span class="ready-tags">
+              <el-tag :type="match.bReady ? ('success' as const) : ('info' as const)" effect="dark">
+                {{ match.bReady ? $t('playerStatus.ready') : $t('playerStatus.notReady') }}
+              </el-tag>
+              <el-tag :type="preloadTagInfo(match.bPreload).type" effect="plain">
+                {{ $t(preloadTagInfo(match.bPreload).key) }}
+              </el-tag>
+            </span>
           </div>
         </div>
         <p class="tip">
@@ -256,6 +276,11 @@ const isPrep = () => match.phase === MatchPhase.PREP;
 }
 .ready .who {
   font-weight: 600;
+}
+.ready-tags {
+  display: flex;
+  gap: 6px;
+  align-items: center;
 }
 .ready.a .who {
   color: var(--tc-a);

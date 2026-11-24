@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, h, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useDraftStore, type Side } from "@/stores/draft";
 import { useMatchStore } from "@/stores/match";
-import { MatchPhase, PickType, type Pick } from "@/api/types";
+import { MatchPhase, type Pick } from "@/api/types";
 import { categoryKindInfo } from "@/utils/format";
 
 /**
@@ -127,15 +127,12 @@ function isCtPick(p: Pick): boolean {
   return k === "CT" || k === "EX";
 }
 
-/** 词条候选：CT 过滤本场已 ban，EX 不受禁用词条约束；单关含 Achievement。 */
+/** 词条候选：按当前图池 CT 类别配置；CT 过滤本场已 ban，EX 不受禁用词条约束。 */
 const ctDialogOptions = computed<{ value: string; disabled: boolean }[]>(() => {
   const code = ctDialogCode.value;
   const p = code ? draft.pickByCode(code) : null;
-  const single = p?.type === PickType.SINGLE;
   const isEx = code ? draft.kindOfCode(code) === "EX" : false;
-  const known = single
-    ? [...draft.ctTagChoices, "Achievement"]
-    : [...draft.ctTagChoices];
+  const known = p ? draft.ctTagChoicesFor(p) : [];
   return known
     .filter((tg) => isEx || !draft.state.bannedTags.includes(tg))
     .map((tg) => ({
@@ -188,70 +185,31 @@ function submitCtPick(): void {
   draft.confirmPickWithOptions(code, [...ctDialogTags.value], ctDialogRetry.value ?? undefined);
 }
 
-// --- PREP：CT/EX 选图可调整词条、CT/EX 单关可调整重试次数后重新提交 ---
-const prepTagInput = ref<string[]>([]);
-const prepRetryInput = ref<number | null>(null);
-const prepIsCt = computed(() => {
-  const code = match.pendingPickCode;
-  if (!code) return false;
-  const k = draft.kindOfCode(code);
-  return (k === "CT" || k === "EX") && draft.ctTagCount > 0;
-});
-const prepKind = computed(() => (match.pendingPickCode ? draft.kindOfCode(match.pendingPickCode) : null));
-const prepIsCp = computed(() => prepKind.value === "CP");
-const prepIsEx = computed(() => prepKind.value === "EX");
-const prepSingle = computed(() => {
-  const p = match.pendingPickCode ? draft.pickByCode(match.pendingPickCode) : null;
-  return p?.type === PickType.SINGLE;
-});
-/** CT/EX 单关：重试次数可在此调整（初值沿用已提交值） */
-const prepNeedsRetry = computed(() =>
-  match.pendingPickCode ? draft.needsRefereeRetry(match.pendingPickCode) : false,
-);
-const prepTagOptions = computed<{ value: string; disabled: boolean }[]>(() => {
-  const known = prepSingle.value
-    ? [...draft.ctTagChoices, "Achievement"]
-    : [...draft.ctTagChoices];
-  // EX 不受本场禁用词条约束
-  return known
-    .filter((tg) => prepIsEx.value || !draft.state.bannedTags.includes(tg))
-    .map((tg) => ({
-      value: tg,
-      disabled: (tg === "Checkpoint" && prepTagInput.value.includes("No Checkpoint")) ||
-        (tg === "No Checkpoint" && prepTagInput.value.includes("Checkpoint")),
-    }));
-});
-const prepBannedHit = computed(() =>
-  prepTagInput.value.filter((tg) => draft.state.bannedTags.includes(tg)),
-);
-// 进入 PREP 时以已提交词条 / 重试为初值（重赛沿用 / 手动改选均可在此基础上调整）
-watch(
-  () => [match.pendingPickCode, draft.state.stage] as const,
-  ([code, st]) => {
-    if (st === "PREP" && code) {
-      prepTagInput.value = [...match.pendingTags];
-      prepRetryInput.value = match.pendingRetry;
-    }
-  },
-  { immediate: true },
-);
-
-function reapplyPickTags(): void {
-  const code = match.pendingPickCode;
-  if (!code) return;
-  if (prepNeedsRetry.value && (prepRetryInput.value == null || prepRetryInput.value < 1)) {
-    ElMessage.warning(t("banpick.pickRetryRequired"));
-    return;
+// --- PREP / 开局 ---
+/** 预载徽标（preload_state）：done/na/absent/failed/in_progress → 标签样式与文案键 */
+function preloadTag(st: string): { type: "success" | "warning" | "danger" | "info"; key: string } {
+  switch (st) {
+    case "done":
+      return { type: "success", key: "preload.done" };
+    case "in_progress":
+      return { type: "warning", key: "preload.inProgress" };
+    case "failed":
+      return { type: "danger", key: "preload.failed" };
+    default:
+      return { type: "info", key: "preload.none" };
   }
-  // CP：词条固定 Checkpoint，不可调整
-  const tags = prepIsCp.value ? ["Checkpoint"] : [...prepTagInput.value];
-  match.selectPick(code, tags, prepRetryInput.value ?? undefined);
 }
 
-// --- PREP / 开局 ---
 async function onManualStart(): Promise<void> {
+  // 存在预载未完席位时，确认框追加强制开始的后果提示
+  const message = match.preloadIncomplete
+    ? h("div", null, [
+        h("div", null, t("banpick.bpManualStartMsg")),
+        h("div", { style: "margin-top: 8px;" }, t("prep.preloadIncompleteWarning")),
+      ])
+    : t("banpick.bpManualStartMsg");
   try {
-    await ElMessageBox.confirm(t("banpick.bpManualStartMsg"), t("banpick.bpManualStartTitle"), {
+    await ElMessageBox.confirm(message, t("banpick.bpManualStartTitle"), {
       type: "warning",
       confirmButtonText: t("banpick.bpManualStartBtn"),
       cancelButtonText: t("common.cancel"),
@@ -268,7 +226,7 @@ const showPrepUi = computed(() => match.phase === MatchPhase.PREP);
 
 <template>
   <section class="panel bp">
-    <div class="bp-head">
+    <div v-if="stage !== 'PREP'" class="bp-head">
       <div class="bp-title">
         <span class="bp-stage">{{ stageLabel(stage) }}</span>
         <el-tag size="small" type="warning" effect="dark">
@@ -477,75 +435,33 @@ const showPrepUi = computed(() => match.phase === MatchPhase.PREP);
         </template>
       </div>
 
-      <!-- CT/EX 选图：词条可调整后重新提交；CP 词条固定 Checkpoint 不可改 -->
-      <div v-if="prepIsCt || prepIsCp" class="tag-block">
-        <div class="row-label">
-          {{
-            prepIsCp
-              ? $t('banpick.prepCpTagLabel')
-              : $t('banpick.prepTagLabel', { n: draft.ctTagCount })
-          }}
-        </div>
-        <div class="btn-row">
-          <el-select
-            v-if="!prepIsCp"
-            v-model="prepTagInput"
-            multiple
-            collapse-tags
-            :multiple-limit="draft.ctTagCount"
-            :placeholder="$t('banpick.ctTagPlaceholder')"
-            class="tag-select"
-          >
-            <el-option
-              v-for="o in prepTagOptions"
-              :key="o.value"
-              :value="o.value"
-              :label="o.value"
-              :disabled="o.disabled"
-            />
-          </el-select>
-          <el-tag v-else type="warning" effect="plain" class="prep-tag">Checkpoint</el-tag>
-          <el-input-number
-            v-if="prepNeedsRetry"
-            v-model="prepRetryInput"
-            :min="1"
-            controls-position="right"
-            class="retry-input"
-          />
-          <el-button type="primary" plain @click="reapplyPickTags">
-            {{ $t('banpick.reapplyTagsBtn') }}
-          </el-button>
-        </div>
-        <div v-if="!prepIsEx && prepBannedHit.length > 0" class="tip warn">
-          {{ $t('banpick.ctTagBannedHit', { tags: prepBannedHit.join(', ') }) }}
-        </div>
-      </div>
-
       <div class="btn-row">
         <el-button @click="draft.startPrepTimer()">{{ $t('banpick.startPrepTimerBtn') }}</el-button>
       </div>
       <div class="ready-row">
         <div class="ready a" :class="{ on: match.aReady }">
           <span class="who">{{ match.playerNames.A || $t('seat.a') }}</span>
-          <el-tag :type="match.aReady ? ('success' as const) : ('info' as const)" effect="dark">{{ match.aReady ? $t('playerStatus.ready') : $t('playerStatus.notReady') }}</el-tag>
+          <span class="ready-tags">
+            <el-tag :type="match.aReady ? ('success' as const) : ('info' as const)" effect="dark">{{ match.aReady ? $t('playerStatus.ready') : $t('playerStatus.notReady') }}</el-tag>
+            <el-tag :type="preloadTag(match.aPreload).type" effect="plain">{{ $t(preloadTag(match.aPreload).key) }}</el-tag>
+          </span>
         </div>
         <div class="ready b" :class="{ on: match.bReady }">
           <span class="who">{{ match.playerNames.B || $t('seat.b') }}</span>
-          <el-tag :type="match.bReady ? ('success' as const) : ('info' as const)" effect="dark">{{ match.bReady ? $t('playerStatus.ready') : $t('playerStatus.notReady') }}</el-tag>
+          <span class="ready-tags">
+            <el-tag :type="match.bReady ? ('success' as const) : ('info' as const)" effect="dark">{{ match.bReady ? $t('playerStatus.ready') : $t('playerStatus.notReady') }}</el-tag>
+            <el-tag :type="preloadTag(match.bPreload).type" effect="plain">{{ $t(preloadTag(match.bPreload).key) }}</el-tag>
+          </span>
         </div>
       </div>
-      <div class="row-label mt8">{{ $t('banpick.timeoutInfo') }}</div>
-      <div class="btn-row">
-        <el-button :disabled="draft.state.usedTimeout.A" @click="draft.useTimeout('A')">{{ $t('banpick.timeoutPlayerBtn', { name: match.playerNames.A || $t('seat.a') }) }}</el-button>
-        <el-button :disabled="draft.state.usedTimeout.B" @click="draft.useTimeout('B')">{{ $t('banpick.timeoutPlayerBtn', { name: match.playerNames.B || $t('seat.b') }) }}</el-button>
-      </div>
-      <div class="btn-row mt8">
+      <div class="btn-row mt8 prep-actions">
         <el-button type="warning" size="large" :disabled="!showPrepUi" @click="onManualStart">{{ $t('banpick.manualStartNoInterruptBtn') }}</el-button>
+        <el-button size="small" plain @click="draft.cancelPick()">{{ $t('banpick.cancelPickBtn') }}</el-button>
       </div>
       <div v-if="!showPrepUi" class="tip">{{ $t('banpick.waitForPrepTip') }}</div>
     </div>
 
-    <div class="bp-foot">
+    <div v-if="stage !== 'PREP'" class="bp-foot">
       <el-button size="small" plain @click="draft.resetDraft()">{{ $t('banpick.resetDraftBtn') }}</el-button>
     </div>
 
@@ -818,8 +734,9 @@ const showPrepUi = computed(() => match.phase === MatchPhase.PREP);
 .ready {
   flex: 1;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
   padding: 8px 12px;
   border-radius: 8px;
   background: var(--tc-hover);
@@ -830,6 +747,15 @@ const showPrepUi = computed(() => match.phase === MatchPhase.PREP);
 }
 .ready .who {
   font-weight: 600;
+}
+.ready-tags {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.prep-actions {
+  align-items: flex-end;
 }
 .ready.a .who {
   color: var(--tc-a);

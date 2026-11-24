@@ -1,14 +1,11 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { useRoute } from "vue-router";
 import { useI18n } from "vue-i18n";
 
 /**
  * 主题切换按钮：toggle html.dark 类 + 写 localStorage.twc_theme。
  * 与 index.html 的早设脚本配套（后者读 twc_theme / 系统偏好初始设类）。
- * 叠加层路由不显示，避免干扰 OBS 直播画面。
  */
-const route = useRoute();
 const { t } = useI18n();
 const isDark = ref(true);
 
@@ -25,7 +22,6 @@ function toggle(): void {
 
 <template>
   <button
-    v-if="route.path !== '/overlay'"
     class="theme-toggle"
     :title="isDark ? t('theme.toLight') : t('theme.toDark')"
     @click="toggle"

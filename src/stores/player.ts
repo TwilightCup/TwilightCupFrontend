@@ -7,6 +7,7 @@
  */
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
+import { ElMessageBox } from "element-plus";
 
 import {
   MatchPhase,
@@ -39,6 +40,8 @@ interface LogLine {
 }
 
 const MAX_LOG = 200;
+/** 选手模拟器向上报 UTC 时间戳的默认间隔（毫秒；与插件默认 5s 保持一致） */
+const UTC_TIMESTAMP_INTERVAL_MS = 5000;
 
 function clock(): string {
   return new Date().toLocaleTimeString("zh-CN", { hour12: false });
@@ -66,9 +69,30 @@ export const usePlayerStore = defineStore("player", () => {
   const countdownRemaining = ref<number | null>(null);
   const authErrorMessage = ref("");
   const messages = ref<LogLine[]>([]);
+  let utcTimer: ReturnType<typeof setInterval> | null = null;
+
+  function startUtcTimer(): void {
+    if (!utcTimer) {
+      utcTimer = setInterval(
+        () => socket.send(send.utcTimestamp(Date.now())),
+        UTC_TIMESTAMP_INTERVAL_MS,
+      );
+    }
+    // 每次认证成功（含重连成功）都先立即补一条，再进入固定间隔节拍
+    socket.send(send.utcTimestamp(Date.now()));
+  }
+
+  function stopUtcTimer(): void {
+    if (utcTimer) {
+      clearInterval(utcTimer);
+      utcTimer = null;
+    }
+  }
 
   socket.onStatusChange = (s) => {
     connStatus.value = s;
+    // 被同账号新连接顶掉（exclusive 接管）：弹窗告知；确认可反手接管回来
+    if (s === "displaced") void promptDisplaced(() => connect());
   };
   socket.onMessage = (msg) => handle(msg);
 
@@ -118,6 +142,7 @@ export const usePlayerStore = defineStore("player", () => {
         matchId.value = msg.match_id;
         authErrorMessage.value = "";
         log("auth", tr("log.joinedMatch", { seat: msg.seat }));
+        startUtcTimer();
         break;
       case "auth_error":
         authErrorMessage.value = msg.msg;
@@ -221,10 +246,25 @@ export const usePlayerStore = defineStore("player", () => {
   // ---- 连接 ----
   function connect(): void {
     if (!auth.token) return;
-    socket.connect(auth.token);
+    // exclusive：独占选手身份（账号+座位）——顶掉旧连接，也接受被新连接顶掉
+    socket.connect(auth.token, undefined, undefined, true);
   }
   function disconnect(): void {
+    stopUtcTimer();
     socket.disconnect();
+  }
+
+  /** 「已被其他窗口接管」弹窗：确认=重新接管（顶掉对方），关闭=留在本页不再重连 */
+  async function promptDisplaced(retake: () => void): Promise<void> {
+    try {
+      await ElMessageBox.alert(tr("conn.displacedMsg"), tr("conn.displacedTitle"), {
+        type: "warning",
+        confirmButtonText: tr("conn.retakeBtn"),
+      });
+      retake();
+    } catch {
+      // 右上角关闭/ESC：留在本页（socket 已终态停止重连，可手动刷新恢复）
+    }
   }
 
   // ---- 模拟「游戏内输出」----

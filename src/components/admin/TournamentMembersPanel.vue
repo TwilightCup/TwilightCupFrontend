@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watchEffect } from "vue";
 import { useAdminStore } from "@/stores/admin";
 import {
   AccountType,
+  DEFAULT_TOURNAMENT_ID,
   TournamentStatus,
   type TournamentOut,
 } from "@/api/types";
@@ -10,11 +11,16 @@ import {
 /**
  * 赛事成员池管理：参赛选手（加/移）、裁判组（仅加）、导播组（仅加）、种子序排序。
  * 仅 DRAFT 状态可写；非 DRAFT 只读展示名单。后端裁判/导播无「移除」端点，故不提供。
+ * 默认赛事（孤立比赛容器）只读：成员变更端点对其 400。
  */
 const props = defineProps<{ tournament: TournamentOut }>();
 const admin = useAdminStore();
 
-const isDraft = computed(() => props.tournament.status === TournamentStatus.DRAFT);
+const isDraft = computed(
+  () =>
+    props.tournament.status === TournamentStatus.DRAFT &&
+    props.tournament.id !== DEFAULT_TOURNAMENT_ID,
+);
 
 const pendingPlayers = ref<string[]>([]);
 const pendingReferees = ref<string[]>([]);

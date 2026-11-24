@@ -8,6 +8,7 @@ import { MatchPhase } from "@/api/types";
 import { phaseInfo, type TagType } from "@/utils/format";
 import RoleSwitcher from "@/components/RoleSwitcher.vue";
 import AccountMenu from "@/components/AccountMenu.vue";
+import PlayerStreamsDropdown from "@/components/PlayerStreamsDropdown.vue";
 import type { ConnStatus } from "@/ws/socket";
 
 const emit = defineEmits<{
@@ -59,6 +60,8 @@ const connInfo = computed<{ dot: string; text: string }>((() => {
       return { dot: "#f0a020", text: t("conn.reconnecting") };
     case "closed":
       return { dot: "#ff5c5c", text: t("conn.closed") };
+    case "displaced":
+      return { dot: "#ff5c5c", text: t("conn.displaced") };
     default:
       return { dot: "#6b7280", text: t("conn.unknown") };
   }
@@ -88,7 +91,7 @@ async function onResume(): Promise<void> {
   <header class="match-header">
     <div class="left">
       <div class="title-block">
-        <span class="logo">🌇</span>
+        <img src="/logo.png" class="logo" alt="logo" />
         <div>
           <div class="match-name">{{ match.matchName || $t('matchHeader.unnamed') }}</div>
           <div class="meta">
@@ -104,6 +107,26 @@ async function onResume(): Promise<void> {
             >
           </div>
         </div>
+      </div>
+      <div class="phase-tags">
+        <el-tag :type="phase.type" effect="dark" size="large" class="phase-tag">
+          {{ phase.label }}
+        </el-tag>
+        <span
+          v-if="match.phase === MatchPhase.COUNTDOWN && match.countdown"
+          class="header-countdown"
+        >
+          {{ match.countdown.remaining }}s
+        </span>
+        <el-tag
+          v-if="draftStageTag"
+          :type="draftStageTag.type"
+          effect="plain"
+          size="large"
+          class="phase-tag"
+        >
+          {{ draftStageTag.label }}
+        </el-tag>
       </div>
     </div>
 
@@ -125,32 +148,21 @@ async function onResume(): Promise<void> {
     </div>
 
     <div class="right">
-      <el-tag :type="phase.type" effect="dark" size="large" class="phase-tag">
-        {{ phase.label }}
-      </el-tag>
-      <el-tag
-        v-if="draftStageTag"
-        :type="draftStageTag.type"
-        effect="plain"
-        size="large"
-        class="phase-tag"
-      >
-        {{ draftStageTag.label }}
-      </el-tag>
       <div class="conn" :title="$t('conn.statusTooltip', { text: connInfo.text })">
         <span class="dot" :style="{ background: connInfo.dot }" />
         <span>{{ connInfo.text }}</span>
       </div>
       <div class="actions">
-        <RoleSwitcher />
-        <el-button v-if="draft.canPause" size="small" type="warning" plain @click="onPause">
+        <el-button v-if="!match.matchEnded && draft.canPause" size="small" type="warning" plain @click="onPause">
           {{ $t('matchHeader.pauseMatchBtn') }}
         </el-button>
-        <el-button v-if="draft.canResume" size="small" type="success" plain @click="onResume">
+        <el-button v-if="!match.matchEnded && draft.canResume" size="small" type="success" plain @click="onResume">
           {{ $t('matchHeader.resumeMatchBtn') }}
         </el-button>
-        <el-button size="small" @click="emit('back')">{{ $t('matchHeader.myMatchesBtn') }}</el-button>
         <el-button size="small" @click="emit('open-history')">{{ $t('matchHeader.dataViewBtn') }}</el-button>
+        <PlayerStreamsDropdown />
+        <el-button size="small" @click="emit('back')">{{ $t('matchHeader.myMatchesBtn') }}</el-button>
+        <RoleSwitcher />
         <AccountMenu @logout="emit('logout')" />
       </div>
     </div>
@@ -182,8 +194,17 @@ async function onResume(): Promise<void> {
   align-items: center;
   gap: 12px;
 }
+.phase-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
 .logo {
-  font-size: 26px;
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
 }
 .match-name {
   font-size: 16px;
@@ -233,6 +254,12 @@ async function onResume(): Promise<void> {
   min-width: 92px;
   justify-content: center;
 }
+.header-countdown {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--tc-primary);
+  font-variant-numeric: tabular-nums;
+}
 .conn {
   display: flex;
   align-items: center;
@@ -248,6 +275,10 @@ async function onResume(): Promise<void> {
 }
 .actions {
   display: flex;
+  align-items: center;
   gap: 8px;
+}
+.actions :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 </style>

@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>HLS SEI 冒烟工具 · MediaMTX → 帧级对齐地基验证</title>
+<style>
+  :root {
+    --bg: #0b0e1a; --panel: #141a2e; --panel2: #1b2340; --line: #2b3456;
+    --txt: #dbe3ff; --dim: #8b94bd; --acc: #4aa8ff; --ok: #37d67a; --warn: #ffb454;
+    --err: #ff5f7a; --mono: "JetBrains Mono Variable", ui-monospace, "Cascadia Mono",
+      "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--txt);
+    font: 14px/1.6 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  header { padding: 18px 24px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { margin: 0 0 4px; font-size: 18px; }
+  header p { margin: 0; color: var(--dim); font-size: 13px; }
+  main { padding: 20px 24px; max-width: 1280px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 12px 0; }
+  input[type=text] { flex: 1 1 420px; min-width: 260px; padding: 9px 12px; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--panel2); color: var(--txt);
+    font-family: var(--mono); font-size: 13px; }
+  button { padding: 8px 16px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--panel2); color: var(--txt); cursor: pointer; font-size: 13px; }
+  button:hover { border-color: var(--acc); color: var(--acc); }
+  button.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  button.primary:hover { filter: brightness(1.1); color: #fff; }
+  select { padding: 8px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--panel2); color: var(--txt); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px 18px; margin-top: 16px; }
+  .card h2 { margin: 0 0 12px; font-size: 15px; color: var(--acc); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .stat { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 12px; }
+  .stat b { display: block; font-size: 20px; font-family: var(--mono); }
+  .stat span { color: var(--dim); font-size: 12px; }
+  pre, table { font-family: var(--mono); font-size: 12px; }
+  pre { background: #0a0d18; border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px; overflow: auto; max-height: 360px; white-space: pre-wrap; word-break: break-all; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid var(--line); padding: 3px 8px; text-align: right; white-space: nowrap; }
+  th { background: var(--panel2); color: var(--dim); font-weight: 600; }
+  td.l, th.l { text-align: left; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .err { color: var(--err); }
+  .dim { color: var(--dim); }
+  .scroll { max-height: 420px; overflow: auto; }
+  label.file { padding: 8px 16px; border: 1px dashed var(--line); border-radius: 8px;
+    cursor: pointer; color: var(--dim); font-size: 13px; }
+  label.file:hover { color: var(--acc); border-color: var(--acc); }
+  .muted { color: var(--dim); font-size: 12px; }
+  #status { font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>HLS SEI 冒烟工具 · 基于真实时间戳的帧级对齐 — 地基验证</h1>
+  <p>拉 MediaMTX 的 m3u8，抓取 LL-HLS part / segment，解 fMP4 / MPEG-TS，逐帧解析插件 SEI
+    （UUID <code>7e57c2ee-…</code>），输出逐帧报告。解析逻辑与仓库
+    <code>tools/verify_sei.py</code> / <code>src/sei-payload.c</code> 同源。可对拍。</p>
+</header>
+<main>
+  <div class="row">
+    <input id="m3u8" type="text" placeholder="http://&lt;mtx-host&gt;:8888/playerA/index.m3u8"
+           value="http://127.0.0.1:8888/playerA/index.m3u8" />
+    <select id="codec">
+      <option value="auto">codec: auto</option>
+      <option value="h264">h264</option>
+      <option value="hevc">hevc</option>
+    </select>
+    <select id="count">
+      <option value="3">3 个 part/段</option>
+      <option value="6" selected>6 个 part/段</option>
+      <option value="12">12 个 part/段</option>
+      <option value="30">30 个 part/段</option>
+    </select>
+    <button id="load" class="primary">拉流分析</button>
+    <label class="file">本地文件解析<input id="file" type="file" style="display:none" /></label>
+    <button id="selftest">自检（造帧↔解析对拍）</button>
+  </div>
+  <div class="muted" id="status">就绪。</div>
+
+  <div class="card" id="proofCard" style="display:none">
+    <h2>① 地基证明：SEI UUID 确实在 MediaMTX HLS 段字节里</h2>
+    <pre id="proof"></pre>
+  </div>
+
+  <div class="card" id="statCard" style="display:none">
+    <h2>② 逐帧统计</h2>
+    <div class="grid" id="stats"></div>
+  </div>
+
+  <div class="card" id="tableCard" style="display:none">
+    <h2>③ 逐帧报告（seq / 关键帧 / NTP / media_pts / realtime(UTC) / dt_ms）</h2>
+    <div class="scroll"><table id="table"></table></div>
+    <div class="muted" style="margin-top:8px" id="tableNote"></div>
+  </div>
+
+  <div class="card" id="logCard" style="display:none">
+    <h2>日志</h2>
+    <pre id="log"></pre>
+  </div>
+</main>
+
+<script>
+"use strict";
+/* =====================================================================
+ * SEI 协议常量与解析 —— 镜像 SEIInjector/src/sei-payload.c 与
+ * tools/verify_sei.py（字段布局/反转义/变长编码完全一致）
+ * ===================================================================== */
+const UUID_HEX = "7e57c2ee0dd24b539b3593edf97a12c1";
+const UUID = new Uint8Array(16);
+{ const h = UUID_HEX.match(/../g); for (let i = 0; i < 16; i++) UUID[i] = parseInt(h[i], 16); }
+const FIELD_SIZE = 22;            // version(1)+flags(1)+seq(4)+pts(8)+realtime(8)
+const FLAG_KEYFRAME = 0x01;
+const FLAG_CLOCK_NTP = 0x02;
+const SEI_PAYLOAD_TYPE = 5;       // user_data_unregistered
+const NAL_SEI_H264 = 6;           // sei_rbsp
+const NAL_SEI_H265 = [39, 40];    // PREFIX/SUFFIX_SEI_NUT
+
+function u32be(b, o) { return ((b[o] << 24) | (b[o+1] << 16) | (b[o+2] << 8) | b[o+3]) >>> 0; }
+function u64be(b, o) {
+  const hi = (b[o] * 2**24 + b[o+1] * 2**16 + b[o+2] * 2**8 + b[o+3]);
+  const lo = (b[o+4] * 2**24 + b[o+5] * 2**16 + b[o+6] * 2**8 + b[o+7]);
+  return hi * 2**32 + lo;
+}
+function toBigInt64(b, o) { return BigInt.asIntN(64, BigInt(u64be(b, o))); }
+
+/* 移除 RBSP 反转义字节（EPB 0x03），产出 want 个未转义字节 */
+function unescapeEpb(src, start, want) {
+  const out = [];
+  let zeros = 0;
+  for (let i = start; i < src.length && out.length < want; i++) {
+    const b = src[i];
+    if (zeros >= 2 && b === 0x03) { zeros = 0; continue; }
+    out.push(b);
+    zeros = (b === 0) ? zeros + 1 : 0;
+  }
+  return out;
+}
+/* 读取 SEI 的 0xFF 链式变长整数；返回 [value|null, nextPos] */
+function readSeiVar(b, pos, end) {
+  let v = 0;
+  while (pos < end && b[pos] === 0xFF) { v += 0xFF; pos++; if (v > 0x1000000) return [null, pos]; }
+  if (pos >= end) return [null, pos];
+  v += b[pos];
+  return [v, pos + 1];
+}
+/* 解析"一个 SEI NAL 的 payload"：以 UUID 开头、version=1，读字段 */
+function parseRawPayload(p) {
+  if (p.length < 16 + FIELD_SIZE) return null;
+  for (let i = 0; i < 16; i++) if (p[i] !== UUID[i]) return null;
+  if (p[16] !== 1) return null;                       // version
+  const flags = p[17];
+  return {
+    keyframe:  !!(flags & FLAG_KEYFRAME),
+    clock_ntp: !!(flags & FLAG_CLOCK_NTP),
+    seq:       u32be(p, 18),
+    media_pts: toBigInt64(p, 22),
+    realtime_us: toBigInt64(p, 30),
+  };
+}
+/* 解析一个 SEI NAL（从 NAL header 之后开始），返回 frameInfo | null */
+function parseSeiNal(nal, codec) {
+  const hdr = codec === "h264" ? 1 : 2;
+  if (nal.length <= hdr) return null;
+  const ntype = codec === "h264" ? (nal[0] & 0x1f)
+                                 : ((nal[0] >> 1) & 0x3f);
+  if (codec === "h264" ? ntype !== NAL_SEI_H264 : !NAL_SEI_H265.includes(ntype)) return null;
+  let p = hdr;
+  let [type, q] = readSeiVar(nal, p, nal.length); if (type === null) return null; p = q;
+  let [msize, q2] = readSeiVar(nal, p, nal.length); if (msize === null) return null; p = q2;
+  if (type !== SEI_PAYLOAD_TYPE || msize < 16 + FIELD_SIZE) return null;
+  const unesc = unescapeEpb(nal, p, msize);
+  if (unesc.length < 16 + FIELD_SIZE) return null;
+  return parseRawPayload(unesc);
+}
+/* 在 Annex-B 字节流里扫描全部起始码，切出 NAL，逐个查 SEI */
+function parseAnnexbFrames(data, codec) {
+  const frames = [];
+  const starts = [];
+  let i = 0; const n = data.length;
+  while (i + 3 <= n) {
+    if (data[i] === 0 && data[i+1] === 0) {
+      if (data[i+2] === 1) { starts.push([i, 3]); i += 3; continue; }
+      if (i + 4 <= n && data[i+2] === 0 && data[i+3] === 1) { starts.push([i, 4]); i += 4; continue; }
+    }
+    i++;
+  }
+  for (let k = 0; k < starts.length; k++) {
+    const nal = data.subarray(starts[k][0] + starts[k][1],
+      k + 1 < starts.length ? starts[k+1][0] : data.length);
+    const info = parseSeiNal(nal, codec);
+    if (info) frames.push({ ...info });
+  }
+  return frames;
+}
+/* =====================================================================
+ * SEI 构造（自检用）—— 镜像 sei_ts_build_nal 的转义/编码算法
+ * ===================================================================== */
+function buildSeiNal(codec, info) {
+  const payload = new Uint8Array(16 + FIELD_SIZE);
+  payload.set(UUID, 0);
+  payload[16] = 1;
+  payload[17] = (info.keyframe ? FLAG_KEYFRAME : 0) | (info.clock_ntp ? FLAG_CLOCK_NTP : 0);
+  payload[18] = (info.seq >> 24) & 0xff; payload[19] = (info.seq >> 16) & 0xff;
+  payload[20] = (info.seq >> 8) & 0xff;  payload[21] = info.seq & 0xff;
+  let v = BigInt.asUintN(64, BigInt(info.media_pts));
+  for (let k = 7; k >= 0; k--) payload[22 + (7 - k)] = Number((v >> BigInt(k * 8)) & 0xffn);
+  v = BigInt.asUintN(64, BigInt(info.realtime_us));
+  for (let k = 7; k >= 0; k--) payload[30 + (7 - k)] = Number((v >> BigInt(k * 8)) & 0xffn);
+
+  const varUint = (x) => { const a = []; while (x >= 0xff) { a.push(0xff); x -= 0xff; } a.push(x); return a; };
+  const typeB = varUint(SEI_PAYLOAD_TYPE);
+  const sizeB = varUint(payload.length);
+
+  const head = codec === "h264" ? [0x06] : [NAL_SEI_H265[0] << 1, 0x01];
+  const buf = [0, 0, 0, 1, ...head, ...typeB, ...sizeB];
+  let zeros = 0;
+  for (const b of buf) zeros = (b === 0) ? zeros + 1 : 0;   // 跨 NAL 前缀统计零游程
+  for (let i = 0; i < payload.length; i++) {
+    const b = payload[i];
+    if (zeros >= 2 && b <= 0x03) { buf.push(0x03); zeros = 0; }
+    buf.push(b);
+    zeros = (b === 0) ? zeros + 1 : 0;
+  }
+  buf.push(0x80);                                            // rbsp_stop_one_bit
+  return new Uint8Array(buf);
+}
+/* =====================================================================
+ * fMP4 最小解析：box 遍历 → stsd 取 codec → moof/traf/trun → mdat 样本
+ * （MediaMTX LL-HLS part / fMP4 segment 都是分片 mp4）
+ * ===================================================================== */
+function parseBoxes(buf, base = 0) {
+  const boxes = []; let p = 0;
+  while (p + 8 <= buf.length) {
+    const size = u32be(buf, p);
+    const type = String.fromCharCode(buf[p+4], buf[p+5], buf[p+6], buf[p+7]);
+    if (size < 8) break;
+    boxes.push({ type, start: base + p, size, data: buf.subarray(p + 8, p + size) });
+    p += size;
+  }
+  return boxes;
+}
+function findBox(boxes, type) { return boxes.find(b => b.type === type); }
+function childBoxes(box) {
+  return parseBoxes(box.data, box.start + 8);
+}
+function parseStsdVideoEntry(stsd) {
+  // stsd: version/flags(4) + entry_count(4) + sample entries...
+  const d = stsd.data;
+  const cnt = u32be(d, 4);
+  if (cnt < 1) return null;
+  let p = 8;
+  const size = u32be(d, p);
+  const fourcc = String.fromCharCode(d[p+4], d[p+5], d[p+6], d[p+7]);
+  return { codec: fourcc, entryStart: p, entrySize: size };
+}
+/* 在 sample entry 字节里定位 avcC/hvcC 配置盒：type 前 4 字节是盒子 size */
+function locateConfigBox(data, type) {
+  const t = type.charCodeAt(0) << 24 | type.charCodeAt(1) << 16 |
+            type.charCodeAt(2) << 8 | type.charCodeAt(3);
+  for (let i = 4; i + 4 <= data.length; i++) {
+    if (u32be(data, i) === t) {
+      const size = u32be(data, i - 4);
+      if (size >= 8 && i - 4 + size <= data.length)
+        return data.subarray(i + 4, i - 4 + size);
+    }
+  }
+  return null;
+}
+function extractFmp4Samples(buf) {
+  /* 返回 { codec, samples: [{payload: Uint8Array, isKey}], avcC? , hvcC? } */
+  let codec = null; let avcC = null; let hvcC = null;
+  const boxes = parseBoxes(buf);
+  const moov = findBox(boxes, "moov");
+  if (moov) {
+    const traks = childBoxes(moov).filter(b => b.type === "trak");
+    for (const trak of traks) {
+      const mdia = findBox(childBoxes(trak), "mdia");
+      if (!mdia) continue;
+      const minf = findBox(childBoxes(mdia), "minf");
+      if (!minf) continue;
+      const stbl = findBox(childBoxes(minf), "stbl");
+      if (!stbl) continue;
+      const stsd = findBox(childBoxes(stbl), "stsd");
+      if (!stsd) continue;
+      const e = parseStsdVideoEntry(stsd);
+      if (!e) continue;
+      if (["avc1", "avc3", "hvc1", "hev1"].includes(e.codec)) {
+        codec = e.codec.startsWith("avc") ? "h264" : "hevc";
+        // 在 sample entry 里按字节模式找 avcC/hvcC（其前有 reserved/video 字段，不能按盒边界解析）
+        const entry = buf.subarray(stsd.start + 8 + e.entryStart, stsd.start + 8 + e.entryStart + e.entrySize);
+        const avcc = locateConfigBox(entry, "avcC");
+        const hvcc = locateConfigBox(entry, "hvcC");
+        if (avcc) avcC = new Uint8Array(avcc);
+        if (hvcc) hvcC = new Uint8Array(hvcc);
+        break;
+      }
+    }
+  }
+  const samples = [];
+  for (const moof of boxes.filter(b => b.type === "moof")) {
+    const moofStart = moof.start;
+    const moofEnd = moof.start + moof.size;
+    const trafs = childBoxes(moof).filter(b => b.type === "traf");
+    for (const traf of trafs) {
+      const inner = childBoxes(traf);
+      const tfhd = findBox(inner, "tfhd");
+      const trun = findBox(inner, "trun");
+      if (!tfhd || !trun) continue;
+      const tf = tfhd.data;
+      const tfFlags = u32be(tf, 0) & 0x00ffffff; // FullBox: version(1)+flags(3) 在 offset 0..4
+      let o = 8;                             // 越过 version/flags(4) 与 track_ID(4)
+      let baseDataOffset = 0;
+      let defDur = 0, defSize = 0, defFlags = 0;
+      if (tfFlags & 0x000001) { baseDataOffset = u64be(tf, o); o += 8; }
+      if (tfFlags & 0x000002) o += 4;        // sample-description-index
+      if (tfFlags & 0x000008) { defDur = u32be(tf, o); o += 4; }
+      if (tfFlags & 0x000010) { defSize = u32be(tf, o); o += 4; }
+      if (tfFlags & 0x000020) { defFlags = u32be(tf, o); o += 4; }
+      // base：显式 base-data-offset > default-base-is-moof(=moof 起点) > moof 起点
+      const base = (tfFlags & 0x000001) ? baseDataOffset : moofStart;
+      const tr = trun.data;
+      const sampleCount = u32be(tr, 4);
+      const trFlags = u32be(tr, 0) & 0x00ffffff; // version 在 tr[0]，flags 占 tr[1..4]
+      let q = 8;
+      let dataOff = 0;
+      if (trFlags & 0x000001) { dataOff = (tr[q] << 24 | tr[q+1] << 16 | tr[q+2] << 8 | tr[q+3]) | 0; q += 4; }
+      let firstSampleFlags = 0;
+      if (trFlags & 0x000004) { firstSampleFlags = u32be(tr, q); q += 4; }
+      let samplePos = base + dataOff;
+      for (let s = 0; s < sampleCount; s++) {
+        if (trFlags & 0x000100) q += 4;      // sample-duration
+        let sz = defSize;
+        if (trFlags & 0x000200) { sz = u32be(tr, q); q += 4; } // sample-size
+        let fl = defFlags;
+        if (trFlags & 0x000400) { fl = u32be(tr, q); q += 4; } // sample-flags
+        if (trFlags & 0x000800) q += 4;      // composition-time-offset
+        const effFlags = (s === 0 && (trFlags & 0x000004)) ? firstSampleFlags : fl;
+        const isKey = !(effFlags & 0x00010000); // bit16 = sample_is_non_sync_sample
+        if (sz > 0 && samplePos + sz <= buf.length) {
+          samples.push({ payload: new Uint8Array(buf.subarray(samplePos, samplePos + sz)), isKey });
+        }
+        samplePos += sz;
+      }
+    }
+  }
+  return { codec, samples, avcC, hvcC };
+}
+/* AVCC（长度前缀）切 NAL */
+function splitAvcc(payload) {
+  const nals = []; let p = 0;
+  while (p + 4 <= payload.length) {
+    const len = u32be(payload, p);
+    p += 4;
+    if (len === 0 || p + len > payload.length) break;
+    nals.push(payload.subarray(p, p + len));
+    p += len;
+  }
+  return nals;
+}
+/* 单样本 → 找 SEI；先按 AVCC，若失败再按 Annex-B 扫 */
+function parseSampleSei(payload, codec) {
+  let nals = splitAvcc(payload);
+  if (nals.length === 0) nals = splitAnnexb(payload);
+  for (const nal of nals) {
+    const info = parseSeiNal(nal, codec);
+    if (info) return info;
+  }
+  return null;
+}
+function splitAnnexb(data) {
+  const nals = []; let i = 0; const n = data.length;
+  const starts = [];
+  while (i + 3 <= n) {
+    if (data[i] === 0 && data[i+1] === 0) {
+      if (data[i+2] === 1) { starts.push(i + 3); i += 3; continue; }
+      if (i + 4 <= n && data[i+2] === 0 && data[i+3] === 1) { starts.push(i + 4); i += 4; continue; }
+    }
+    i++;
+  }
+  for (let k = 0; k < starts.length; k++) {
+    nals.push(data.subarray(starts[k], k + 1 < starts.length ? starts[k+1] : data.length));
+  }
+  return nals;
+}
+/* =====================================================================
+ * MPEG-TS 最小解析：找视频 PES，拼 Annex-B 流
+ * ===================================================================== */
+function extractTsVideo(buf) {
+  // 找 188 字节对齐的 0x47 同步（连验 3 个包）
+  let sync = -1;
+  for (let p = 0; p + 188 * 3 <= buf.length; p++) {
+    if (buf[p] === 0x47 && buf[p + 188] === 0x47 && buf[p + 376] === 0x47) { sync = p; break; }
+  }
+  if (sync < 0) return null;
+  const out = [];
+  let curPid = -1;        // 当前正在累积的视频 PID
+  let inPes = false;
+  let pesRemain = -1;     // 当前 PES 剩余 payload（-1 = 未知/直到下一 PES）
+  const pushPes = () => { inPes = false; curPid = -1; pesRemain = -1; };
+  for (let i = sync; i + 188 <= buf.length; i += 188) {
+    const pid = ((buf[i+1] & 0x1f) << 8) | buf[i+2];
+    const pusi = (buf[i+1] & 0x40) !== 0;
+    const afc = (buf[i+3] >> 4) & 0x3;
+    let q = i + 4;
+    if (afc & 0x2) { q += 1 + buf[q]; }   // adaptation field
+    if (!(afc & 0x1)) continue;           // 无 payload
+    if (pusi) {
+      // 新 PES 开始（当前 PID 的旧 PES 到此为止）
+      if (inPes && pid !== curPid) pushPes();
+      if (q + 6 <= i + 188) {
+        const sc = (buf[q] << 16) | (buf[q+1] << 8) | buf[q+2];
+        if (sc === 0x000001) {
+          const sid = buf[q+3];
+          if ((sid & 0xf0) === 0xe0) {    // video stream_id
+            if (inPes && pid === curPid) pushPes();
+            const pesLen = (buf[q+4] << 8) | buf[q+5];
+            const hdrLen = buf[q+8];
+            curPid = pid; inPes = true;
+            const bodyStart = q + 9 + hdrLen;
+            const avail = i + 188 - bodyStart;
+            let take = avail;
+            if (pesLen > 0) take = Math.min(pesLen - 3 - hdrLen, avail);
+            for (let k = 0; k < take; k++) out.push(buf[bodyStart + k]);
+            pesRemain = (pesLen > 0) ? (pesLen - 3 - hdrLen - take) : -1;
+            continue;
+          }
+        }
+      }
+    }
+    // 当前视频 PES 的续包
+    if (inPes && pid === curPid) {
+      const avail = i + 188 - q;
+      let take = avail;
+      if (pesRemain >= 0) { take = Math.min(pesRemain, avail); pesRemain -= take; }
+      for (let k = 0; k < take; k++) out.push(buf[q + k]);
+    }
+  }
+  return new Uint8Array(out);
+}
+/* =====================================================================
+ * m3u8 解析（兼容 LL-HLS parts 与经典 segment，含 EXT-X-MAP init）
+ * ===================================================================== */
+function parseM3u8(text, base) {
+  const init = { uri: null, byteRange: null };
+  const items = [];   // {uri, kind:'part'|'segment', duration}
+  const lines = text.split(/\r?\n/);
+  let pendingDur = null;
+  const resolve = (u) => new URL(u, base).href;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#EXT-X-VERSION")) continue;
+    if (line.startsWith("#EXT-X-MAP:")) {
+      const m = line.match(/URI="([^"]+)"/);
+      if (m) init.uri = resolve(m[1]);
+      continue;
+    }
+    if (line.startsWith("#EXTINF:")) {
+      const m = line.match(/^#EXTINF:([0-9.]+)/);
+      pendingDur = m ? parseFloat(m[1]) : null;
+      continue;
+    }
+    if (line.startsWith("#EXT-X-PART:")) {
+      const m = line.match(/URI="([^"]+)"/);
+      const d = line.match(/DURATION=([0-9.]+)/);
+      if (m) items.push({ uri: resolve(m[1]), kind: "part", duration: d ? parseFloat(d[1]) : 0 });
+      continue;
+    }
+    if (!line.startsWith("#") && /^[^#]/.test(line)) {
+      if (pendingDur !== null) {
+        items.push({ uri: resolve(line), kind: "segment", duration: pendingDur });
+        pendingDur = null;
+      }
+    }
+  }
+  return { init, items };
+}
+/* =====================================================================
+ * 编排：拉流 → 解复用 → 帧报告
+ * ===================================================================== */
+const $ = (id) => document.getElementById(id);
+const statusEl = $("status");
+let logBuf = [];
+function log(s) { logBuf.push(s); if (logBuf.length > 200) logBuf.shift(); $("log").textContent = logBuf.join("\n"); }
+function setStatus(s, cls) { statusEl.innerHTML = `<span class="${cls || ''}">${s}</span>`; }
+
+async function fetchBytes(url) {
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error(`fetch ${url} -> ${r.status}`);
+  const buf = new Uint8Array(await r.arrayBuffer());
+  log(`fetched ${url} (${buf.length} B)`);
+  return buf;
+}
+
+async function analyzePlaylist(m3u8Url, codecSel, maxItems) {
+  logBuf = []; $("logCard").style.display = "block"; $("log").textContent = "";
+  const base = new URL(m3u8Url, location.href).href;
+  setStatus("拉取 m3u8…");
+  let text;
+  try { text = await (await fetch(base, { cache: "no-store" })).text(); }
+  catch (e) { throw new Error("拉 m3u8 失败（跨域/CORS？）：" + e.message); }
+  const { init, items } = parseM3u8(text, base);
+  log(`m3u8: ${items.length} items (${items.filter(i => i.kind === 'part').length} parts, ${items.filter(i => i.kind === 'segment').length} segments), init=${init.uri ? 'yes' : 'no'}`);
+  if (init.uri) log(`init: ${init.uri}`);
+
+  const chosen = items.slice(Math.max(0, items.length - maxItems));
+  let allSamples = [];
+  let codec = codecSel !== "auto" ? codecSel : null;
+  let proofBuf = null, proofUrl = "";
+
+  // 先取 init（fMP4 codec/description 来源）
+  if (init.uri) {
+    const ib = await fetchBytes(init.uri);
+    const res = extractFmp4Samples(ib);
+    if (res.codec) codec = res.codec;
+    log(`init: codec=${res.codec || '?'} avcC=${res.avcC ? res.avcC.length + 'B' : '-'} hvcC=${res.hvcC ? res.hvcC.length + 'B' : '-'}`);
+  }
+
+  for (const it of chosen) {
+    const buf = await fetchBytes(it.uri);
+    if (!proofBuf) { proofBuf = buf; proofUrl = it.uri; }
+    let parsed = null;
+    if (buf.length >= 8 && String.fromCharCode(buf[0], buf[1], buf[2], buf[3]) === "ftyp") {
+      parsed = extractFmp4Samples(buf);
+      if (parsed.codec) codec = codec || parsed.codec;
+      for (const s of parsed.samples) allSamples.push({ ...s });
+      log(`  [fMP4 part] ${it.uri}: ${parsed.samples.length} samples`);
+    } else {
+      const es = extractTsVideo(buf);
+      if (es && es.length > 0) {
+        const frames = parseAnnexbFrames(es, codec || "h264");
+        for (const f of frames) allSamples.push({ _frame: f });
+        log(`  [TS] ${it.uri}: ${frames.length} SEI frames`);
+        if (codec === "auto" && frames.length === 0) {
+          const f2 = parseAnnexbFrames(es, "hevc");
+          if (f2.length) { codec = "hevc"; allSamples = []; }
+        }
+      } else {
+        log(`  [?] ${it.uri}: 无法识别容器（既非 ftyp 也非 TS）`);
+      }
+    }
+  }
+  if (!codec) codec = "h264";
+  if (codecSel !== "auto") codec = codecSel;
+  log(`final codec = ${codec}`);
+
+  // 逐样本解析 SEI；样本没有 SEI 的记为空
+  const frames = [];
+  for (const s of allSamples) {
+    if (s._frame) { frames.push({ ...s._frame }); continue; }
+    const info = parseSampleSei(s.payload, codec);
+    frames.push({ ...(info || { missing: true, keyframe: s.isKey }), _isKey: s.isKey });
+  }
+  return { proofBuf, proofUrl, codec, frames, init, items };
+}
+
+function renderProof(proofBuf, url) {
+  // 原始字节里搜 UUID（UUID 无 0x00 字节，不会被 EPB 转义破坏）
+  const hex = UUID_HEX;
+  let idx = -1;
+  const ascii = Array.from(proofBuf, b => String.fromCharCode(b)).join("");
+  idx = ascii.indexOf(hex);
+  let off = idx;
+  if (idx < 0) { // 大小端/其他编码尝试：直接按字节序列搜
+    outer: for (let i = 0; i + 16 <= proofBuf.length; i++) {
+      for (let j = 0; j < 16; j++) if (proofBuf[i + j] !== UUID[j]) continue outer;
+      off = i; idx = i; break;
+    }
+  }
+  const p = $("proof");
+  if (idx >= 0) {
+    p.innerHTML = `<span class="ok">✓ UUID 命中</span>：在 <b>${url}</b> 的第 ${off} 字节处找到
+      <b>${UUID_HEX}</b>（${proofBuf.length} B 段内）<br/>
+      <span class="muted">说明 SEI（含 realtime_us）确实逐帧存在于 MediaMTX HLS 段字节中 → 地基成立。</span>`;
+  } else {
+    p.innerHTML = `<span class="err">✗ 未在该段的原始字节中找到 UUID</span><br/>
+      <span class="muted">可能：该段样本被切分/段太小/编码器未启用 SEI Timestamp 插件，或需要抓更多段。可改用“本地文件解析”对录屏文件复核。</span>`;
+  }
+  $("proofCard").style.display = "block";
+}
+
+function renderStats(frames, codec) {
+  const total = frames.length;
+  const ntp = frames.filter(f => f.clock_ntp).length;
+  const key = frames.filter(f => f.keyframe).length;
+  const missing = frames.filter(f => f.missing).length;
+  let meanMs = NaN, minMs = NaN, maxMs = NaN, gaps = 0, fps = NaN;
+  if (total >= 2) {
+    const ds = [];
+    for (let i = 1; i < total; i++) {
+      const d = Number(frames[i].realtime_us - frames[i-1].realtime_us) / 1000;
+      if (isFinite(d) && d > 0 && d < 10000) ds.push(d);
+    }
+    if (ds.length) {
+      meanMs = ds.reduce((a, b) => a + b, 0) / ds.length;
+      minMs = Math.min(...ds); maxMs = Math.max(...ds);
+      fps = 1000 / meanMs;
+    }
+  }
+  // seq 丢帧检测
+  for (let i = 1; i < total; i++) {
+    if (!frames[i].missing && !frames[i-1].missing) {
+      const d = (frames[i].seq - frames[i-1].seq + 0x100000000) % 0x100000000;
+      if (d !== 1 && d > 1) gaps++;
+    }
+  }
+  const g = $("stats");
+  const item = (label, val, cls) => `<div class="stat"><b class="${cls || ''}">${val}</b><span>${label}</span></div>`;
+  g.innerHTML =
+    item("解析帧数", total) +
+    item("NTP 校准", `${ntp}/${total}`, ntp === total ? "ok" : "warn") +
+    item("关键帧", key, "") +
+    item("缺失 SEI 样本", missing, missing ? "warn" : "ok") +
+    item("帧间隔均值", isFinite(meanMs) ? meanMs.toFixed(2) + " ms" : "—") +
+    item("≈帧率", isFinite(fps) ? fps.toFixed(1) + " fps" : "—") +
+    item("帧间隔 min/max", isFinite(minMs) ? `${minMs.toFixed(1)}/${maxMs.toFixed(1)} ms` : "—") +
+    item("seq 跳变(丢帧?)", gaps, gaps ? "warn" : "ok") +
+    item("codec", codec.toUpperCase(), "");
+  $("statCard").style.display = "block";
+  return { meanMs, gaps };
+}
+
+function renderTable(frames, noteEl) {
+  const t = $("table");
+  let html = "<tr><th>#</th><th class='l'>seq</th><th>K</th><th>NTP</th><th class='l'>media_pts</th><th class='l'>realtime (UTC)</th><th>dt_ms</th></tr>";
+  let prev = null;
+  frames.slice(0, 400).forEach((f, i) => {
+    let dt = "";
+    if (prev !== null && !f.missing && !prev.missing) {
+      dt = (Number(f.realtime_us - prev.realtime_us) / 1000).toFixed(2);
+    }
+    const rt = f.missing ? "" : new Date(Number(f.realtime_us) / 1000).toISOString().replace("T", " ").slice(0, 23);
+    html += `<tr><td>${i}</td><td class='l'>${f.missing ? "—" : f.seq}</td>
+      <td>${f.missing ? "—" : (f.keyframe ? '<span class="ok">K</span>' : '.')}</td>
+      <td>${f.missing ? "—" : (f.clock_ntp ? '<span class="ok">N</span>' : '<span class="warn">-</span>')}</td>
+      <td class='l'>${f.missing ? "—" : f.media_pts.toString()}</td>
+      <td class='l'>${rt}</td><td>${dt}</td></tr>`;
+    prev = f;
+  });
+  t.innerHTML = html;
+  $("tableCard").style.display = "block";
+  noteEl.textContent = frames.length > 400 ? `（仅显示前 400 行，共 ${frames.length} 帧）` :
+    (frames.length ? "" : "未解析到任何 SEI 帧——确认该流由“SEI Timestamp (H.264/H.265)”编码器产出、且插件已启用。");
+}
+
+/* ===================================================================== */
+async function onLoad() {
+  const url = $("m3u8").value.trim();
+  const codecSel = $("codec").value;
+  const maxItems = parseInt($("count").value, 10);
+  if (!url) return setStatus("请填 m3u8 地址", "warn");
+  try {
+    const { proofBuf, proofUrl, codec, frames } = await analyzePlaylist(url, codecSel, maxItems);
+    setStatus(`分析完成：${frames.length} 帧，codec=${codec}`);
+    if (proofBuf) renderProof(proofBuf, proofUrl);
+    if (frames.length) {
+      renderStats(frames, codec);
+      renderTable(frames, $("tableNote"));
+    }
+  } catch (e) {
+    console.error(e);
+    setStatus("出错：" + e.message, "err");
+    log("ERROR: " + e.message);
+  }
+}
+async function onFile(file) {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  logBuf = []; $("logCard").style.display = "block"; $("log").textContent = "";
+  log(`local file: ${file.name} (${buf.length} B)`);
+  let codec = $("codec").value; if (codec === "auto") codec = "h264";
+  let frames = [];
+  let proofBuf = buf;
+  if (buf.length >= 8 && String.fromCharCode(buf[0], buf[1], buf[2], buf[3]) === "ftyp") {
+    const res = extractFmp4Samples(buf);
+    codec = res.codec || codec;
+    log(`fMP4: codec=${res.codec} avcC=${res.avcC ? res.avcC.length + 'B' : '-'} samples=${res.samples.length}`);
+    for (const s of res.samples) {
+      const info = parseSampleSei(s.payload, codec);
+      frames.push({ ...(info || { missing: true, keyframe: s.isKey }), _isKey: s.isKey });
+    }
+  } else {
+    const es = extractTsVideo(buf);
+    if (es && es.length > 0) { frames = parseAnnexbFrames(es, codec); log(`TS → annexb ${es.length} B`); }
+    if (!frames.length) { frames = parseAnnexbFrames(buf, codec); log(`直扫 annexb`); }
+    if (!frames.length && codec === "h264") { frames = parseAnnexbFrames(buf, "hevc"); codec = "hevc"; log(`回退 hevc`); }
+  }
+  renderProof(proofBuf, "本地文件 " + file.name);
+  if (frames.length) { renderStats(frames, codec); renderTable(frames, $("tableNote")); }
+  setStatus(`本地文件：${frames.length} 帧，codec=${codec}`);
+}
+function onSelfTest() {
+  logBuf = []; $("logCard").style.display = "block";
+  const infos = [
+    { codec: "h264", info: { keyframe: true, clock_ntp: true, seq: 42, media_pts: 8400000000n, realtime_us: 1767153600123456n } },
+    { codec: "hevc", info: { keyframe: false, clock_ntp: false, seq: 7, media_pts: 1400000000n, realtime_us: 1767153600222222n } },
+  ];
+  let ok = true; const lines = [];
+  for (const { codec, info } of infos) {
+    const nal = buildSeiNal(codec, info);
+    const got = parseSeiNal(nal, codec);
+    const pass = got && got.seq === info.seq && got.keyframe === info.keyframe &&
+      got.clock_ntp === info.clock_ntp && got.media_pts === info.media_pts &&
+      got.realtime_us === info.realtime_us;
+    ok = ok && pass;
+    lines.push(`[${codec.toUpperCase()}] 造帧 ${nal.length}B → 解析 ${pass ? "OK ✓" : "FAIL ✗"}  seq=${got && got.seq} key=${got && got.keyframe} ntp=${got && got.clock_ntp} realtime=${got && got.realtime_us}`);
+  }
+  // 额外：原始字节 UUID 存在性
+  const nal = buildSeiNal("h264", infos[0].info);
+  const ascii = Array.from(nal, b => String.fromCharCode(b)).join("");
+  lines.push(`[H264] 原始 NAL 内 UUID 直接可搜到：${ascii.indexOf(UUID_HEX) >= 0 ? "是 ✓" : "否 ✗"}`);
+  $("log").textContent = lines.join("\n");
+  setStatus(`自检：${ok ? "全部通过 ✓（造帧↔解析与 C/Python 同算法）" : "存在失败 ✗"}`, ok ? "ok" : "err");
+}
+
+$("load").addEventListener("click", onLoad);
+$("selftest").addEventListener("click", onSelfTest);
+$("file").addEventListener("change", (e) => { if (e.target.files[0]) onFile(e.target.files[0]); });
+$("m3u8").addEventListener("keydown", (e) => { if (e.key === "Enter") onLoad(); });
+// 初始自检，证明解析器可用
+onSelfTest();
+</script>
+</body>
+</html>

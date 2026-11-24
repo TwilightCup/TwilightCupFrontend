@@ -6,6 +6,7 @@ import {
   attemptStatusLabel,
   attemptVisible,
   formatMs,
+  formatUtcTime,
   invalidReasonsTitle,
   playerStatusInfo,
   seatLabel,
@@ -36,6 +37,7 @@ const isSingle = computed(
   () => !isMulti.value && visibleAttempts.value.length > 0,
 );
 const liveScore = computed(() => match.liveScore[props.side]);
+const utc = computed(() => (props.side === "A" ? match.utcA : match.utcB));
 
 const levels = computed(() =>
   [...player.value.completedLevels].sort((a, b) => a.level_index - b.level_index),
@@ -70,6 +72,11 @@ const attemptInvalid = (a: { status: number }): boolean =>
           {{ statusInfo.label }}
         </el-tag>
       </div>
+    </div>
+
+    <div v-if="utc" class="utc">
+      <span class="utc-label">{{ $t('playerStatusCard.utcSync') }}</span>
+      <span class="utc-time">{{ formatUtcTime(utc.utcMs) }}</span>
     </div>
 
     <div class="score">
@@ -159,6 +166,20 @@ const attemptInvalid = (a: { status: number }): boolean =>
 .tags {
   display: flex;
   gap: 6px;
+}
+.utc {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--tc-text-dim);
+  border-top: 1px dashed var(--tc-border);
+  padding-top: 6px;
+}
+.utc-time {
+  font-weight: 600;
+  color: var(--tc-text);
+  font-variant-numeric: tabular-nums;
 }
 .score {
   text-align: center;

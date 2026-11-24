@@ -1,0 +1,59 @@
+/**
+ * 单侧计时器叠加层锚定虚拟时间 T（§1.3）——替代 useDelayedRef 的整段均匀 delay：
+ * 连续计时从展示历史读取样本，按已提交 T 与本侧实际帧时间投影。
+ * enabled=false（对齐关/无流）时不驱动，由上层回退原
+ * useLiveTimers + 手动画行。
+ */
+import { onBeforeUnmount, onMounted, ref, type Ref } from "vue";
+import { alignEngine, type Side } from "@/scenes/align/useFrameAlign";
+import type { LiveTime } from "@/stores/director";
+import { projectTimer } from "./timerProjection";
+
+export interface AlignedTimingCtx {
+  /** 本侧是否启用对齐（config.alignX && 有流） */
+  enabled: () => boolean;
+  /** 叠在 T 上的手动微调偏移（ms，正 = 向更久前看） */
+  offsetMs: () => number;
+  /** Read the persistent store snapshot at exactly this playback time. */
+  sampleAt: (wallMs: number) => { sample: LiveTime | null; running: boolean } | null;
+}
+
+export interface AlignedTiming {
+  main: Ref<number | null>;
+  seg: Ref<number | null>;
+  /** true = 本侧处于 T 锚定显示（有样本、T 就绪） */
+  active: Ref<boolean>;
+}
+
+export function useAlignedTiming(_side: Side, ctx: AlignedTimingCtx): AlignedTiming {
+  const main = ref<number | null>(null);
+  const seg = ref<number | null>(null);
+  const active = ref(false);
+
+  let timer = 0;
+
+  onMounted(() => {
+    const tick = () => {
+      if (!ctx.enabled()) {
+        active.value = false;
+        main.value = null;
+        seg.value = null;
+        return;
+      }
+      // Keep alignment active while warming up: never fall back to realtime values.
+      active.value = true;
+      const T = alignEngine.tUs.value;
+      const rt = alignEngine.sync.presentedRt[_side];
+      const tw = T == null || rt == null ? null : Math.min(T, rt) / 1000 - Math.max(0, ctx.offsetMs());
+      const state = tw == null ? null : ctx.sampleAt(tw);
+      const value = projectTimer(state?.sample ?? null, tw, state?.running ?? false);
+      main.value = value.main;
+      seg.value = value.seg;
+    };
+    tick();
+    timer = window.setInterval(tick, 50);
+  });
+  onBeforeUnmount(() => window.clearInterval(timer));
+
+  return { main, seg, active };
+}

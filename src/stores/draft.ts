@@ -17,6 +17,7 @@ import { ElMessage } from "element-plus";
 import { api, ApiError } from "@/api/client";
 import {
   CategoryKind,
+  CT_TAG_ACHIEVEMENT,
   MatchPhase,
   MatchStatus,
   PickType,
@@ -27,6 +28,7 @@ import {
 import {
   CT_TAG_BASE,
   categoryKindOf,
+  mergeInherentTags,
   normalizeMappool,
   validateMappool,
 } from "@/utils/mappool";
@@ -142,13 +144,42 @@ export const useDraftStore = defineStore("draft", () => {
   // 派生：CT 词条 ban
   // =========================================================================
 
-  /** CT 词条禁用候选：固定枚举（CT 选图定义时不预录词条，由选手 pick 时再选）。 */
+  /** 当前图池 CT 类别显式配置的支持词条；None = 旧数据未配置（回退内置词条）。 */
+  const ctTagCategoryChoices = computed<string[] | null>(() => {
+    const cat = mappool.value?.categories.find(
+      (c) => categoryKindOf(c.name) === CategoryKind.CT,
+    );
+    return cat?.ct_tags ?? null;
+  });
+
+  /** CT 词条禁用候选：CT 类别当前支持的词条，但剔除 Achievement（词条禁用仍只针对基础词条）。 */
   const ctTagChoices = computed<string[]>(() => {
     const hasCT = mappool.value?.categories.some(
       (c) => categoryKindOf(c.name) === CategoryKind.CT,
     );
-    return hasCT ? [...CT_TAG_BASE] : [];
+    if (!hasCT) return [];
+    const explicit = ctTagCategoryChoices.value;
+    return explicit
+      ? explicit.filter((t) => t !== CT_TAG_ACHIEVEMENT)
+      : [...CT_TAG_BASE];
   });
+
+  /** 某选图词条候选：CT 按图池配置；EX/旧 CT 未配置回退内置词条（单关加 Achievement）。 */
+  function ctTagChoicesFor(pick: Pick): string[] {
+    const k = kindOfCode(pick.code);
+    if (k === CategoryKind.EX) {
+      return pick.type === PickType.SINGLE
+        ? [...CT_TAG_BASE, CT_TAG_ACHIEVEMENT]
+        : [...CT_TAG_BASE];
+    }
+    if (k === CategoryKind.CT) {
+      const base = ctTagCategoryChoices.value ?? [...CT_TAG_BASE];
+      const result = pick.type === PickType.SINGLE ? [...base, CT_TAG_ACHIEVEMENT] : [...base];
+      return [...new Set(result)];
+    }
+    return [];
+  }
+
   const tagBanDone = computed(() => state.tagBanActed.A && state.tagBanActed.B);
 
   // =========================================================================
@@ -189,6 +220,11 @@ export const useDraftStore = defineStore("draft", () => {
 
   function pickByCode(code: string): Pick | null {
     return mappool.value?.categories.flatMap((c) => c.picks).find((p) => p.code === code) ?? null;
+  }
+  /** 并入当前选图的固有词条（ML/IL/CP/TB 的 Glitchless，图池编辑器所设）。 */
+  function withInherentTags(code: string, tags: string[]): string[] {
+    const p = pickByCode(code);
+    return p ? mergeInherentTags(tags, p) : tags;
   }
   function kindOfCode(code: string): CK | null {
     const cat = mappool.value?.categories.find((c) => c.picks.some((p) => p.code === code));
@@ -285,6 +321,8 @@ export const useDraftStore = defineStore("draft", () => {
     try {
       // 成员可见的比赛详情（含结构化图池 + ban/protect 配置），裁判无需管理员权限
       const s = await api.getMyMatch(sid, token);
+      // 切换比赛期间可能已经换了场：迟到的上一场响应直接丢弃，防止图池/配置串场
+      if (match.matchId !== sid) return;
       setMappool(normalizeMappool(s.mappool), "session");
       banCount.value = s.ban_count ?? 1;
       protectCount.value = s.protect_count ?? 1;
@@ -292,6 +330,7 @@ export const useDraftStore = defineStore("draft", () => {
       matchStatus.value = s.status;
       afterMappoolLoaded(sid);
     } catch (e) {
+      if (match.matchId !== sid) return;
       loadError.value = (e as Error)?.message ?? tr("toast.draftLoadMappoolFail");
       state.stage = "LOAD";
     }
@@ -501,8 +540,9 @@ export const useDraftStore = defineStore("draft", () => {
     const legal = legalPicks.value.some((p) => p.code === code);
     if (!legal) return;
     const picker = state.nextPicker ?? "A";
-    state.picks.push({ by: picker, code });
-    enterPrep(code);
+    const tags = withInherentTags(code, []);
+    state.picks.push({ by: picker, code, ...(tags.length > 0 ? { tags } : {}) });
+    enterPrep(code, tags);
     state.nextPicker = other(picker);
   }
 
@@ -511,13 +551,14 @@ export const useDraftStore = defineStore("draft", () => {
     const legal = legalPicks.value.some((p) => p.code === code);
     if (!legal) return;
     const picker = state.nextPicker ?? "A";
+    const merged = withInherentTags(code, tags);
     state.picks.push({
       by: picker,
       code,
-      ...(tags.length > 0 ? { tags } : {}),
+      ...(merged.length > 0 ? { tags: merged } : {}),
       ...(retry != null ? { retry } : {}),
     });
-    enterPrep(code, tags, retry);
+    enterPrep(code, merged, retry);
     state.nextPicker = other(picker);
   }
 
@@ -535,8 +576,9 @@ export const useDraftStore = defineStore("draft", () => {
     if (finalPool.length === 0) return;
     const pick = finalPool[Math.floor(Math.random() * finalPool.length)];
     const picker = state.nextPicker ?? "A";
-    state.picks.push({ by: picker, code: pick.code });
-    enterPrep(pick.code);
+    const tags = withInherentTags(pick.code, []);
+    state.picks.push({ by: picker, code: pick.code, ...(tags.length > 0 ? { tags } : {}) });
+    enterPrep(pick.code, tags);
     state.nextPicker = other(picker);
   }
 
@@ -546,8 +588,13 @@ export const useDraftStore = defineStore("draft", () => {
 
   function forceTB(): void {
     if (!tbCode.value) return;
-    state.picks.push({ by: state.nextPicker ?? "A", code: tbCode.value });
-    enterPrep(tbCode.value);
+    const tags = withInherentTags(tbCode.value, []);
+    state.picks.push({
+      by: state.nextPicker ?? "A",
+      code: tbCode.value,
+      ...(tags.length > 0 ? { tags } : {}),
+    });
+    enterPrep(tbCode.value, tags);
   }
 
   // =========================================================================
@@ -597,6 +644,21 @@ export const useDraftStore = defineStore("draft", () => {
   }
 
   // =========================================================================
+  // 取消本次选图（仅 PREP 阶段使用）：回到 PICK 阶段，并移除刚选中的图
+  // =========================================================================
+
+  function cancelPick(): void {
+    if (state.stage !== "PREP") return;
+    const last = state.picks.pop();
+    if (!last) return;
+    // 恢复到该 pick 对应的选手再来一次
+    state.nextPicker = last.by;
+    const tb = isTBPrep();
+    match.clearPendingPick();
+    enterStage(tb ? "TB_FORCE" : "PICK");
+  }
+
+  // =========================================================================
   // 重置
   // =========================================================================
 
@@ -608,10 +670,13 @@ export const useDraftStore = defineStore("draft", () => {
   /** 裁判「开始比赛」：激活 CREATED → RUNNING（选手随后可连入摇点）。单场冲突由后端拒绝。 */
   async function startMatch(): Promise<void> {
     if (!match.matchId || !auth.token) return;
+    const sid = match.matchId;
     try {
-      const s = await api.startMatch(match.matchId, auth.token);
+      const s = await api.startMatch(sid, auth.token);
+      if (match.matchId !== sid) return;
       matchStatus.value = s.status;
     } catch (e) {
+      if (match.matchId !== sid) return;
       ElMessage.error(e instanceof ApiError ? e.message : tr("toast.draftStartMatchFail"));
     }
   }
@@ -619,10 +684,13 @@ export const useDraftStore = defineStore("draft", () => {
   /** 裁判「暂停比赛」：RUNNING → PAUSED，保留进度并释放选手占用（可分配到其他比赛）。 */
   async function pauseMatch(): Promise<void> {
     if (!match.matchId || !auth.token) return;
+    const sid = match.matchId;
     try {
-      const s = await api.pauseMatch(match.matchId, auth.token);
+      const s = await api.pauseMatch(sid, auth.token);
+      if (match.matchId !== sid) return;
       matchStatus.value = s.status;
     } catch (e) {
+      if (match.matchId !== sid) return;
       ElMessage.error(e instanceof ApiError ? e.message : tr("toast.draftPauseMatchFail"));
     }
   }
@@ -630,10 +698,13 @@ export const useDraftStore = defineStore("draft", () => {
   /** 裁判「恢复比赛」：PAUSED → RUNNING；后端校验选手不在其他进行中比赛，冲突则原样展示后端错误。 */
   async function resumeMatch(): Promise<void> {
     if (!match.matchId || !auth.token) return;
+    const sid = match.matchId;
     try {
-      const s = await api.resumeMatch(match.matchId, auth.token);
+      const s = await api.resumeMatch(sid, auth.token);
+      if (match.matchId !== sid) return;
       matchStatus.value = s.status;
     } catch (e) {
+      if (match.matchId !== sid) return;
       ElMessage.error(e instanceof ApiError ? e.message : tr("toast.draftResumeMatchFail"));
     }
   }
@@ -673,6 +744,7 @@ export const useDraftStore = defineStore("draft", () => {
     lowRoller,
     ordersDecided,
     ctTagChoices,
+    ctTagChoicesFor,
     tagBanDone,
     draftSlots,
     currentSlot,
@@ -711,6 +783,7 @@ export const useDraftStore = defineStore("draft", () => {
     startPickTimer,
     startPrepTimer,
     manualStart,
+    cancelPick,
     resetDraft,
     $reset,
   };
